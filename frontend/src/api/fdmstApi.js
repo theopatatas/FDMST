@@ -1,0 +1,183 @@
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5050/api'
+const AUTH_TOKEN_KEY = 'fdmst_auth_token'
+const AUTH_USER_KEY = 'fdmst_auth_user'
+export const AUTH_CHANGED_EVENT = 'fdmst-auth-changed'
+
+export const authStorage = {
+  saveSession({ token, user }) {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    }
+
+    if (user) {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user))
+    }
+
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
+  },
+  clearSession() {
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(AUTH_USER_KEY)
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
+  },
+  getToken() {
+    return localStorage.getItem(AUTH_TOKEN_KEY)
+  },
+  getUser() {
+    const storedUser = localStorage.getItem(AUTH_USER_KEY)
+
+    if (!storedUser) {
+      return null
+    }
+
+    try {
+      return JSON.parse(storedUser)
+    } catch {
+      return null
+    }
+  },
+  isAuthenticated() {
+    return Boolean(authStorage.getToken())
+  },
+}
+
+const parseResponse = async (response) => {
+  const text = await response.text()
+  let data
+
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = null
+  }
+
+  if (!response.ok) {
+    const error = new Error(data?.message || 'Something went wrong. Please try again.')
+    error.status = response.status
+    error.errors = data?.errors || {}
+    throw error
+  }
+
+  return data
+}
+
+const request = async (path, options = {}) => {
+  const token = authStorage.getToken()
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    })
+  } catch {
+    throw new Error('Unable to reach the server. Please check your connection and try again.')
+  }
+
+  return parseResponse(response)
+}
+
+export const fdmstApi = {
+  health: () => request('/health'),
+  register: (payload) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  login: async (payload) => {
+    const data = await request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+
+    authStorage.saveSession(data)
+    return data
+  },
+  getAdminDashboard: () => request('/dashboard/admin'),
+  getAdminAnalytics: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dashboard/admin/analytics${query ? `?${query}` : ''}`)
+  },
+  getStaffDashboard: () => request('/dashboard/staff'),
+  getProfile: () => request('/users/me'),
+  getNotifications: () => request('/users/me/notifications'),
+  markNotificationsRead: () =>
+    request('/users/me/notifications/read', {
+      method: 'PATCH',
+    }),
+  updateProfile: async (payload) => {
+    const data = await request('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+
+    authStorage.saveSession(data)
+    return data
+  },
+  getDentists: () => request('/appointments/dentists'),
+  bookAppointment: (payload) =>
+    request('/appointments/book', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMyAppointments: () => request('/appointments/my'),
+  getMyDentalRecords: () => request('/dentalrecords/my'),
+  getStaff: () => request('/users/staff'),
+  verifyAdminPassword: (adminPassword) =>
+    request('/users/admin/verify-password', {
+      method: 'POST',
+      body: JSON.stringify({ adminPassword }),
+    }),
+  createStaff: (payload) =>
+    request('/users/staff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateStaff: (id, payload) =>
+    request(`/users/staff/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  updateStaffStatus: (id, payload) =>
+    request(`/users/staff/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  getAppointments: () => request('/appointments'),
+  updateAppointmentStatus: (id, status) =>
+    request(`/appointments/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  list: (resource) => request(`/${resource}`),
+  getById: (resource, id) => request(`/${resource}/${id}`),
+  create: (resource, payload) =>
+    request(`/${resource}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  update: (resource, id, payload) =>
+    request(`/${resource}/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  remove: (resource, id) =>
+    request(`/${resource}/${id}`, {
+      method: 'DELETE',
+    }),
+}
+
+export { API_BASE_URL }
