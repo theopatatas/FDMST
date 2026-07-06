@@ -6,6 +6,7 @@ function PasswordField({
   className,
   inputClassName,
   label,
+  leftIcon: LeftIcon,
   minLength,
   name,
   onChange,
@@ -21,6 +22,9 @@ function PasswordField({
     <label className={className || 'grid gap-2 text-sm font-semibold text-slate-500'} htmlFor={inputId}>
       {label}
       <span className="relative">
+        {LeftIcon ? (
+          <LeftIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+        ) : null}
         <input
           id={inputId}
           autoComplete={autoComplete}

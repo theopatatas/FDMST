@@ -565,7 +565,7 @@ router.get(
     res.json({
       stats: {
         totalAppointments,
-        todaysAppointments: kpiStats.todaysAppointments,
+        todaysAppointments,
         upcomingAppointments,
         completedAppointments,
         pendingAppointments,
@@ -596,6 +596,7 @@ router.get(
       totalDentists,
       todaysAppointments,
       inventoryAlerts,
+      totalTreatments,
       recentAppointments,
       staffActivity,
       appointments,
@@ -670,7 +671,7 @@ router.get(
         noShowAppointments: kpiStats.noShowAppointments,
         todaysAppointments,
         inventoryAlerts,
-        totalTreatments: dentalRecords.length,
+        totalTreatments,
         upcomingAppointments: kpiStats.upcomingAppointments,
         estimatedRevenue,
         monthlyChange: kpiStats.monthlyChange,

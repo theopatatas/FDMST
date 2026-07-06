@@ -347,13 +347,11 @@ function AdminInventoryPage() {
 
   return (
     <main className="min-w-0 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">Inventory</p>
-            <h1 className="mt-2 text-3xl font-semibold text-sky-950 sm:text-4xl">Inventory Management</h1>
-            <p className="mt-2 max-w-2xl text-slate-500">Manage clinic supplies, equipment, stock levels, suppliers, and reorder alerts.</p>
-            <div className="mt-5 flex max-w-full flex-wrap gap-3">
+            <p className="text-sm font-semibold text-sky-950">Stock Overview</p>
+            <div className="mt-3 flex max-w-full flex-wrap gap-3">
               <StatusPill tone="sky">{summary.total} total items</StatusPill>
               <StatusPill tone={summary.lowStock ? 'amber' : 'emerald'}>{summary.lowStock} low stock</StatusPill>
               <StatusPill tone={summary.outOfStock ? 'red' : 'emerald'}>{summary.outOfStock} out of stock</StatusPill>

@@ -65,8 +65,25 @@ const roleLabels = {
   staff: 'Staff',
 }
 
+const adminPageMeta = [
+  { path: '/admin/analytics', title: 'Analytics Dashboard', subtitle: 'Monitor clinic performance and key insights.' },
+  { path: '/admin/appointments', title: 'Appointments', subtitle: 'View, filter, and manage clinic appointments.' },
+  { path: '/admin/inventory', title: 'Inventory Management', subtitle: 'Manage clinic supplies, stock levels, and reorder alerts.' },
+  { path: '/admin/notifications', title: 'Notifications', subtitle: 'Review appointment updates, clinic alerts, and system messages.' },
+  { path: '/admin/patients', title: 'Patients', subtitle: 'Manage patient records and information.' },
+  { path: '/admin/profile', title: 'Profile', subtitle: 'View and update your account information.' },
+  { path: '/admin/reports', title: 'Reports', subtitle: 'Generate, export, and print clinic operational reports.' },
+  { path: '/admin/settings', title: 'Settings', subtitle: 'Manage clinic profile, account, notification, and security preferences.' },
+  { path: '/admin/staff', title: 'Staff Management', subtitle: 'Manage staff and dentist accounts securely.' },
+  { path: '/admin', title: 'Dashboard', subtitle: "Overview of today's clinic operations." },
+]
+
 function getDisplayName(user) {
   return [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'FDMST User'
+}
+
+function getAdminPageMeta(pathname) {
+  return adminPageMeta.find((item) => (item.path === '/admin' ? pathname === item.path : pathname.startsWith(item.path))) || adminPageMeta[adminPageMeta.length - 1]
 }
 
 function getProfilePath(role) {
@@ -241,10 +258,16 @@ function DashboardLayout({ portalLabel, navItems }) {
   }
 
   const profilePath = getProfilePath(user?.role)
+  const isAdminPortal = user?.role === 'admin' || portalLabel === 'Admin Portal'
   const isPatientPortal = user?.role === 'patient' || portalLabel === 'Patient Portal'
+  const headerMeta = useMemo(() => {
+    if (isAdminPortal) return getAdminPageMeta(location.pathname)
+    if (isPatientPortal) return { title: 'Patient Portal', subtitle: 'Access appointments, records, notifications, and profile details.' }
+    return { title: portalLabel, subtitle: `${roleLabels[user?.role] || 'User'} workspace for daily clinic operations.` }
+  }, [isAdminPortal, isPatientPortal, location.pathname, portalLabel, user?.role])
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-700 lg:grid lg:grid-cols-[17rem_1fr]">
+    <div className="min-h-screen bg-[#f6f8fb] text-slate-700 lg:grid lg:grid-cols-[17rem_1fr]">
       <aside
         className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -274,7 +297,7 @@ function DashboardLayout({ portalLabel, navItems }) {
           </button>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
+        <nav className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-5">
           {navItems.map((item) => {
             const iconKey = item.icon || item.action
             const Icon = iconMap[iconKey] || FaFileAlt
@@ -285,9 +308,9 @@ function DashboardLayout({ portalLabel, navItems }) {
                 key={item.label}
                 type="button"
                 onClick={handleLogout}
-                className="mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-red-50 hover:text-red-600"
+                className="mt-auto flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-semibold text-slate-600 transition hover:bg-red-50 hover:text-red-600"
               >
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 ${iconColor}`}>
+                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${iconColor}`}>
                   <Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
                 <span>{item.label}</span>
@@ -300,9 +323,9 @@ function DashboardLayout({ portalLabel, navItems }) {
                 state={item.preserveFrom ? { from: location.pathname } : undefined}
                 onClick={() => setIsSidebarOpen(false)}
                 className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  `group flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold transition ${
                     isActive
-                      ? 'bg-sky-950 text-white shadow-sm ring-1 ring-sky-900'
+                      ? 'bg-sky-950 text-white shadow-lg shadow-sky-950/15 ring-1 ring-sky-900'
                       : 'text-slate-600 hover:bg-slate-100 hover:text-sky-950'
                   }`
                 }
@@ -310,7 +333,7 @@ function DashboardLayout({ portalLabel, navItems }) {
                 {({ isActive }) => (
                   <>
                     <span
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 ${
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${
                         isActive ? 'bg-amber-400 text-sky-950 ring-amber-300' : iconColor
                       }`}
                     >
@@ -335,8 +358,8 @@ function DashboardLayout({ portalLabel, navItems }) {
       ) : null}
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-          <div className="flex min-h-20 items-center justify-between gap-4 px-4 py-3 sm:px-6">
+        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 shadow-sm shadow-slate-200/40 backdrop-blur">
+          <div className="flex min-h-24 items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
@@ -347,20 +370,12 @@ function DashboardLayout({ portalLabel, navItems }) {
                 <FaBars className="h-4 w-4" aria-hidden="true" />
               </button>
               <div className="min-w-0">
-                {isPatientPortal ? (
-                  <h1 className="truncate text-xl font-semibold text-sky-950 sm:text-2xl">
-                    Patient Portal
-                  </h1>
-                ) : (
-                  <>
-                    <p className="truncate text-sm font-medium uppercase tracking-[0.16em] text-slate-400">
-                      {portalLabel}
-                    </p>
-                    <h1 className="truncate text-xl font-semibold text-sky-950 sm:text-2xl">
-                      {getDisplayName(user)}
-                    </h1>
-                  </>
-                )}
+                <h1 className="truncate text-2xl font-semibold tracking-tight text-sky-950 sm:text-3xl">
+                  {headerMeta.title}
+                </h1>
+                <p className="mt-1 hidden max-w-2xl truncate text-sm font-medium text-slate-500 sm:block">
+                  {headerMeta.subtitle}
+                </p>
               </div>
             </div>
 

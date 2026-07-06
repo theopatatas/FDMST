@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FaEdit, FaPowerOff, FaShieldAlt, FaUndo } from 'react-icons/fa'
+import {
+  FaBriefcase,
+  FaEdit,
+  FaEnvelope,
+  FaLock,
+  FaPhone,
+  FaPlus,
+  FaRedo,
+  FaSearch,
+  FaShieldAlt,
+  FaTrashAlt,
+  FaUndo,
+  FaUser,
+  FaUserPlus,
+  FaUsers,
+} from 'react-icons/fa'
 import { FaTimes } from 'react-icons/fa'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { fdmstApi } from '../../api/fdmstApi.js'
@@ -8,7 +23,10 @@ import { useToast } from '../../context/ToastContext.jsx'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
 
 const inputClass =
-  'h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm text-slate-700 outline-none transition focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+  'h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+
+const iconInputClass =
+  'h-12 w-full rounded-xl border border-slate-200 bg-white px-12 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
 
 const initialForm = {
   firstName: '',
@@ -32,6 +50,46 @@ function formatRole(role) {
   return role === 'dentist' ? 'Dentist' : 'Staff'
 }
 
+function fullName(member) {
+  return [member?.firstName, member?.lastName].filter(Boolean).join(' ') || 'Unnamed Staff'
+}
+
+function initials(member) {
+  return [member?.firstName, member?.lastName].filter(Boolean).map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'FD'
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Not recorded'
+
+  return new Date(value).toLocaleString(undefined, {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function StaffAvatar({ member, index = 0 }) {
+  const colors = ['bg-sky-950', 'bg-violet-700', 'bg-emerald-600', 'bg-orange-600', 'bg-teal-700', 'bg-blue-700']
+
+  return (
+    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ${colors[index % colors.length]}`}>
+      {initials(member)}
+    </span>
+  )
+}
+
+function RoleBadge({ role }) {
+  const isDentist = role === 'dentist'
+
+  return (
+    <span className={`inline-flex rounded-lg px-3 py-1 text-xs font-semibold ring-1 ${isDentist ? 'bg-violet-50 text-violet-700 ring-violet-100' : 'bg-blue-50 text-blue-700 ring-blue-100'}`}>
+      {formatRole(role)}
+    </span>
+  )
+}
+
 function StatusBadge({ status }) {
   const isActive = status === 'active'
 
@@ -42,6 +100,15 @@ function StatusBadge({ status }) {
       }`}
     >
       {isActive ? 'Active' : 'Inactive'}
+    </span>
+  )
+}
+
+function IconField({ children, icon: Icon }) {
+  return (
+    <span className="relative">
+      <Icon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+      {children}
     </span>
   )
 }
@@ -61,6 +128,10 @@ function AdminStaffPage() {
   const [confirmation, setConfirmation] = useState(initialConfirmation)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [query, setQuery] = useState('')
+  const [roleFilter, setRoleFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [page, setPage] = useState(1)
 
   const isEditing = Boolean(editingStaffId)
 
@@ -72,6 +143,26 @@ function AdminStaffPage() {
       }),
     [staff],
   )
+
+  const filteredStaff = useMemo(
+    () =>
+      sortedStaff.filter((member) => {
+        const searchText = [fullName(member), member.email, member.contactNumber, formatRole(member.role)].filter(Boolean).join(' ').toLowerCase()
+        const matchesQuery = !query.trim() || searchText.includes(query.trim().toLowerCase())
+        const matchesRole = roleFilter === 'all' || member.role === roleFilter
+        const matchesStatus = statusFilter === 'all' || (member.status || 'active') === statusFilter
+
+        return matchesQuery && matchesRole && matchesStatus
+      }),
+    [query, roleFilter, sortedStaff, statusFilter],
+  )
+  const pageSize = 5
+  const totalPages = Math.max(Math.ceil(filteredStaff.length / pageSize), 1)
+  const visibleStaff = filteredStaff.slice((page - 1) * pageSize, page * pageSize)
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, roleFilter, statusFilter])
 
   const loadStaff = useCallback(async () => {
     try {
@@ -299,30 +390,22 @@ function AdminStaffPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">Staff Management</p>
-        <h1 className="mt-2 text-3xl font-semibold text-sky-950">Clinic Staff</h1>
-        <p className="mt-2 text-slate-500">
-          Manage staff and dentist accounts with admin-verified security checks.
-        </p>
-      </div>
-
       {!isAccessVerified ? (
         <div className="rounded-[1.75rem] border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-800 shadow-sm">
           Staff Management is locked. Re-enter your admin password to continue.
         </div>
       ) : null}
 
-      <section className={`grid gap-8 xl:grid-cols-[24rem_1fr] ${isAccessVerified ? '' : 'pointer-events-none mt-6 opacity-35 blur-[1px]'}`}>
-        <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold text-sky-950">
+      <section className={`grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)] ${isAccessVerified ? '' : 'pointer-events-none mt-6 opacity-35 blur-[1px]'}`}>
+        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
+                <FaUserPlus className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h2 className="text-xl font-semibold text-sky-950">
                 {isEditing ? 'Edit Staff Account' : 'Add Staff Account'}
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Sensitive staff changes require admin password verification.
-              </p>
             </div>
             {isEditing ? (
               <button
@@ -335,75 +418,62 @@ function AdminStaffPage() {
               </button>
             ) : null}
           </div>
+          <div className="mt-5 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800">
+            <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>Sensitive staff changes require admin password verification.</p>
+          </div>
 
           <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               First Name
-              <input
-                className={inputClass}
-                name="firstName"
-                value={form.firstName}
-                onChange={handleChange}
-                required
-              />
+              <IconField icon={FaUser}>
+                <input className={iconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
+              </IconField>
               {fieldErrors.firstName ? <span className="text-xs font-medium text-red-600">{fieldErrors.firstName}</span> : null}
             </label>
 
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Last Name
-              <input
-                className={inputClass}
-                name="lastName"
-                value={form.lastName}
-                onChange={handleChange}
-                required
-              />
+              <IconField icon={FaUser}>
+                <input className={iconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
+              </IconField>
               {fieldErrors.lastName ? <span className="text-xs font-medium text-red-600">{fieldErrors.lastName}</span> : null}
             </label>
 
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Email
-              <input
-                className={inputClass}
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                required
-              />
+              <IconField icon={FaEnvelope}>
+                <input className={iconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" required />
+              </IconField>
               {fieldErrors.email ? <span className="text-xs font-medium text-red-600">{fieldErrors.email}</span> : null}
             </label>
 
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Mobile Number
-              <input
-                className={inputClass}
-                type="tel"
-                name="contactNumber"
-                inputMode="numeric"
-                maxLength={11}
-                placeholder="09XXXXXXXXX"
-                value={form.contactNumber}
-                onChange={handleChange}
-              />
+              <IconField icon={FaPhone}>
+                <input className={iconInputClass} type="tel" name="contactNumber" inputMode="numeric" maxLength={11} placeholder="09XXXXXXXXX" value={form.contactNumber} onChange={handleChange} />
+              </IconField>
               {fieldErrors.contactNumber ? (
                 <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span>
               ) : null}
             </label>
 
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Role
-              <select className={inputClass} name="role" value={form.role} onChange={handleChange}>
-                <option value="staff">Staff</option>
-                <option value="dentist">Dentist</option>
-              </select>
+              <IconField icon={FaBriefcase}>
+                <select className={iconInputClass} name="role" value={form.role} onChange={handleChange}>
+                  <option value="staff">Staff</option>
+                  <option value="dentist">Dentist</option>
+                </select>
+              </IconField>
             </label>
 
             {!isEditing ? (
               <>
                 <PasswordField
-                  inputClassName={inputClass}
+                  inputClassName={`${iconInputClass} pl-12`}
                   label="Temporary Password"
+                  leftIcon={FaLock}
                   name="password"
                   minLength={8}
                   value={form.password}
@@ -418,70 +488,121 @@ function AdminStaffPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-12 rounded-2xl bg-sky-950 px-6 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
+              <FaBriefcase className="h-4 w-4" aria-hidden="true" />
               {isEditing ? 'Save Staff Changes' : 'Create Staff Account'}
             </button>
           </form>
         </article>
 
-        <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-sky-950">Current Staff</h2>
-              <p className="mt-2 text-sm text-slate-500">Activate, deactivate, and update staff access.</p>
+        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
+                <FaUsers className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <h2 className="text-xl font-semibold text-sky-950">Current Staff</h2>
+                <p className="mt-1 text-sm text-slate-500">Activate, deactivate, and update staff access.</p>
+              </div>
             </div>
-            <span className="text-sm font-medium text-slate-400">{staff.length} accounts</span>
+            <button
+              type="button"
+              onClick={() => {
+                resetForm()
+                window.scrollTo({ top: 0, behavior: 'smooth' })
+              }}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900"
+            >
+              <FaPlus className="h-4 w-4" aria-hidden="true" />
+              Add Staff
+            </button>
+          </div>
+
+          <div className="mt-8 grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]">
+            <label className="relative">
+              <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input className={iconInputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search staff by name, email, or role..." />
+            </label>
+            <select className={inputClass} value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+              <option value="all">All Roles</option>
+              <option value="staff">Staff</option>
+              <option value="dentist">Dentist</option>
+            </select>
+            <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('')
+                setRoleFilter('all')
+                setStatusFilter('all')
+              }}
+              className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950"
+              aria-label="Clear staff filters"
+            >
+              <FaTimes className="h-4 w-4" aria-hidden="true" />
+            </button>
           </div>
 
           {isLoading ? (
             <p className="mt-6 text-sm text-slate-500">Loading staff accounts...</p>
-          ) : sortedStaff.length ? (
-            <div className="mt-6 overflow-x-auto rounded-2xl border border-gray-200">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-gray-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          ) : filteredStaff.length ? (
+            <>
+            <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-[900px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Name</th>
+                    <th className="px-4 py-4 font-semibold">Name</th>
                     <th className="px-4 py-3 font-semibold">Email</th>
                     <th className="px-4 py-3 font-semibold">Mobile</th>
                     <th className="px-4 py-3 font-semibold">Role</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Date Added</th>
                     <th className="px-4 py-3 text-right font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedStaff.map((member) => (
-                    <tr key={member.id} className="border-b border-gray-100 last:border-b-0">
-                      <td className="px-4 py-3 font-medium text-sky-950">
-                        {[member.firstName, member.lastName].filter(Boolean).join(' ')}
+                  {visibleStaff.map((member, index) => (
+                    <tr key={member.id} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-4 py-5">
+                        <div className="flex items-center gap-3">
+                          <StaffAvatar member={member} index={index} />
+                          <span className="font-semibold text-sky-950">{fullName(member)}</span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3">{member.email}</td>
-                      <td className="px-4 py-3">{member.contactNumber || 'Not provided'}</td>
-                      <td className="px-4 py-3">{formatRole(member.role)}</td>
+                      <td className="px-4 py-3 text-slate-700">{member.email}</td>
+                      <td className="px-4 py-3 text-slate-700">{member.contactNumber || 'Not provided'}</td>
+                      <td className="px-4 py-3"><RoleBadge role={member.role} /></td>
                       <td className="px-4 py-3">
                         <StatusBadge status={member.status} />
                       </td>
+                      <td className="px-4 py-3 text-slate-500">{formatDateTime(member.createdAt)}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => handleEdit(member)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-950 transition hover:bg-sky-100"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-sky-950 transition hover:bg-sky-50"
+                            aria-label={`Edit ${fullName(member)}`}
                           >
-                            <FaEdit className="h-3.5 w-3.5" aria-hidden="true" />
-                            Edit
+                            <FaEdit className="h-4 w-4" aria-hidden="true" />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleStatusPrompt(member)}
-                            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                            className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border transition ${
                               member.status === 'active'
                                 ? 'border-red-100 bg-red-50 text-red-700 hover:bg-red-100'
                                 : 'border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                             }`}
+                            aria-label={`${member.status === 'active' ? 'Deactivate' : 'Activate'} ${fullName(member)}`}
                           >
-                            <FaPowerOff className="h-3.5 w-3.5" aria-hidden="true" />
-                            {member.status === 'active' ? 'Deactivate' : 'Activate'}
+                            {member.status === 'active' ? <FaTrashAlt className="h-4 w-4" aria-hidden="true" /> : <FaRedo className="h-4 w-4" aria-hidden="true" />}
                           </button>
                         </div>
                       </td>
@@ -490,9 +611,21 @@ function AdminStaffPage() {
                 </tbody>
               </table>
             </div>
+            <div className="-mx-5 -mb-5 mt-auto flex flex-col gap-3 border-t border-slate-100 px-5 py-5 text-sm font-medium text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <p>Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredStaff.length)} of {filteredStaff.length} staff</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setPage((current) => Math.max(current - 1, 1))} disabled={page === 1} className="h-10 rounded-xl border border-slate-200 px-3 text-sky-950 disabled:opacity-40">‹</button>
+                {Array.from({ length: totalPages }).slice(0, 3).map((_, index) => {
+                  const pageNumber = index + 1
+                  return <button key={pageNumber} type="button" onClick={() => setPage(pageNumber)} className={`h-10 min-w-10 rounded-xl border px-3 font-semibold ${page === pageNumber ? 'border-sky-950 bg-sky-950 text-white' : 'border-slate-200 text-sky-950'}`}>{pageNumber}</button>
+                })}
+                <button type="button" onClick={() => setPage((current) => Math.min(current + 1, totalPages))} disabled={page === totalPages} className="h-10 rounded-xl border border-slate-200 px-3 text-sky-950 disabled:opacity-40">›</button>
+              </div>
+            </div>
+            </>
           ) : (
             <div className="mt-6 rounded-2xl border border-dashed border-gray-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-              No staff accounts yet. Create the first one using the form.
+              No staff accounts match your filters.
             </div>
           )}
         </article>

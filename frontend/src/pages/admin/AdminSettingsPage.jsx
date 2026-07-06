@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fdmstApi } from '../../api/fdmstApi.js'
-import { inputClass, PageHeader, StatusPill, textareaClass } from '../../components/AdminUi.jsx'
+import { inputClass, textareaClass } from '../../components/AdminUi.jsx'
 import ProfilePage from '../ProfilePage.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
@@ -70,7 +70,6 @@ function AdminSettingsPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <PageHeader eyebrow="Settings" title="System Settings" description="Manage clinic profile, account details, notifications, and security preferences." action={<StatusPill tone="emerald">Saved to database</StatusPill>} />
       <div className="mb-6 flex gap-2 overflow-x-auto">
         {['clinic', 'account', 'preferences'].map((tab) => <button key={tab} onClick={() => setActiveTab(tab)} className={`rounded-2xl px-5 py-2.5 text-sm font-semibold capitalize ${activeTab === tab ? 'bg-sky-950 text-white' : 'bg-white text-slate-600 ring-1 ring-gray-200'}`}>{tab}</button>)}
       </div>

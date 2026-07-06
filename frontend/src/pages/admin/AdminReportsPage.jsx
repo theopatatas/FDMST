@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FaFileCsv, FaFileExcel, FaPrint } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
-import { inputClass, PageHeader, StatusPill } from '../../components/AdminUi.jsx'
+import { inputClass } from '../../components/AdminUi.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 
 function inRange(dateValue, start, end) {
@@ -120,7 +120,6 @@ function AdminReportsPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <PageHeader eyebrow="Reports" title="Clinic Reports" description="Generate operational reports for appointments, patients, treatments, inventory, revenue, and staff." action={<StatusPill tone="sky">{filteredAppointments.length} appointments</StatusPill>} />
       <section className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
         <div className="mb-5 flex flex-wrap gap-2">
           {['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'].map((item) => (

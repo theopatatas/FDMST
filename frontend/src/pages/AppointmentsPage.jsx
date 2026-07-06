@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fdmstApi } from '../api/fdmstApi.js'
-import { inputClass, PageHeader, StatusPill } from '../components/AdminUi.jsx'
+import { inputClass } from '../components/AdminUi.jsx'
 import AppointmentsTable from '../components/AppointmentsTable.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 
@@ -63,7 +63,6 @@ function AppointmentsPage({ title, description, allowApproval = false }) {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <PageHeader eyebrow="Appointments" title={title} description={description} action={<StatusPill tone="sky">{filteredAppointments.length} shown</StatusPill>} />
       <section className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
         <div className="grid gap-3 md:grid-cols-5">
           <input className={inputClass} type="date" value={filters.date} onChange={(event) => setFilters((current) => ({ ...current, date: event.target.value }))} />

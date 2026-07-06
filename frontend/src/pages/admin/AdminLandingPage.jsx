@@ -10,7 +10,6 @@ import {
   FaUsers,
 } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
-import { PageHeader, StatusPill } from '../../components/AdminUi.jsx'
 import AppointmentsTable from '../../components/AppointmentsTable.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 
@@ -111,13 +110,6 @@ function AdminLandingPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <PageHeader
-        eyebrow="Admin Dashboard"
-        title="Today at the Clinic"
-        description="A lightweight snapshot of current clinic activity, today's schedule, notifications, and recent operational updates."
-        action={<StatusPill tone="sky">Overview only</StatusPill>}
-      />
-
       <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => <OverviewCard key={card.label} {...card} />)}
       </section>

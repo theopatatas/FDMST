@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FaEdit, FaEye, FaPowerOff, FaShieldAlt, FaTimes, FaUndo } from 'react-icons/fa'
+import {
+  FaCalendarAlt,
+  FaEdit,
+  FaEnvelope,
+  FaEye,
+  FaFilter,
+  FaMapMarkerAlt,
+  FaNotesMedical,
+  FaPhone,
+  FaPlus,
+  FaPowerOff,
+  FaRedo,
+  FaSearch,
+  FaShieldAlt,
+  FaTimes,
+  FaUndo,
+  FaUser,
+  FaUserPlus,
+  FaUsers,
+  FaVenusMars,
+} from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
-import { inputClass, PageHeader, StatusPill, textareaClass } from '../../components/AdminUi.jsx'
+import { inputClass } from '../../components/AdminUi.jsx'
 import PasswordField from '../../components/PasswordField.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
@@ -21,6 +41,15 @@ const initialForm = {
   status: 'active',
 }
 
+const patientInputClass =
+  'h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+
+const patientIconInputClass =
+  'h-12 w-full rounded-xl border border-slate-200 bg-white px-12 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+
+const patientTextareaClass =
+  'min-h-16 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+
 const initialConfirmation = {
   type: '',
   title: '',
@@ -31,7 +60,55 @@ const initialConfirmation = {
 }
 
 function fullName(patient) {
-  return [patient.firstName, patient.lastName].filter(Boolean).join(' ')
+  return [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Unnamed Patient'
+}
+
+function initials(patient) {
+  return [patient?.firstName, patient?.lastName].filter(Boolean).map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'FD'
+}
+
+function PatientAvatar({ patient, index = 0 }) {
+  const colors = ['bg-violet-600', 'bg-pink-500', 'bg-blue-500', 'bg-orange-500', 'bg-teal-500', 'bg-amber-400']
+
+  return (
+    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ${colors[index % colors.length]}`}>
+      {initials(patient)}
+    </span>
+  )
+}
+
+function PatientStatusBadge({ status, registrationStatus }) {
+  const normalized = status || 'active'
+  if (registrationStatus === 'unverified') {
+    return <span className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">Unverified</span>
+  }
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${normalized === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-red-50 text-red-700 ring-red-100'}`}>
+      {normalized === 'active' ? 'Active' : 'Inactive'}
+    </span>
+  )
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+
+  return new Date(value).toLocaleString(undefined, {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function IconField({ children, icon: Icon }) {
+  return (
+    <span className="relative">
+      <Icon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+      {children}
+    </span>
+  )
 }
 
 function AdminPatientsPage() {
@@ -44,6 +121,8 @@ function AdminPatientsPage() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [genderFilter, setGenderFilter] = useState('all')
+  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isConfirming, setIsConfirming] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
@@ -77,10 +156,28 @@ function AdminPatientsPage() {
       const matchesQuery = !normalizedQuery || [fullName(patient), patient.email, patient.patientId, patient.contactNumber]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalizedQuery))
-      const matchesStatus = statusFilter === 'all' || (patient.status || 'active') === statusFilter
-      return matchesQuery && matchesStatus
+      const normalizedStatus = patient.registrationStatus === 'unverified' ? 'unverified' : (patient.status || 'active')
+      const matchesStatus = statusFilter === 'all' || normalizedStatus === statusFilter
+      const matchesGender = genderFilter === 'all' || patient.gender === genderFilter
+      return matchesQuery && matchesStatus && matchesGender
     })
-  }, [patients, query, statusFilter])
+  }, [genderFilter, patients, query, statusFilter])
+
+  const pageSize = 6
+  const totalPages = Math.max(Math.ceil(filteredPatients.length / pageSize), 1)
+  const visiblePatients = filteredPatients.slice((page - 1) * pageSize, page * pageSize)
+
+  useEffect(() => {
+    setPage(1)
+  }, [genderFilter, query, statusFilter])
+
+  const getPatientLastAppointment = useCallback((patient) => {
+    const patientAppointments = appointments
+      .filter((appointment) => appointment.email === patient.email || appointment.patientName === fullName(patient))
+      .sort((left, right) => new Date(right.appointmentDate || 0) - new Date(left.appointmentDate || 0))
+
+    return patientAppointments[0]
+  }, [appointments])
 
   const selectedAppointments = useMemo(
     () => appointments.filter((appointment) => {
@@ -258,61 +355,162 @@ function AdminPatientsPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <PageHeader eyebrow="Patients" title="Patient Management" description="Search, maintain profiles, and review appointment, treatment, billing, and medical history." />
-
-      <section className="grid gap-8 xl:grid-cols-[24rem_1fr]">
-        <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="text-lg font-semibold text-sky-950">{editingId ? 'Edit Patient' : 'Add Patient'}</h2>
-            {editingId ? <button type="button" onClick={resetForm} className="rounded-xl border border-gray-200 p-2 text-slate-500"><FaUndo /></button> : null}
+      <section className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
+        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
+                <FaUserPlus className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h2 className="text-xl font-semibold text-sky-950">{editingId ? 'Edit Patient' : 'Add Patient'}</h2>
+            </div>
+            {editingId ? <button type="button" onClick={resetForm} className="rounded-xl border border-gray-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-sky-950" aria-label="Cancel editing"><FaUndo /></button> : null}
           </div>
-          <form className="mt-5 grid gap-4" onSubmit={handleSubmit}>
-            {['firstName', 'lastName', 'email'].map((name) => (
-              <label key={name} className="grid gap-2 text-sm font-semibold text-slate-500">
-                {name === 'firstName' ? 'First Name' : name === 'lastName' ? 'Last Name' : 'Email'}
-                <input className={inputClass} name={name} type={name === 'email' ? 'email' : 'text'} value={form[name]} onChange={handleChange} required={name !== 'email'} />
-                {fieldErrors[name] ? <span className="text-xs text-red-600">{fieldErrors[name]}</span> : null}
-              </label>
-            ))}
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+          <div className="mt-5 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800">
+            <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>Sensitive patient changes require admin password verification.</p>
+          </div>
+
+          <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              First Name
+              <IconField icon={FaUser}>
+                <input className={patientIconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
+              </IconField>
+              {fieldErrors.firstName ? <span className="text-xs text-red-600">{fieldErrors.firstName}</span> : null}
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Last Name
+              <IconField icon={FaUser}>
+                <input className={patientIconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
+              </IconField>
+              {fieldErrors.lastName ? <span className="text-xs text-red-600">{fieldErrors.lastName}</span> : null}
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Birth Date
+              <IconField icon={FaCalendarAlt}>
+                <input className={patientIconInputClass} name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} />
+              </IconField>
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Gender
+              <IconField icon={FaVenusMars}>
+                <select className={patientIconInputClass} name="gender" value={form.gender} onChange={handleChange}><option value="prefer_not_to_say">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select>
+              </IconField>
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Email
+              <IconField icon={FaEnvelope}>
+                <input className={patientIconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" />
+              </IconField>
+              {fieldErrors.email ? <span className="text-xs text-red-600">{fieldErrors.email}</span> : null}
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Mobile Number
-              <input className={inputClass} name="contactNumber" inputMode="numeric" maxLength={11} value={form.contactNumber} onChange={handleChange} placeholder="09XXXXXXXXX" />
+              <IconField icon={FaPhone}>
+                <input className={patientIconInputClass} name="contactNumber" inputMode="numeric" maxLength={11} value={form.contactNumber} onChange={handleChange} placeholder="09XXXXXXXXX" />
+              </IconField>
               {fieldErrors.contactNumber ? <span className="text-xs text-red-600">{fieldErrors.contactNumber}</span> : null}
             </label>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-2 text-sm font-semibold text-slate-500">Birth Date<input className={inputClass} name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} /></label>
-              <label className="grid gap-2 text-sm font-semibold text-slate-500">Gender<select className={inputClass} name="gender" value={form.gender} onChange={handleChange}><option value="prefer_not_to_say">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
-            </div>
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">Address<input className={inputClass} name="address" value={form.address || ''} onChange={handleChange} /></label>
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">Medical History<textarea className={textareaClass} name="medicalHistory" value={form.medicalHistory || ''} onChange={handleChange} /></label>
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">Dental History<textarea className={textareaClass} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} /></label>
-            <label className="grid gap-2 text-sm font-semibold text-slate-500">Billing Notes<textarea className={textareaClass} name="billingNotes" value={form.billingNotes || ''} onChange={handleChange} /></label>
-            <button className="h-12 rounded-2xl bg-sky-950 px-5 text-sm font-semibold text-white">{editingId ? 'Save Patient' : 'Add Patient'}</button>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Address
+              <IconField icon={FaMapMarkerAlt}>
+                <textarea className={`${patientTextareaClass} pl-12`} name="address" value={form.address || ''} onChange={handleChange} placeholder="Enter full address" />
+              </IconField>
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Medical History
+              <IconField icon={FaNotesMedical}>
+                <textarea className={`${patientTextareaClass} pl-12`} name="medicalHistory" value={form.medicalHistory || ''} onChange={handleChange} placeholder="Enter medical history (optional)" />
+              </IconField>
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Dental History
+              <textarea className={patientTextareaClass} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} placeholder="Enter dental history (optional)" />
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Billing Notes
+              <textarea className={patientTextareaClass} name="billingNotes" value={form.billingNotes || ''} onChange={handleChange} placeholder="Enter billing notes (optional)" />
+            </label>
+            <button className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900">
+              <FaPlus className="h-4 w-4" aria-hidden="true" />
+              {editingId ? 'Save Patient' : 'Create Patient'}
+            </button>
           </form>
         </article>
 
-        <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
-            <input className={inputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients..." />
-            <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option>
-            </select>
+        <article className="flex min-h-[52rem] flex-col rounded-[1.35rem] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+          <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
+                <FaUsers className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <h2 className="text-xl font-semibold text-sky-950">Patient List</h2>
+                <p className="mt-1 text-sm text-slate-500">View and manage all patient records.</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => { resetForm(); window.scrollTo({ top: 0, behavior: 'smooth' }) }} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900">
+              <FaPlus className="h-4 w-4" aria-hidden="true" />
+              Add Patient
+            </button>
           </div>
-          {isLoading ? <p className="mt-6 text-sm text-slate-500">Loading patients...</p> : (
-            <div className="mt-6 overflow-x-auto rounded-2xl border border-gray-200">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Patient</th><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
+
+          <div className="grid gap-3 border-b border-slate-100 px-5 pb-5 lg:grid-cols-[minmax(0,1fr)_11rem_11rem_auto_auto]">
+            <label className="relative">
+              <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input className={patientIconInputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients by name, email, or ID..." />
+            </label>
+            <select className={patientInputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">All Statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="unverified">Unverified</option>
+            </select>
+            <select className={patientInputClass} value={genderFilter} onChange={(event) => setGenderFilter(event.target.value)}>
+              <option value="all">All Genders</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+            <button type="button" onClick={loadData} className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950" aria-label="Refresh patients"><FaRedo className="h-4 w-4" aria-hidden="true" /></button>
+            <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setGenderFilter('all') }} className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950" aria-label="Clear patient filters"><FaFilter className="h-4 w-4" aria-hidden="true" /></button>
+          </div>
+
+          {isLoading ? <p className="p-6 text-sm text-slate-500">Loading patients...</p> : filteredPatients.length ? (
+            <>
+            <div className="overflow-x-auto">
+              <table className="min-w-[980px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-4">Patient ID</th><th className="px-5 py-4">Full Name</th><th className="px-5 py-4">Email</th><th className="px-5 py-4">Mobile Number</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Last Appointment</th><th className="px-5 py-4">Date Registered</th><th className="px-5 py-4 text-right">Actions</th></tr></thead>
                 <tbody>
-                  {filteredPatients.map((patient) => (
-                    <tr key={patient._id} className="border-t border-gray-100">
-                      <td className="px-4 py-3"><p className="font-semibold text-sky-950">{fullName(patient)}</p><p className="text-xs text-slate-500">{patient.patientId || 'No Patient ID'}</p></td>
-                      <td className="px-4 py-3">{patient.email || patient.contactNumber || 'Not provided'}</td>
-                      <td className="px-4 py-3"><StatusPill tone={(patient.status || 'active') === 'active' ? 'emerald' : 'red'}>{patient.status || 'active'}</StatusPill></td>
-                      <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => handleViewPrompt(patient)} className="rounded-xl bg-slate-100 px-3 py-2 text-slate-600" aria-label={`View ${fullName(patient)}`}><FaEye /></button><button type="button" onClick={() => handleEditPrompt(patient)} className="rounded-xl bg-sky-50 px-3 py-2 text-sky-950" aria-label={`Edit ${fullName(patient)}`}><FaEdit /></button><button type="button" onClick={() => handleToggleStatus(patient)} className="rounded-xl bg-red-50 px-3 py-2 text-red-600" aria-label={`Change status for ${fullName(patient)}`}><FaPowerOff /></button></div></td>
+                  {visiblePatients.map((patient, index) => {
+                    const lastAppointment = getPatientLastAppointment(patient)
+                    return (
+                    <tr key={patient._id} className="border-t border-slate-100">
+                      <td className="px-5 py-5"><div className="flex items-center gap-3"><PatientAvatar patient={patient} index={index} /><span className="text-xs font-medium text-slate-500">{patient.patientId || 'No Patient ID'}</span></div></td>
+                      <td className="px-5 py-5 font-semibold text-sky-950">{fullName(patient)}</td>
+                      <td className="px-5 py-5 text-slate-700">{patient.email || 'Not provided'}</td>
+                      <td className="px-5 py-5 text-slate-700">{patient.contactNumber || 'Not provided'}</td>
+                      <td className="px-5 py-5"><PatientStatusBadge status={patient.status} registrationStatus={patient.registrationStatus} /></td>
+                      <td className="px-5 py-5 text-slate-600">{lastAppointment ? formatDateTime(lastAppointment.appointmentDate) : '—'}</td>
+                      <td className="px-5 py-5 text-slate-600">{formatDateTime(patient.createdAt)}</td>
+                      <td className="px-5 py-5"><div className="flex justify-end gap-2"><button type="button" onClick={() => handleViewPrompt(patient)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200" aria-label={`View ${fullName(patient)}`}><FaEye /></button><button type="button" onClick={() => handleEditPrompt(patient)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-950 transition hover:bg-sky-100" aria-label={`Edit ${fullName(patient)}`}><FaEdit /></button><button type="button" onClick={() => handleToggleStatus(patient)} className={`inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${(patient.status || 'active') === 'active' ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`} aria-label={`Change status for ${fullName(patient)}`}><FaPowerOff /></button></div></td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
+            </div>
+            <div className="mt-auto flex flex-col gap-3 border-t border-slate-100 px-5 py-5 text-sm font-medium text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <p>Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredPatients.length)} of {filteredPatients.length} patients</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setPage((current) => Math.max(current - 1, 1))} disabled={page === 1} className="h-10 rounded-xl border border-slate-200 px-3 text-sky-950 disabled:opacity-40">‹</button>
+                {Array.from({ length: totalPages }).slice(0, 3).map((_, index) => {
+                  const pageNumber = index + 1
+                  return <button key={pageNumber} type="button" onClick={() => setPage(pageNumber)} className={`h-10 min-w-10 rounded-xl border px-3 font-semibold ${page === pageNumber ? 'border-sky-950 bg-sky-950 text-white' : 'border-slate-200 text-sky-950'}`}>{pageNumber}</button>
+                })}
+                <button type="button" onClick={() => setPage((current) => Math.min(current + 1, totalPages))} disabled={page === totalPages} className="h-10 rounded-xl border border-slate-200 px-3 text-sky-950 disabled:opacity-40">›</button>
+              </div>
+            </div>
+            </>
+          ) : (
+            <div className="m-5 rounded-2xl border border-dashed border-gray-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+              No patient records match your filters.
             </div>
           )}
         </article>
