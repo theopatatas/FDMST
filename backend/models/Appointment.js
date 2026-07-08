@@ -53,6 +53,10 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    declineReason: {
+      type: String,
+      trim: true,
+    },
   },
   {
     collection: "appointments",

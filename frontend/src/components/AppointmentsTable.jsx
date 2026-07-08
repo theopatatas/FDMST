@@ -12,6 +12,7 @@ function AppointmentsTable({
   emptyMessage = 'No appointments found.',
   showActions = false,
   onUpdateStatus,
+  onRowClick,
   updatingId = null,
 }) {
   if (!appointments?.length) {
@@ -25,7 +26,7 @@ function AppointmentsTable({
   return (
     <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
       <table className="min-w-full text-left text-sm">
-        <thead className="border-b border-gray-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <thead className="sticky top-0 z-10 border-b border-gray-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
           <tr>
             <th className="px-4 py-3 font-semibold">Patient</th>
             <th className="px-4 py-3 font-semibold">Date</th>
@@ -38,7 +39,11 @@ function AppointmentsTable({
         </thead>
         <tbody>
           {appointments.map((appointment) => (
-            <tr key={appointment.id} className="border-b border-gray-100 last:border-b-0">
+            <tr
+              key={appointment.id}
+              onClick={() => onRowClick?.(appointment)}
+              className={`border-b border-gray-100 last:border-b-0 ${onRowClick ? 'cursor-pointer transition hover:bg-slate-50' : ''}`}
+            >
               <td className="px-4 py-3 font-medium text-sky-950">{appointment.patientName}</td>
               <td className="px-4 py-3">{formatDate(appointment.appointmentDate)}</td>
               <td className="px-4 py-3">{appointment.appointmentTime}</td>
@@ -54,16 +59,26 @@ function AppointmentsTable({
                 </span>
               </td>
               {showActions && (
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
                   {appointment.status === 'pending' ? (
-                    <button
-                      type="button"
-                      onClick={() => onUpdateStatus?.(appointment.id, 'confirmed')}
-                      disabled={updatingId === appointment.id}
-                      className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {updatingId === appointment.id ? 'Approving...' : 'Approve'}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateStatus?.(appointment.id, 'confirmed')}
+                        disabled={updatingId === appointment.id}
+                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === appointment.id ? 'Approving...' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateStatus?.(appointment.id, 'cancelled')}
+                        disabled={updatingId === appointment.id}
+                        className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === appointment.id ? 'Declining...' : 'Decline'}
+                      </button>
+                    </div>
                   ) : (
                     <span className="text-xs text-slate-400">—</span>
                   )}

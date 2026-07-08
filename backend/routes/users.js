@@ -61,6 +61,7 @@ const sanitizeNotification = (notification) => ({
   type: notification.type,
   isRead: notification.isRead,
   scheduledFor: notification.scheduledFor,
+  metadata: notification.metadata || {},
   createdAt: notification.createdAt,
 });
 
@@ -179,6 +180,80 @@ router.patch(
     await Notification.updateMany({ $or: filters, isRead: false }, { isRead: true });
 
     res.json({ message: "Notifications marked as read." });
+  }),
+);
+
+router.patch(
+  "/me/notifications/:id/read",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid notification." });
+    }
+
+    const patient = await Patient.findOne({ userId: req.user.id }).select("_id");
+    const filters = [{ user: req.user.id }];
+
+    if (patient) {
+      filters.push({ patient: patient._id });
+    }
+
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, $or: filters },
+      { isRead: true },
+      { new: true },
+    );
+
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found." });
+    }
+
+    res.json({ data: sanitizeNotification(notification) });
+  }),
+);
+
+router.patch(
+  "/me/password",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: "Current password, new password, and confirmation are required.",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "New password must be at least 8 characters long.",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        message: "New password and confirmation do not match.",
+      });
+    }
+
+    const user = await User.findById(req.user.id).select("+passwordHash");
+
+    if (!user) {
+      return res.status(404).json({ message: "Profile not found." });
+    }
+
+    const isCurrentPasswordValid = await verifyPassword(currentPassword, user.passwordHash);
+
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({
+        message: "Current password is incorrect.",
+      });
+    }
+
+    user.passwordHash = await hashPasswordScrypt(newPassword);
+    await user.save();
+
+    res.json({ message: "Password updated successfully." });
   }),
 );
 

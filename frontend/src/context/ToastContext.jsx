@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 const ToastContext = createContext(null)
 
-const TOAST_DURATION_MS = 5000
+const TOAST_DURATION_MS = 1500
 const TOAST_FADE_MS = 300
 
 const toastStyles = {
@@ -80,18 +80,19 @@ export function ToastProvider({ children }) {
   )
 
   const showToast = useCallback(
-    (message, type = 'info') => {
+    (message, type = 'info', options = {}) => {
       if (!message) {
         return
       }
 
       const id = crypto.randomUUID()
+      const duration = Number(options.duration) > 0 ? Number(options.duration) : TOAST_DURATION_MS
 
       setToasts((currentToasts) => [...currentToasts, { id, message, type, exiting: false }])
 
       const fadeTimer = setTimeout(() => {
         startDismiss(id)
-      }, TOAST_DURATION_MS)
+      }, duration)
 
       timersRef.current.set(id, { fade: fadeTimer, remove: null })
     },
@@ -100,9 +101,9 @@ export function ToastProvider({ children }) {
 
   const toast = useMemo(
     () => ({
-      success: (message) => showToast(message, 'success'),
-      error: (message) => showToast(message, 'error'),
-      info: (message) => showToast(message, 'info'),
+      success: (message, options) => showToast(message, 'success', options),
+      error: (message, options) => showToast(message, 'error', options),
+      info: (message, options) => showToast(message, 'info', options),
     }),
     [showToast],
   )

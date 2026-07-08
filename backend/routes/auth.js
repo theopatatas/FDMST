@@ -1,12 +1,15 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 
+const AuditLog = require("../models/AuditLog");
 const Patient = require("../models/Patient");
 const User = require("../models/User");
 const { getJwtExpiresIn, getJwtSecret } = require("../config/auth");
+const { authenticate } = require("../middleware/auth");
 const asyncHandler = require("../utils/asyncHandler");
+const { preparePatientCreateBody } = require("../utils/patientRecords");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
-const { MOBILE_NUMBER_MESSAGE, isValidMobileNumber, normalizeMobileNumber } = require("../utils/validation");
+const { normalizeMobileNumber } = require("../utils/validation");
 
 const router = express.Router();
 
@@ -33,7 +36,12 @@ const sanitizePatient = (patient) => ({
   email: patient.email,
   contactNumber: patient.contactNumber,
   dateOfBirth: patient.dateOfBirth,
+  gender: patient.gender,
+  address: patient.address,
+  medicalHistory: patient.medicalHistory,
+  dentalHistory: patient.dentalHistory,
   registrationStatus: patient.registrationStatus,
+  status: patient.status,
   createdAt: patient.createdAt,
 });
 
@@ -48,51 +56,66 @@ const createAuthToken = (user) =>
     { expiresIn: getJwtExpiresIn() },
   );
 
-const generatePatientId = async () => {
-  const year = new Date().getFullYear();
-  const prefix = `FDMST-${year}-`;
-  const latestPatient = await Patient.findOne({
-    patientId: { $regex: `^${prefix}` },
-  })
-    .sort({ patientId: -1 })
-    .select("patientId");
-
-  const latestNumber = latestPatient?.patientId
-    ? Number(latestPatient.patientId.replace(prefix, ""))
-    : 0;
-
-  return `${prefix}${String(latestNumber + 1).padStart(5, "0")}`;
-};
-
 router.post(
   "/register",
   asyncHandler(async (req, res) => {
-    const { firstName, lastName, email, username, contactNumber, dateOfBirth, password } = req.body;
+    const {
+      firstName,
+      lastName,
+      email,
+      username,
+      contactNumber,
+      dateOfBirth,
+      gender,
+      address,
+      allergies,
+      medicalHistory,
+      dentalHistory,
+      password,
+      confirmPassword,
+    } = req.body;
 
-    if (!firstName || !lastName || !email || !dateOfBirth || !password) {
+    if (!firstName || !lastName || !email || !contactNumber || !dateOfBirth || !password) {
       return res.status(400).json({
-        message: "First name, last name, email, birth date, and password are required.",
+        message: "First name, last name, email, mobile number, birth date, and password are required.",
+      });
+    }
+
+    if (confirmPassword !== undefined && password !== confirmPassword) {
+      return res.status(400).json({
+        message: "Passwords do not match.",
+        errors: { confirmPassword: "Passwords do not match." },
       });
     }
 
     if (password.length < 8) {
       return res.status(400).json({
         message: "Password must be at least 8 characters long.",
-      });
-    }
-
-    if (!isValidMobileNumber(contactNumber)) {
-      return res.status(400).json({
-        message: MOBILE_NUMBER_MESSAGE,
-        errors: { contactNumber: MOBILE_NUMBER_MESSAGE },
+        errors: { password: "Password must be at least 8 characters long." },
       });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedUsername = username?.trim();
     const normalizedContactNumber = normalizeMobileNumber(contactNumber);
-
-    const duplicateFilters = [{ email: normalizedEmail }];
+    const patientPayload = await preparePatientCreateBody(
+      {
+        firstName,
+        lastName,
+        email: normalizedEmail,
+        contactNumber: normalizedContactNumber,
+        dateOfBirth,
+        gender,
+        address,
+        allergies,
+        medicalHistory,
+        dentalHistory,
+        registrationStatus: "unverified",
+        status: "active",
+      },
+      { requireEmail: true, requireMobile: true, requireBirthDate: true },
+    );
+    const duplicateFilters = [{ email: normalizedEmail }, { contactNumber: normalizedContactNumber }];
 
     if (normalizedUsername) {
       duplicateFilters.push({ username: normalizedUsername });
@@ -105,16 +128,22 @@ router.post(
         message:
           existingUser.email === normalizedEmail
             ? "An account with this email already exists."
+            : existingUser.contactNumber === normalizedContactNumber
+              ? "An account with this mobile number already exists."
             : "This username is already taken.",
+        errors:
+          existingUser.email === normalizedEmail
+            ? { email: "This email is already registered." }
+            : existingUser.contactNumber === normalizedContactNumber
+              ? { contactNumber: "This mobile number is already registered." }
+              : { username: "This username is already taken." },
       });
     }
 
     const passwordHash = await hashPasswordScrypt(password);
-    const patientId = await generatePatientId();
-
     const user = await User.create({
-      firstName,
-      lastName,
+      firstName: patientPayload.firstName,
+      lastName: patientPayload.lastName,
       email: normalizedEmail,
       username: normalizedUsername || undefined,
       contactNumber: normalizedContactNumber,
@@ -124,16 +153,17 @@ router.post(
       status: "active",
     });
 
-    const patient = await Patient.create({
-      userId: user._id,
-      patientId,
-      firstName,
-      lastName,
-      email: normalizedEmail,
-      contactNumber: normalizedContactNumber,
-      dateOfBirth,
-      registrationStatus: "unverified",
-    });
+    let patient;
+
+    try {
+      patient = await Patient.create({
+        ...patientPayload,
+        userId: user._id,
+      });
+    } catch (error) {
+      await User.findByIdAndDelete(user._id).catch(() => {});
+      throw error;
+    }
 
     res.status(201).json({
       message: "Registration successful.",
@@ -179,11 +209,37 @@ router.post(
 
     const token = createAuthToken(user);
 
+    AuditLog.create({
+      action: "Login",
+      entityType: "Authentication",
+      entityId: user._id,
+      performedBy: user._id,
+      performedByEmail: user.email,
+      metadata: { role: user.role, status: "Success" },
+    }).catch(() => {});
+
     res.json({
       message: "Login successful.",
       token,
       user: sanitizeUser(user),
     });
+  }),
+);
+
+router.post(
+  "/logout",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    AuditLog.create({
+      action: "Logout",
+      entityType: "Authentication",
+      entityId: req.user.id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: { role: req.user.role, status: "Success" },
+    }).catch(() => {});
+
+    res.json({ message: "Logout recorded." });
   }),
 );
 

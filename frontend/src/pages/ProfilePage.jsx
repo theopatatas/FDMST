@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import {
   FaAddressCard,
@@ -125,7 +125,26 @@ function ProfilePage() {
   const user = useMemo(() => layoutUser || authStorage.getUser(), [layoutUser])
   const patient = user?.patient || {}
 
-  const handleChange = (event) => {
+  useEffect(() => {
+    if (!user) return
+
+    let isActive = true
+
+    queueMicrotask(() => {
+      if (!isActive) return
+      setForm((currentForm) => ({
+        ...userToForm(user),
+        profilePhoto: currentForm.profilePhoto || user.profilePhoto || '',
+        ...emptyPasswordFields,
+      }))
+    })
+
+    return () => {
+      isActive = false
+    }
+  }, [user])
+
+  const handleChange = useCallback((event) => {
     const { name, value } = event.target
     const nextValue = name === 'contactNumber' ? digitsOnly(value) : value
 
@@ -137,7 +156,7 @@ function ProfilePage() {
       ...currentErrors,
       [name]: '',
     }))
-  }
+  }, [])
 
   const handlePhotoChange = (event) => {
     const file = event.target.files?.[0]

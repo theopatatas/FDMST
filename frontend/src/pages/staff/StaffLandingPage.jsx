@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { FaBullhorn } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import AppointmentsTable from '../../components/AppointmentsTable.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -7,13 +9,18 @@ import { formatDate } from '../../utils/auth.js'
 function StaffLandingPage() {
   const toast = useToast()
   const [dashboard, setDashboard] = useState(null)
+  const [promotions, setPromotions] = useState([])
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        const data = await fdmstApi.getStaffDashboard()
+        const [data, promotionResponse] = await Promise.all([
+          fdmstApi.getStaffDashboard(),
+          fdmstApi.list('promotions'),
+        ])
         setDashboard(data)
+        setPromotions(Array.isArray(promotionResponse.data) ? promotionResponse.data : [])
       } catch (loadError) {
         toast.error(loadError.message || 'Failed to load staff dashboard.')
       } finally {
@@ -62,6 +69,37 @@ function StaffLandingPage() {
             />
           </div>
         </article>
+      </section>
+
+      <section className="mt-10 rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
+              <FaBullhorn aria-hidden="true" />
+            </span>
+            <div>
+              <h2 className="text-xl font-semibold text-sky-950">Clinic Promotions</h2>
+              <p className="mt-1 text-sm text-slate-500">Active offers visible to portal users.</p>
+            </div>
+          </div>
+          <Link to="/staff/promotions" className="inline-flex h-11 items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-900">
+            View All
+          </Link>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          {promotions.slice(0, 3).length ? promotions.slice(0, 3).map((promotion) => (
+            <article key={promotion._id} className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-amber-600">{promotion.discountLabel || promotion.promoCode || 'Clinic Offer'}</p>
+              <h3 className="mt-2 font-semibold text-sky-950">{promotion.title}</h3>
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{promotion.description || 'No additional details.'}</p>
+            </article>
+          )) : (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500 md:col-span-3">
+              No active promotions right now.
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="mt-10">

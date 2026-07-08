@@ -102,7 +102,12 @@ export const fdmstApi = {
     authStorage.saveSession(data)
     return data
   },
+  logout: () =>
+    request('/auth/logout', {
+      method: 'POST',
+    }),
   getAdminDashboard: () => request('/dashboard/admin'),
+  getPublicSettings: () => request('/public-settings'),
   getAdminAnalytics: (filters = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
@@ -118,6 +123,10 @@ export const fdmstApi = {
     request('/users/me/notifications/read', {
       method: 'PATCH',
     }),
+  markNotificationRead: (id) =>
+    request(`/users/me/notifications/${id}/read`, {
+      method: 'PATCH',
+    }),
   updateProfile: async (payload) => {
     const data = await request('/users/me', {
       method: 'PATCH',
@@ -127,7 +136,20 @@ export const fdmstApi = {
     authStorage.saveSession(data)
     return data
   },
+  updatePassword: (payload) =>
+    request('/users/me/password', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   getDentists: () => request('/appointments/dentists'),
+  getAppointmentAvailability: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/appointments/availability${query ? `?${query}` : ''}`)
+  },
   bookAppointment: (payload) =>
     request('/appointments/book', {
       method: 'POST',
@@ -157,10 +179,10 @@ export const fdmstApi = {
       body: JSON.stringify(payload),
     }),
   getAppointments: () => request('/appointments'),
-  updateAppointmentStatus: (id, status) =>
+  updateAppointmentStatus: (id, payload) =>
     request(`/appointments/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(typeof payload === 'string' ? { status: payload } : payload),
     }),
   list: (resource) => request(`/${resource}`),
   getById: (resource, id) => request(`/${resource}/${id}`),

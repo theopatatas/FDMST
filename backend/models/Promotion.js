@@ -11,6 +11,10 @@ const promotionSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+    },
     serviceType: {
       type: String,
       trim: true,

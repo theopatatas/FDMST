@@ -34,9 +34,9 @@ const initialForm = {
   dateOfBirth: '',
   gender: 'prefer_not_to_say',
   address: '',
+  allergies: '',
   medicalHistory: '',
   dentalHistory: '',
-  billingNotes: '',
   registrationStatus: 'unverified',
   status: 'active',
 }
@@ -48,7 +48,7 @@ const patientIconInputClass =
   'h-12 w-full rounded-xl border border-slate-200 bg-white px-12 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
 
 const patientTextareaClass =
-  'min-h-16 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
+  'h-12 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
 
 const initialConfirmation = {
   type: '',
@@ -168,7 +168,7 @@ function AdminPatientsPage() {
   const visiblePatients = filteredPatients.slice((page - 1) * pageSize, page * pageSize)
 
   useEffect(() => {
-    setPage(1)
+    queueMicrotask(() => setPage(1))
   }, [genderFilter, query, statusFilter])
 
   const getPatientLastAppointment = useCallback((patient) => {
@@ -238,6 +238,7 @@ function AdminPatientsPage() {
       lastName: form.lastName.trim(),
       email: form.email.trim(),
       contactNumber: form.contactNumber.trim(),
+      allergies: form.allergies.trim(),
     }
 
     openConfirmation({
@@ -257,6 +258,7 @@ function AdminPatientsPage() {
     setForm({
       ...initialForm,
       ...patient,
+      allergies: Array.isArray(patient.allergies) ? patient.allergies.join(', ') : patient.allergies || '',
       dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
       status: patient.status || 'active',
     })
@@ -420,6 +422,13 @@ function AdminPatientsPage() {
             </label>
 
             <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Allergies
+              <IconField icon={FaNotesMedical}>
+                <textarea className={`${patientTextareaClass} pl-12`} name="allergies" value={form.allergies || ''} onChange={handleChange} placeholder="Enter allergies (optional)" />
+              </IconField>
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Medical History
               <IconField icon={FaNotesMedical}>
                 <textarea className={`${patientTextareaClass} pl-12`} name="medicalHistory" value={form.medicalHistory || ''} onChange={handleChange} placeholder="Enter medical history (optional)" />
@@ -427,11 +436,9 @@ function AdminPatientsPage() {
             </label>
             <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Dental History
-              <textarea className={patientTextareaClass} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} placeholder="Enter dental history (optional)" />
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Billing Notes
-              <textarea className={patientTextareaClass} name="billingNotes" value={form.billingNotes || ''} onChange={handleChange} placeholder="Enter billing notes (optional)" />
+              <IconField icon={FaNotesMedical}>
+                <textarea className={`${patientTextareaClass} pl-12`} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} placeholder="Enter dental history (optional)" />
+              </IconField>
             </label>
             <button className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900">
               <FaPlus className="h-4 w-4" aria-hidden="true" />
@@ -521,7 +528,7 @@ function AdminPatientsPage() {
           <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-[1.75rem] bg-white p-6 shadow-2xl">
             <div className="flex justify-between gap-4"><div><h2 className="text-2xl font-semibold text-sky-950">{fullName(selectedPatient)}</h2><p className="text-sm text-slate-500">{selectedPatient.email || 'No email'}</p></div><button onClick={() => setSelectedPatient(null)} className="h-10 rounded-xl border px-4 text-sm font-semibold">Close</button></div>
             <div className="mt-6 grid gap-5 lg:grid-cols-2">
-              <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Medical / Dental History</h3><p className="mt-3 text-sm text-slate-600">{selectedPatient.medicalHistory || 'No medical history recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.dentalHistory || 'No dental history recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.billingNotes || 'No billing notes recorded.'}</p></section>
+              <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Medical / Dental History</h3><p className="mt-3 text-sm text-slate-600">{selectedPatient.allergies?.length ? `Allergies: ${selectedPatient.allergies.join(', ')}` : 'No allergies recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.medicalHistory || 'No medical history recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.dentalHistory || 'No dental history recorded.'}</p></section>
               <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Appointment History</h3>{selectedAppointments.length ? selectedAppointments.map((item) => <p key={item.id} className="mt-2 text-sm text-slate-600">{new Date(item.appointmentDate).toLocaleDateString()} • {item.service} • {item.status}</p>) : <p className="mt-3 text-sm text-slate-500">No appointments found.</p>}</section>
               <section className="rounded-2xl bg-slate-50 p-4 lg:col-span-2"><h3 className="font-semibold text-sky-950">Treatment Records</h3>{selectedRecords.length ? selectedRecords.map((item) => <p key={item._id} className="mt-2 text-sm text-slate-600">{new Date(item.visitDate).toLocaleDateString()} • {item.procedure || item.treatment || 'Treatment'} • {item.dentistName || 'No dentist listed'}</p>) : <p className="mt-3 text-sm text-slate-500">No dental records found.</p>}</section>
             </div>

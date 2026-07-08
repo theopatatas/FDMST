@@ -4,7 +4,7 @@ import { inputClass } from '../components/AdminUi.jsx'
 import AppointmentsTable from '../components/AppointmentsTable.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 
-function AppointmentsPage({ title, description, allowApproval = false }) {
+function AppointmentsPage({ allowApproval = false }) {
   const toast = useToast()
   const [appointments, setAppointments] = useState([])
   const [dentists, setDentists] = useState([])
@@ -12,6 +12,9 @@ function AppointmentsPage({ title, description, allowApproval = false }) {
   const [updatingId, setUpdatingId] = useState(null)
   const [view, setView] = useState('table')
   const [filters, setFilters] = useState({ date: '', dentist: 'all', status: 'all', patient: '' })
+  const [declineTarget, setDeclineTarget] = useState(null)
+  const [declineReason, setDeclineReason] = useState('')
+  const [declineError, setDeclineError] = useState('')
 
   const loadAppointments = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -49,13 +52,57 @@ function AppointmentsPage({ title, description, allowApproval = false }) {
   }, {}), [filteredAppointments])
 
   const handleUpdateStatus = async (appointmentId, status) => {
+    if (status === 'cancelled') {
+      const appointment = appointments.find((item) => item.id === appointmentId)
+      setDeclineTarget(appointment || { id: appointmentId })
+      setDeclineReason('')
+      setDeclineError('')
+      return
+    }
+
     setUpdatingId(appointmentId)
     try {
-      const response = await fdmstApi.updateAppointmentStatus(appointmentId, status)
+      const response = await fdmstApi.updateAppointmentStatus(appointmentId, { status })
       toast.success(response.message || 'Appointment status updated.')
       setAppointments((current) => current.map((appointment) => appointment.id === appointmentId ? { ...appointment, status: response.appointment.status } : appointment))
     } catch (updateError) {
       toast.error(updateError.message || 'Unable to update appointment.')
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const closeDeclineModal = () => {
+    if (updatingId) return
+    setDeclineTarget(null)
+    setDeclineReason('')
+    setDeclineError('')
+  }
+
+  const confirmDecline = async () => {
+    const reason = declineReason.trim()
+
+    if (!reason) {
+      setDeclineError('Please enter a reason for declining this appointment.')
+      return
+    }
+
+    setUpdatingId(declineTarget.id)
+    try {
+      const response = await fdmstApi.updateAppointmentStatus(declineTarget.id, {
+        status: 'cancelled',
+        declineReason: reason,
+      })
+      toast.success(response.message || 'Appointment declined.')
+      setAppointments((current) => current.map((appointment) => (
+        appointment.id === declineTarget.id
+          ? { ...appointment, status: response.appointment.status, declineReason: response.appointment.declineReason }
+          : appointment
+      )))
+      closeDeclineModal()
+    } catch (updateError) {
+      setDeclineError(updateError.message || 'Unable to decline appointment.')
+      toast.error(updateError.message || 'Unable to decline appointment.')
     } finally {
       setUpdatingId(null)
     }
@@ -85,6 +132,53 @@ function AppointmentsPage({ title, description, allowApproval = false }) {
           ))}
         </section>
       )}
+
+      {declineTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-2xl shadow-sky-950/20">
+            <div>
+              <h2 className="text-xl font-semibold text-sky-950">Decline Appointment</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Add a clear reason before declining {declineTarget.patientName ? `${declineTarget.patientName}'s` : 'this'} appointment.
+              </p>
+            </div>
+
+            <label className="mt-5 grid gap-2 text-sm font-semibold text-slate-600">
+              Reason
+              <textarea
+                className={`${inputClass} min-h-28 resize-none py-3 leading-6`}
+                value={declineReason}
+                onChange={(event) => {
+                  setDeclineReason(event.target.value)
+                  setDeclineError('')
+                }}
+                placeholder="Example: Dentist is unavailable for the selected schedule."
+                maxLength={300}
+              />
+            </label>
+            {declineError ? <p className="mt-2 text-sm font-medium text-red-600">{declineError}</p> : null}
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeclineModal}
+                disabled={updatingId === declineTarget.id}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDecline}
+                disabled={updatingId === declineTarget.id}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-red-600 px-5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {updatingId === declineTarget.id ? 'Declining...' : 'Decline Appointment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   )
 }

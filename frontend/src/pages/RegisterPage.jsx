@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fdmstApi } from '../api/fdmstApi.js'
 import { useToast } from '../context/ToastContext.jsx'
@@ -10,6 +10,10 @@ const initialForm = {
   email: '',
   contactNumber: '',
   dateOfBirth: '',
+  gender: 'prefer_not_to_say',
+  address: '',
+  allergies: '',
+  medicalHistory: '',
   password: '',
   confirmPassword: '',
   acceptedPrivacy: false,
@@ -100,8 +104,25 @@ function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [clinicSettings, setClinicSettings] = useState(null)
 
   const age = useMemo(() => calculateAge(form.dateOfBirth), [form.dateOfBirth])
+
+  useEffect(() => {
+    let isMounted = true
+
+    fdmstApi.getPublicSettings()
+      .then((settings) => {
+        if (isMounted) setClinicSettings(settings || null)
+      })
+      .catch(() => {
+        if (isMounted) setClinicSettings(null)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const handleChange = (event) => {
     const { name, type, checked, value } = event.target
@@ -135,11 +156,21 @@ function RegisterPage() {
       return
     }
 
-    const mobileError = validateMobileNumber(form.contactNumber)
+    const errors = {}
+    if (!form.firstName.trim()) errors.firstName = 'First name is required.'
+    if (!form.lastName.trim()) errors.lastName = 'Last name is required.'
+    if (!form.email.trim()) errors.email = 'Email address is required.'
+    if (!form.dateOfBirth) errors.dateOfBirth = 'Birth date is required.'
+
+    const mobileError = validateMobileNumber(form.contactNumber, { required: true })
 
     if (mobileError) {
-      setFieldErrors({ contactNumber: mobileError })
-      toast.error(mobileError)
+      errors.contactNumber = mobileError
+    }
+
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors)
+      toast.error(Object.values(errors)[0])
       return
     }
 
@@ -152,7 +183,12 @@ function RegisterPage() {
         email: form.email.trim(),
         contactNumber: form.contactNumber.trim(),
         dateOfBirth: form.dateOfBirth,
+        gender: form.gender,
+        address: form.address.trim(),
+        allergies: form.allergies.trim(),
+        medicalHistory: form.medicalHistory.trim(),
         password: form.password,
+        confirmPassword: form.confirmPassword,
       })
 
       toast.success(
@@ -184,11 +220,15 @@ function RegisterPage() {
           </Link>
 
           <div className="mt-16 flex items-center gap-4">
-            <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-lg">
-              <ToothIcon />
-            </span>
+            {clinicSettings?.clinicLogo ? (
+              <img src={clinicSettings.clinicLogo} alt="" className="h-16 w-16 rounded-2xl object-cover shadow-lg ring-1 ring-white/20" />
+            ) : (
+              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-lg">
+                <ToothIcon />
+              </span>
+            )}
             <div>
-              <p className="text-2xl font-semibold leading-tight">Flores-Dizon Dental</p>
+              <p className="text-2xl font-semibold leading-tight">{clinicSettings?.clinicName || 'Flores-Dizon Dental'}</p>
               <p className="mt-1 text-base font-medium text-sky-200">Clinic Management System</p>
             </div>
           </div>
@@ -256,6 +296,9 @@ function RegisterPage() {
                   type="text"
                   value={form.firstName}
                 />
+                {fieldErrors.firstName ? (
+                  <span className="text-xs font-medium text-red-600">{fieldErrors.firstName}</span>
+                ) : null}
               </label>
 
               <label className="grid gap-2 text-sm font-semibold text-slate-500">
@@ -269,6 +312,9 @@ function RegisterPage() {
                   type="text"
                   value={form.lastName}
                 />
+                {fieldErrors.lastName ? (
+                  <span className="text-xs font-medium text-red-600">{fieldErrors.lastName}</span>
+                ) : null}
               </label>
             </div>
 
@@ -283,10 +329,13 @@ function RegisterPage() {
                 type="email"
                 value={form.email}
               />
+              {fieldErrors.email ? (
+                <span className="text-xs font-medium text-red-600">{fieldErrors.email}</span>
+              ) : null}
             </label>
 
             <label className="grid gap-2 text-sm font-semibold text-slate-500">
-              Mobile Number <span className="font-normal text-slate-300">(optional)</span>
+              Mobile Number *
               <input
                 className={inputClass}
                 name="contactNumber"
@@ -294,6 +343,7 @@ function RegisterPage() {
                 placeholder="09XXXXXXXXX"
                 inputMode="numeric"
                 maxLength={11}
+                required
                 type="tel"
                 value={form.contactNumber}
               />
@@ -313,6 +363,9 @@ function RegisterPage() {
                   type="date"
                   value={form.dateOfBirth}
                 />
+                {fieldErrors.dateOfBirth ? (
+                  <span className="text-xs font-medium text-red-600">{fieldErrors.dateOfBirth}</span>
+                ) : null}
               </label>
 
               <label className="grid gap-2 text-sm font-semibold text-slate-500">
@@ -326,6 +379,54 @@ function RegisterPage() {
                 />
               </label>
             </div>
+
+            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+              Gender
+              <select
+                className={inputClass}
+                name="gender"
+                onChange={handleChange}
+                value={form.gender}
+              >
+                <option value="prefer_not_to_say">Prefer not to say</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+              Address
+              <textarea
+                className={`${inputClass} min-h-24 py-4`}
+                name="address"
+                onChange={handleChange}
+                placeholder="Enter full address"
+                value={form.address}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+              Allergies
+              <textarea
+                className={`${inputClass} min-h-24 py-4`}
+                name="allergies"
+                onChange={handleChange}
+                placeholder="Enter known allergies, separated by commas (optional)"
+                value={form.allergies}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-semibold text-slate-500">
+              Medical History
+              <textarea
+                className={`${inputClass} min-h-24 py-4`}
+                name="medicalHistory"
+                onChange={handleChange}
+                placeholder="Enter medical history or current conditions if applicable"
+                value={form.medicalHistory}
+              />
+            </label>
 
             <label className="grid gap-2 text-sm font-semibold text-slate-500">
               Password *
@@ -349,6 +450,9 @@ function RegisterPage() {
                   <EyeIcon />
                 </button>
               </span>
+              {fieldErrors.password ? (
+                <span className="text-xs font-medium text-red-600">{fieldErrors.password}</span>
+              ) : null}
             </label>
 
             <label className="grid gap-2 text-sm font-semibold text-slate-500">
@@ -373,6 +477,9 @@ function RegisterPage() {
                   <EyeIcon />
                 </button>
               </span>
+              {fieldErrors.confirmPassword ? (
+                <span className="text-xs font-medium text-red-600">{fieldErrors.confirmPassword}</span>
+              ) : null}
             </label>
 
             <label className="flex items-start gap-4 text-sm font-semibold leading-7 text-slate-500">

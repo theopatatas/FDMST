@@ -9,10 +9,14 @@ import AdminInventoryPage from './pages/admin/AdminInventoryPage.jsx'
 import PortalSectionPage from './pages/PortalSectionPage.jsx'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage.jsx'
 import AdminLandingPage from './pages/admin/AdminLandingPage.jsx'
+import AdminNotificationsPage from './pages/admin/AdminNotificationsPage.jsx'
+import AdminPromotionsPage from './pages/admin/AdminPromotionsPage.jsx'
 import AdminReportsPage from './pages/admin/AdminReportsPage.jsx'
 import AdminSettingsPage from './pages/admin/AdminSettingsPage.jsx'
 import BookAppointmentPage from './pages/patient/BookAppointmentPage.jsx'
 import PatientLandingPage from './pages/patient/PatientLandingPage.jsx'
+import PatientNotificationsPage from './pages/patient/PatientNotificationsPage.jsx'
+import PatientPromotionsPage from './pages/patient/PatientPromotionsPage.jsx'
 import PatientRecordsPage from './pages/patient/PatientRecordsPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
@@ -27,6 +31,7 @@ const adminNavItems = [
   { label: 'Analytics', to: '/admin/analytics', icon: 'analytics' },
   { label: 'Reports', to: '/admin/reports', icon: 'reports' },
   { label: 'Inventory', to: '/admin/inventory', icon: 'inventory' },
+  { label: 'Promotions', to: '/admin/promotions', icon: 'promotions' },
   { label: 'Settings', to: '/admin/settings', icon: 'settings' },
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
@@ -35,7 +40,15 @@ const staffNavItems = [
   { label: 'Dashboard', to: '/staff', end: true, icon: 'dashboard' },
   { label: 'Appointments', to: '/staff/appointments', icon: 'appointments' },
   { label: 'Patients', to: '/staff/patients', icon: 'patients' },
-  { label: 'Notifications', to: '/staff/notifications', icon: 'notifications' },
+  { label: 'Promotions', to: '/staff/promotions', icon: 'promotions' },
+  { label: 'Logout', action: 'logout', icon: 'logout' },
+]
+
+const dentistNavItems = [
+  { label: 'Dashboard', to: '/dentist', end: true, icon: 'dashboard' },
+  { label: 'Appointments', to: '/dentist/appointments', icon: 'appointments' },
+  { label: 'Patients', to: '/dentist/patients', icon: 'patients' },
+  { label: 'Promotions', to: '/dentist/promotions', icon: 'promotions' },
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
@@ -43,6 +56,7 @@ const patientNavItems = [
   { label: 'Dashboard', to: '/patient', end: true, icon: 'dashboard' },
   { label: 'Book Appointment', to: '/patient/book-appointment', icon: 'appointments' },
   { label: 'Records', to: '/patient/records', icon: 'records' },
+  { label: 'Clinic Promotions', to: '/patient/promotions', icon: 'promotions' },
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
@@ -72,14 +86,10 @@ function App() {
         <Route index element={<PatientLandingPage />} />
         <Route path="book-appointment" element={<BookAppointmentPage />} />
         <Route path="records" element={<PatientRecordsPage />} />
+        <Route path="promotions" element={<PatientPromotionsPage />} />
         <Route
           path="notifications"
-          element={
-            <PortalSectionPage
-              title="Notifications"
-              description="View appointment updates and clinic reminders."
-            />
-          }
+          element={<PatientNotificationsPage />}
         />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
@@ -109,15 +119,8 @@ function App() {
         <Route path="analytics" element={<AdminAnalyticsPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="inventory" element={<AdminInventoryPage />} />
-        <Route
-          path="notifications"
-          element={
-            <PortalSectionPage
-              title="Notifications"
-              description="View appointment updates, clinic alerts, and system messages."
-            />
-          }
-        />
+        <Route path="promotions" element={<AdminPromotionsPage />} />
+        <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
       </Route>
@@ -158,6 +161,47 @@ function App() {
             />
           }
         />
+        <Route path="promotions" element={<PatientPromotionsPage />} />
+        <Route path="profile" element={<ProfilePage />} />
+      </Route>
+
+      <Route
+        path="/dentist"
+        element={
+          <ProtectedRoute allowedRoles={['dentist']}>
+            <DashboardLayout portalLabel="Dentist Portal" navItems={dentistNavItems} />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<StaffLandingPage />} />
+        <Route
+          path="appointments"
+          element={
+            <AppointmentsPage
+              title="Appointments"
+              description="Review scheduled visits and patient appointment requests."
+            />
+          }
+        />
+        <Route
+          path="patients"
+          element={
+            <PortalSectionPage
+              title="Patients"
+              description="Browse patient records and recent registrations."
+            />
+          }
+        />
+        <Route
+          path="notifications"
+          element={
+            <PortalSectionPage
+              title="Notifications"
+              description="View appointment updates, patient messages, and clinic alerts."
+            />
+          }
+        />
+        <Route path="promotions" element={<PatientPromotionsPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
     </Routes>

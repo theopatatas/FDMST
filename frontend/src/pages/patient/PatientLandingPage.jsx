@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   FaArrowRight,
-  FaBell,
   FaCalendarCheck,
   FaCheckCircle,
   FaClock,
   FaFileMedical,
   FaGift,
   FaRegCalendarAlt,
-  FaTag,
   FaTimesCircle,
   FaTooth,
 } from 'react-icons/fa'
@@ -35,7 +33,7 @@ const quickActions = [
   {
     title: 'Clinic Promos',
     description: 'See current patient offers without leaving your portal.',
-    href: '#patient-promotions',
+    href: '/patient/promotions',
     icon: FaGift,
     accent: 'bg-amber-50 text-amber-600 ring-amber-100',
   },
@@ -66,20 +64,6 @@ function getDisplayName(user) {
 
 function getFirstName(user) {
   return user?.firstName || getDisplayName(user).split(' ')[0] || 'Patient'
-}
-
-function getRelativeTime(value) {
-  if (!value) return 'Just now'
-
-  const minutes = Math.max(Math.floor((Date.now() - new Date(value).getTime()) / 60000), 0)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
-
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
-
-  const days = Math.floor(hours / 24)
-  return `${days} day${days === 1 ? '' : 's'} ago`
 }
 
 function isUpcoming(appointment) {
@@ -228,12 +212,12 @@ function PatientLandingPage() {
   const location = useLocation()
   const [user, setUser] = useState(() => authStorage.getUser())
   const [appointments, setAppointments] = useState([])
-  const [notifications, setNotifications] = useState([])
-  const [promotions, setPromotions] = useState([])
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(({ silent = false } = {}) => {
+    let isActive = true
+
     setIsLoading(true)
 
     const currentUser = authStorage.getUser()
@@ -241,35 +225,44 @@ function PatientLandingPage() {
 
     if (!currentUser) {
       setAppointments([])
-      setNotifications([])
-      setPromotions([])
       setIsLoading(false)
-      return
+      return () => {
+        isActive = false
+      }
     }
 
-    try {
-      const [appointmentResponse, notificationResponse, promotionResponse] = await Promise.all([
-        fdmstApi.getMyAppointments(),
-        fdmstApi.getNotifications(),
-        fdmstApi.list('promotions'),
-      ])
-      setAppointments(appointmentResponse.data || [])
-      setNotifications(notificationResponse.data || [])
-      setPromotions(promotionResponse.data || [])
-    } catch (loadError) {
-      toast.error(loadError.message || 'Failed to load your dashboard.')
-      setAppointments([])
-      setNotifications([])
-      setPromotions([])
-    } finally {
-      setIsLoading(false)
+    Promise.all([
+      fdmstApi.getMyAppointments(),
+    ])
+      .then(([appointmentResponse]) => {
+        if (!isActive) return
+        setAppointments(Array.isArray(appointmentResponse.data) ? appointmentResponse.data : [])
+      })
+      .catch((loadError) => {
+        if (!isActive) return
+        if (!silent) toast.error(loadError.message || 'Failed to load your dashboard.')
+        setAppointments([])
+      })
+      .finally(() => {
+        if (isActive) setIsLoading(false)
+      })
+
+    return () => {
+      isActive = false
     }
   }, [toast])
 
   useEffect(() => {
     window.scrollTo(0, 0)
-    loadDashboard()
-  }, [location.pathname, location.key, location.state?.refreshDashboard, loadDashboard])
+    let cleanup
+    queueMicrotask(() => {
+      cleanup = loadDashboard()
+    })
+
+    return () => {
+      cleanup?.()
+    }
+  }, [loadDashboard, location.state?.refreshDashboard])
 
   useEffect(() => {
     const syncUser = () => setUser(authStorage.getUser())
@@ -281,8 +274,8 @@ function PatientLandingPage() {
   const firstName = getFirstName(user)
   const upcomingAppointments = useMemo(() => appointments.filter(isUpcoming), [appointments])
   const nextAppointment = upcomingAppointments[0]
-  const pendingCount = appointments.filter((appointment) => appointment.status === 'pending').length
-  const completedCount = appointments.filter((appointment) => appointment.status === 'completed').length
+  const pendingCount = useMemo(() => appointments.filter((appointment) => appointment.status === 'pending').length, [appointments])
+  const completedCount = useMemo(() => appointments.filter((appointment) => appointment.status === 'completed').length, [appointments])
 
   if (!user) {
     return (
@@ -362,7 +355,7 @@ function PatientLandingPage() {
           </div>
         </section>
 
-        <section className="mt-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="mt-10">
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -377,77 +370,6 @@ function PatientLandingPage() {
               <AppointmentsPreview appointments={upcomingAppointments} isLoading={isLoading} onSelect={setSelectedAppointment} />
             </div>
           </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-sky-950">Notifications</h2>
-                <p className="mt-1 text-sm text-slate-500">Latest clinic updates.</p>
-              </div>
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
-                <FaBell aria-hidden="true" />
-              </span>
-            </div>
-            <div className="mt-5 grid gap-3">
-              {notifications.slice(0, 3).length ? notifications.slice(0, 3).map((notification) => (
-                <div key={notification.id} className={`rounded-2xl p-4 ${notification.isRead ? 'bg-slate-50' : 'bg-sky-50'}`}>
-                  <p className="font-semibold text-sky-950">{notification.title}</p>
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">{notification.message}</p>
-                  <p className="mt-2 text-xs font-medium text-slate-400">{getRelativeTime(notification.createdAt)}</p>
-                </div>
-              )) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                  No notifications yet.
-                </div>
-              )}
-            </div>
-            <Link to="/patient/notifications" className="mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-sky-950 transition hover:bg-slate-50">
-              View All
-            </Link>
-          </article>
-        </section>
-
-        <section id="patient-promotions" className="mt-10">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-sky-950">Clinic Promotions</h2>
-              <p className="mt-2 text-slate-500">Current patient offers available inside your portal.</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-5 lg:grid-cols-3">
-            {promotions.length ? promotions.slice(0, 3).map((promotion) => (
-              <article key={promotion._id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-                <div className="flex h-32 items-center justify-between bg-sky-950 px-6 text-white">
-                  <div>
-                    <p className="text-sm font-semibold text-amber-300">{promotion.discountLabel || promotion.promoCode || 'Patient Offer'}</p>
-                    <p className="mt-2 max-w-44 text-lg font-semibold leading-6">{promotion.serviceType || 'Dental Care'}</p>
-                  </div>
-                  <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-amber-300 ring-1 ring-white/10">
-                    <FaTag className="h-7 w-7" aria-hidden="true" />
-                  </span>
-                </div>
-                <div className="p-5">
-                  <h3 className="text-lg font-semibold text-sky-950">{promotion.title}</h3>
-                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500">{promotion.description || 'Ask the clinic team about this current offer.'}</p>
-                  <p className="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                    Expires {promotion.endDate ? formatDate(promotion.endDate) : 'soon'}
-                  </p>
-                  <Link to="/patient/book-appointment" className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
-                    Learn More
-                  </Link>
-                </div>
-              </article>
-            )) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center lg:col-span-3">
-                <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
-                  <FaGift aria-hidden="true" />
-                </span>
-                <p className="mt-4 font-semibold text-sky-950">No active promotions right now</p>
-                <p className="mt-2 text-sm text-slate-500">New patient offers will appear here when available.</p>
-              </div>
-            )}
-          </div>
         </section>
       </div>
 

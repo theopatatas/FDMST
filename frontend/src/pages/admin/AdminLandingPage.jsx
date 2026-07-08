@@ -9,6 +9,7 @@ import {
   FaUserClock,
   FaUsers,
 } from 'react-icons/fa'
+import { useNavigate } from 'react-router-dom'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import AppointmentsTable from '../../components/AppointmentsTable.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -39,27 +40,27 @@ function OverviewCard({ label, value, helper, icon: Icon, tone = 'sky' }) {
   )
 }
 
-function InfoPanel({ title, children }) {
+function InfoPanel({ title, children, scrollable = false }) {
   return (
     <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold text-sky-950">{title}</h2>
-      <div className="mt-4">{children}</div>
+      <div className={`mt-4 ${scrollable ? 'max-h-[23rem] overflow-y-auto pr-2' : ''}`}>{children}</div>
     </article>
   )
 }
 
-function ActivityList({ items = [], emptyMessage }) {
+function StaffActivityList({ items = [] }) {
   if (!items.length) {
-    return <p className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">{emptyMessage}</p>
+    return <p className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">No staff activity recorded.</p>
   }
 
   return (
     <div className="grid gap-3">
       {items.map((item) => (
         <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm" key={item._id || item.id}>
-          <p className="font-semibold capitalize text-sky-950">{(item.action || item.title || 'Activity').replaceAll('_', ' ')}</p>
+          <p className="font-semibold capitalize text-sky-950">{(item.action || 'Staff activity').replaceAll('_', ' ')}</p>
           <p className="mt-1 text-slate-500">
-            {item.performedByEmail || item.message || item.entityType || 'System update'} • {new Date(item.createdAt).toLocaleString()}
+            {item.performedByEmail || 'System'} • {new Date(item.createdAt).toLocaleString()}
           </p>
         </div>
       ))}
@@ -69,6 +70,7 @@ function ActivityList({ items = [], emptyMessage }) {
 
 function AdminLandingPage() {
   const toast = useToast()
+  const navigate = useNavigate()
   const [dashboard, setDashboard] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -89,7 +91,7 @@ function AdminLandingPage() {
     return () => clearInterval(timer)
   }, [loadDashboard])
 
-  const stats = dashboard?.stats || {}
+  const stats = useMemo(() => dashboard?.stats || {}, [dashboard?.stats])
   const cards = useMemo(
     () => [
       { label: 'Total Appointments', value: stats.totalAppointments || 0, helper: 'All booking records', icon: FaCalendarCheck, tone: 'sky' },
@@ -114,20 +116,18 @@ function AdminLandingPage() {
         {cards.map((card) => <OverviewCard key={card.label} {...card} />)}
       </section>
 
-      <section className="mt-8 grid gap-6 xl:grid-cols-[1fr_24rem]">
-        <InfoPanel title="Today's Appointment Schedule">
-          <AppointmentsTable appointments={dashboard?.todaysSchedule || []} emptyMessage="No appointments scheduled for today." />
+      <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <InfoPanel title="Today's Appointment Schedule" scrollable>
+          <AppointmentsTable
+            appointments={dashboard?.todaysSchedule || []}
+            emptyMessage="No appointments scheduled for today."
+            onRowClick={() => navigate('/admin/appointments')}
+          />
         </InfoPanel>
 
-        <div className="grid gap-6">
-          <InfoPanel title="Recent Notifications">
-            <ActivityList items={dashboard?.notifications || []} emptyMessage="No recent notifications." />
-          </InfoPanel>
-
-          <InfoPanel title="Recent Activity">
-            <ActivityList items={dashboard?.recentActivity || []} emptyMessage="No recent activity recorded." />
-          </InfoPanel>
-        </div>
+        <InfoPanel title="Staff Activity" scrollable>
+          <StaffActivityList items={dashboard?.staffActivity || []} />
+        </InfoPanel>
       </section>
     </main>
   )

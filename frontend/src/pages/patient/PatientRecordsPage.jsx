@@ -27,6 +27,7 @@ const statusStyles = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-100',
   recorded: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
 }
+const REFERENCE_TIME = Date.now()
 
 function fullName(patient) {
   return [patient?.firstName, patient?.lastName].filter(Boolean).join(' ') || 'Patient'
@@ -89,26 +90,39 @@ function PatientRecordsPage() {
   const [sortBy, setSortBy] = useState('date_desc')
   const [isLoading, setIsLoading] = useState(true)
 
-  const loadRecords = useCallback(async () => {
+  const loadRecords = useCallback(() => {
+    let isActive = true
     setIsLoading(true)
 
-    try {
-      const response = await fdmstApi.getMyDentalRecords()
-      setPatient(response.patient || null)
-      setRecords(response.data || [])
-      setAppointments(response.appointments || [])
-    } catch (error) {
-      toast.error(error.message || 'Unable to load dental records.')
-      setPatient(null)
-      setRecords([])
-      setAppointments([])
-    } finally {
-      setIsLoading(false)
+    fdmstApi.getMyDentalRecords()
+      .then((response) => {
+        if (!isActive) return
+        setPatient(response.patient || null)
+        setRecords(Array.isArray(response.data) ? response.data : [])
+        setAppointments(Array.isArray(response.appointments) ? response.appointments : [])
+      })
+      .catch((error) => {
+        if (!isActive) return
+        toast.error(error.message || 'Unable to load dental records.')
+        setPatient(null)
+        setRecords([])
+        setAppointments([])
+      })
+      .finally(() => {
+        if (isActive) setIsLoading(false)
+      })
+
+    return () => {
+      isActive = false
     }
   }, [toast])
 
   useEffect(() => {
-    Promise.resolve().then(loadRecords)
+    let cleanup
+    queueMicrotask(() => {
+      cleanup = loadRecords()
+    })
+    return () => cleanup?.()
   }, [loadRecords])
 
   const dentists = useMemo(() => {
@@ -142,9 +156,9 @@ function PatientRecordsPage() {
       const matchesTreatment = treatmentFilter === 'all' || row.service === treatmentFilter
       const matchesStatus = statusFilter === 'all' || row.status === statusFilter
       const visitDate = row.appointmentDate ? new Date(row.appointmentDate) : null
-      const now = new Date()
       const daysAgo = dateFilter === '30_days' ? 30 : dateFilter === '90_days' ? 90 : dateFilter === '1_year' ? 365 : null
-      const matchesDate = !daysAgo || (visitDate && visitDate >= new Date(now.setDate(now.getDate() - daysAgo)))
+      const cutoffDate = daysAgo ? new Date(REFERENCE_TIME - daysAgo * 24 * 60 * 60 * 1000) : null
+      const matchesDate = !daysAgo || (visitDate && !Number.isNaN(visitDate.getTime()) && visitDate >= cutoffDate)
 
       return matchesQuery && matchesDentist && matchesTreatment && matchesStatus && matchesDate
     })

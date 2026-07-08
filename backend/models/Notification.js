@@ -22,7 +22,7 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["appointment", "inventory", "feedback", "system"],
+      enum: ["appointment", "inventory", "feedback", "promotion", "system"],
       default: "system",
     },
     isRead: {
@@ -30,6 +30,10 @@ const notificationSchema = new mongoose.Schema(
       default: false,
     },
     scheduledFor: Date,
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     collection: "notifications",

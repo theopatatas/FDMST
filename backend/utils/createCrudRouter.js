@@ -8,6 +8,7 @@ const createCrudRouter = (Model, options = {}) => {
   const defaultSort = options.defaultSort || { createdAt: -1 };
   const hiddenFields = options.hiddenFields || "";
   const beforeCreate = options.beforeCreate;
+  const afterCreate = options.afterCreate;
   const beforeUpdate = options.beforeUpdate;
   const beforeDelete = options.beforeDelete;
 
@@ -40,6 +41,9 @@ const createCrudRouter = (Model, options = {}) => {
     asyncHandler(async (req, res) => {
       const createBody = beforeCreate ? await beforeCreate(req.body, req) : req.body;
       const item = await Model.create(createBody);
+      if (afterCreate) {
+        await afterCreate(item, req);
+      }
       res.status(201).json(item);
     }),
   );

@@ -161,6 +161,28 @@ function SkeletonSection() {
   )
 }
 
+function normalizeKpiChange(change) {
+  if (change && typeof change === 'object') {
+    const status = change.status || 'neutral'
+    const value = typeof change.value === 'number' ? change.value : null
+
+    return {
+      value,
+      status,
+      label: `${Number(value || 0) > 0 ? '+' : ''}${Number(value || 0)}%`,
+      icon: status === 'increase' || status === 'new' ? '↑' : status === 'decrease' ? '↓' : '−',
+    }
+  }
+
+  const value = Number(change || 0)
+  return {
+    value,
+    status: value > 0 ? 'increase' : value < 0 ? 'decrease' : 'neutral',
+    label: `${value > 0 ? '+' : ''}${value}%`,
+    icon: value > 0 ? '↑' : value < 0 ? '↓' : '−',
+  }
+}
+
 function KpiCard({ item, value, change = 0 }) {
   const Icon = item.icon
   const tones = {
@@ -171,9 +193,12 @@ function KpiCard({ item, value, change = 0 }) {
     slate: 'bg-slate-100 text-slate-600 ring-slate-200',
     violet: 'bg-violet-50 text-violet-700 ring-violet-100',
   }
-  const isPositive = change > 0
-  const isNegative = change < 0
-  const changeClass = isPositive ? 'text-emerald-600' : isNegative ? 'text-red-600' : 'text-slate-400'
+  const changeState = normalizeKpiChange(change)
+  const changeClass = changeState.status === 'increase' || changeState.status === 'new'
+    ? 'text-emerald-600'
+    : changeState.status === 'decrease'
+      ? 'text-red-600'
+      : 'text-slate-400'
 
   return (
     <article className="min-h-28 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
@@ -187,7 +212,7 @@ function KpiCard({ item, value, change = 0 }) {
         </div>
       </div>
       <p className={`mt-4 text-xs font-semibold ${changeClass}`}>
-        {isPositive ? '↑' : isNegative ? '↓' : '−'} {isPositive ? '+' : ''}{change}% <span className="font-medium text-slate-400">vs last month</span>
+        {changeState.icon} {changeState.label} <span className="font-medium text-slate-400">vs previous period</span>
       </p>
     </article>
   )

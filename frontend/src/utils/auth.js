@@ -1,6 +1,7 @@
 export const getRoleHomePath = (role) => {
   if (role === 'admin') return '/admin'
-  if (role === 'staff' || role === 'dentist') return '/staff'
+  if (role === 'dentist') return '/dentist'
+  if (role === 'staff') return '/staff'
   return '/patient'
 }
 

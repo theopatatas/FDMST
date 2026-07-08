@@ -35,6 +35,7 @@ const iconMap = {
   notifications: FaBell,
   patients: FaUsers,
   profile: FaUser,
+  promotions: FaBullhorn,
   reports: FaChartLine,
   records: FaFileAlt,
   settings: FaCog,
@@ -52,6 +53,7 @@ const iconColorMap = {
   notifications: 'text-amber-600 bg-amber-50 ring-amber-100',
   patients: 'text-violet-700 bg-violet-50 ring-violet-100',
   profile: 'text-slate-700 bg-slate-50 ring-slate-100',
+  promotions: 'text-amber-600 bg-amber-50 ring-amber-100',
   reports: 'text-teal-700 bg-teal-50 ring-teal-100',
   records: 'text-blue-700 bg-blue-50 ring-blue-100',
   settings: 'text-slate-700 bg-slate-50 ring-slate-100',
@@ -72,6 +74,7 @@ const adminPageMeta = [
   { path: '/admin/notifications', title: 'Notifications', subtitle: 'Review appointment updates, clinic alerts, and system messages.' },
   { path: '/admin/patients', title: 'Patients', subtitle: 'Manage patient records and information.' },
   { path: '/admin/profile', title: 'Profile', subtitle: 'View and update your account information.' },
+  { path: '/admin/promotions', title: 'Promotions', subtitle: 'Manage clinic promotions, offers, and patient announcements.' },
   { path: '/admin/reports', title: 'Reports', subtitle: 'Generate, export, and print clinic operational reports.' },
   { path: '/admin/settings', title: 'Settings', subtitle: 'Manage clinic profile, account, notification, and security preferences.' },
   { path: '/admin/staff', title: 'Staff Management', subtitle: 'Manage staff and dentist accounts securely.' },
@@ -89,13 +92,22 @@ function getAdminPageMeta(pathname) {
 function getProfilePath(role) {
   if (role === 'admin') return '/admin/profile'
   if (role === 'patient') return '/patient/profile'
+  if (role === 'dentist') return '/dentist/profile'
   return '/staff/profile'
 }
 
 function getNotificationsPath(role) {
   if (role === 'admin') return '/admin/notifications'
   if (role === 'patient') return '/patient/notifications'
+  if (role === 'dentist') return '/dentist/notifications'
   return '/staff/notifications'
+}
+
+function getPromotionsPath(role) {
+  if (role === 'admin') return '/admin/promotions'
+  if (role === 'patient') return '/patient/promotions'
+  if (role === 'dentist') return '/dentist/promotions'
+  return '/staff/promotions'
 }
 
 function formatRelativeTime(value) {
@@ -163,6 +175,7 @@ function DashboardLayout({ portalLabel, navItems }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [clinicSettings, setClinicSettings] = useState(null)
 
   useEffect(() => {
     const syncUser = () => setUser(authStorage.getUser())
@@ -173,6 +186,30 @@ function DashboardLayout({ portalLabel, navItems }) {
     return () => {
       window.removeEventListener(AUTH_CHANGED_EVENT, syncUser)
       window.removeEventListener('storage', syncUser)
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadSettings = async () => {
+      try {
+        const settings = await fdmstApi.getPublicSettings()
+
+        if (isMounted) {
+          setClinicSettings(settings || null)
+        }
+      } catch {
+        if (isMounted) {
+          setClinicSettings(null)
+        }
+      }
+    }
+
+    loadSettings()
+
+    return () => {
+      isMounted = false
     }
   }, [])
 
@@ -242,7 +279,13 @@ function DashboardLayout({ portalLabel, navItems }) {
     }
   }, [location.pathname])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fdmstApi.logout()
+    } catch {
+      // Logging out should still succeed locally if the audit request fails.
+    }
+
     authStorage.clearSession()
     navigate('/login', { replace: true })
   }
@@ -257,14 +300,45 @@ function DashboardLayout({ portalLabel, navItems }) {
     }
   }
 
+  const handleOpenNotification = async (notification) => {
+    if (!notification) return
+
+    if (!notification.isRead) {
+      try {
+        await fdmstApi.markNotificationRead(notification.id)
+      } catch {
+        // Navigation should still work if the read-state update is temporarily unavailable.
+      }
+
+      setNotifications((current) =>
+        current.map((item) => item.id === notification.id ? { ...item, isRead: true } : item),
+      )
+      setUnreadCount((current) => Math.max(current - 1, 0))
+    }
+
+    setIsNotificationOpen(false)
+
+    if (notification.type === 'promotion' || notification.metadata?.target === 'promotion') {
+      const promotionId = notification.metadata?.promotionId
+      const query = promotionId ? `?promotion=${encodeURIComponent(promotionId)}` : ''
+      navigate(`${getPromotionsPath(user?.role)}${query}`)
+      return
+    }
+
+    navigate(getNotificationsPath(user?.role))
+  }
+
   const profilePath = getProfilePath(user?.role)
   const isAdminPortal = user?.role === 'admin' || portalLabel === 'Admin Portal'
   const isPatientPortal = user?.role === 'patient' || portalLabel === 'Patient Portal'
   const headerMeta = useMemo(() => {
     if (isAdminPortal) return getAdminPageMeta(location.pathname)
-    if (isPatientPortal) return { title: 'Patient Portal', subtitle: 'Access appointments, records, notifications, and profile details.' }
+    if (isPatientPortal) return { title: 'Patient Portal', subtitle: 'Access appointments, records, promotions, and profile details.' }
     return { title: portalLabel, subtitle: `${roleLabels[user?.role] || 'User'} workspace for daily clinic operations.` }
   }, [isAdminPortal, isPatientPortal, location.pathname, portalLabel, user?.role])
+  const clinicName = clinicSettings?.clinicName || 'Flores-Dizon Dental Clinic'
+  const [brandLead, ...brandRestParts] = clinicName.split(' ')
+  const brandRest = brandRestParts.join(' ')
 
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-slate-700 lg:grid lg:grid-cols-[17rem_1fr]">
@@ -275,12 +349,20 @@ function DashboardLayout({ portalLabel, navItems }) {
       >
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-5">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-950 text-amber-500 shadow-md">
-              <FaTooth className="h-5 w-5" aria-hidden="true" />
-            </span>
+            {clinicSettings?.clinicLogo ? (
+              <img
+                src={clinicSettings.clinicLogo}
+                alt=""
+                className="h-11 w-11 rounded-2xl object-cover shadow-md ring-1 ring-slate-200"
+              />
+            ) : (
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-950 text-amber-500 shadow-md">
+                <FaTooth className="h-5 w-5" aria-hidden="true" />
+              </span>
+            )}
             <div>
               <p className="text-sm font-semibold text-sky-950">
-                Flores-Dizon <span className="text-amber-500">Dental</span>
+                {brandLead || 'Flores-Dizon'} {brandRest ? <span className="text-amber-500">{brandRest}</span> : null}
               </p>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 {portalLabel}
@@ -424,23 +506,33 @@ function DashboardLayout({ portalLabel, navItems }) {
                         const Icon = getNotificationIcon(notification)
 
                         return (
-                          <div
+                          <button
                             key={notification.id}
-                            className={`mx-2 flex gap-3 rounded-2xl px-3 py-3 ${
+                            type="button"
+                            onClick={() => handleOpenNotification(notification)}
+                            className={`mx-2 flex w-[calc(100%-1rem)] gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-slate-50 ${
                               notification.isRead ? 'bg-white' : 'bg-sky-50'
                             }`}
                           >
-                            <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-                              notification.isRead ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              <Icon className="h-4 w-4" aria-hidden="true" />
-                            </span>
+                            {notification.metadata?.promotionImageUrl ? (
+                              <img
+                                src={notification.metadata.promotionImageUrl}
+                                alt=""
+                                className="mt-0.5 h-9 w-9 shrink-0 rounded-xl object-cover ring-1 ring-slate-100"
+                              />
+                            ) : (
+                              <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                                notification.isRead ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                <Icon className="h-4 w-4" aria-hidden="true" />
+                              </span>
+                            )}
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold text-sky-950">{notification.title}</p>
                               <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{notification.message}</p>
                               <p className="mt-1 text-xs font-medium text-slate-400">{formatRelativeTime(notification.createdAt || notification.scheduledFor)}</p>
                             </div>
-                          </div>
+                          </button>
                         )
                       }) : (
                         <div className="px-5 py-8 text-center">

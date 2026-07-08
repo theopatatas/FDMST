@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { fdmstApi } from '../api/fdmstApi.js'
 import { useToast } from '../context/ToastContext.jsx'
@@ -69,6 +69,23 @@ function SignInPage() {
 
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [clinicSettings, setClinicSettings] = useState(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    fdmstApi.getPublicSettings()
+      .then((settings) => {
+        if (isMounted) setClinicSettings(settings || null)
+      })
+      .catch(() => {
+        if (isMounted) setClinicSettings(null)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const handleChange = (e) => {
     setForm({
@@ -119,13 +136,17 @@ function SignInPage() {
           </Link>
 
           <div className="mt-16 flex items-center gap-4">
-            <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-lg">
-              <ToothIcon />
-            </span>
+            {clinicSettings?.clinicLogo ? (
+              <img src={clinicSettings.clinicLogo} alt="" className="h-16 w-16 rounded-2xl object-cover shadow-lg ring-1 ring-white/20" />
+            ) : (
+              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-lg">
+                <ToothIcon />
+              </span>
+            )}
 
             <div>
               <p className="text-2xl font-semibold">
-                Flores-Dizon Dental
+                {clinicSettings?.clinicName || 'Flores-Dizon Dental'}
               </p>
 
               <p className="mt-1 text-base text-sky-200">

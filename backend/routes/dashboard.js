@@ -159,9 +159,35 @@ const lastMonthKeys = (count = 12) => {
 };
 
 const calculateChange = (current, previous) => {
-  if (!previous && !current) return 0;
-  if (!previous) return 100;
-  return Math.round(((current - previous) / previous) * 100);
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (!previousValue && !currentValue) {
+    return {
+      value: 0,
+      status: "neutral",
+      current: currentValue,
+      previous: previousValue,
+    };
+  }
+
+  if (!previousValue) {
+    return {
+      value: currentValue * 100,
+      status: "increase",
+      current: currentValue,
+      previous: previousValue,
+    };
+  }
+
+  const value = Number((((currentValue - previousValue) / previousValue) * 100).toFixed(1));
+
+  return {
+    value,
+    status: value > 0 ? "increase" : value < 0 ? "decrease" : "neutral",
+    current: currentValue,
+    previous: previousValue,
+  };
 };
 
 const getAnalyticsFilters = (query = {}) => {
@@ -188,31 +214,51 @@ const getAnalyticsBaseFilters = (query = {}) => {
   return baseQuery;
 };
 
-const buildKpiStats = (appointments, monthlyAppointments) => {
+const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null) => {
   const todayStart = startOfDay(new Date());
   const todayEnd = endOfDay(new Date());
   const now = new Date();
-  const currentMonthKey = getMonthKey(now);
-  const previousMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const previousMonthKey = getMonthKey(previousMonthDate);
-
-  const getCounts = (items) => ({
+  const currentMonthStart = comparisonRange?.currentStart || new Date(now.getFullYear(), now.getMonth(), 1);
+  const currentMonthEnd = comparisonRange?.currentEnd || new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  const previousMonthStart = comparisonRange?.previousStart || new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonthEnd = comparisonRange?.previousEnd || new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  const previousTodayDay = Math.min(now.getDate(), previousMonthEnd.getDate());
+  const previousTodayStart = new Date(now.getFullYear(), now.getMonth() - 1, previousTodayDay);
+  previousTodayStart.setHours(0, 0, 0, 0);
+  const previousTodayEnd = endOfDay(previousTodayStart);
+  const isNoShow = (item) => item.status === "no_show" || /no[-\s]?show/i.test(item.notes || "");
+  const getCounts = (items, { todayRange, upcomingReference = now } = {}) => ({
     totalAppointments: items.length,
     todaysAppointments: items.filter((item) => {
       const date = new Date(item.appointmentDate);
-      return date >= todayStart && date <= todayEnd && item.status !== "cancelled";
+      const range = todayRange || { start: todayStart, end: todayEnd };
+      return date >= range.start && date <= range.end && item.status !== "cancelled";
     }).length,
     upcomingAppointments: items.filter((item) => (
-      new Date(item.appointmentDate) > now && ["pending", "confirmed"].includes(item.status)
+      new Date(item.appointmentDate) > upcomingReference && ["pending", "confirmed"].includes(item.status)
     )).length,
     completedAppointments: items.filter((item) => item.status === "completed").length,
     pendingAppointments: items.filter((item) => item.status === "pending").length,
     cancelledAppointments: items.filter((item) => item.status === "cancelled").length,
-    noShowAppointments: items.filter((item) => /no[-\s]?show/i.test(item.notes || "")).length,
+    noShowAppointments: items.filter(isNoShow).length,
   });
 
-  const currentCounts = getCounts(monthlyAppointments.filter((item) => getMonthKey(item.appointmentDate || item.createdAt) === currentMonthKey));
-  const previousCounts = getCounts(monthlyAppointments.filter((item) => getMonthKey(item.appointmentDate || item.createdAt) === previousMonthKey));
+  const currentPeriodAppointments = monthlyAppointments.filter((item) => {
+    const date = new Date(item.appointmentDate || item.createdAt);
+    return date >= currentMonthStart && date <= currentMonthEnd;
+  });
+  const previousPeriodAppointments = monthlyAppointments.filter((item) => {
+    const date = new Date(item.appointmentDate || item.createdAt);
+    return date >= previousMonthStart && date <= previousMonthEnd;
+  });
+  const currentCounts = getCounts(currentPeriodAppointments, {
+    todayRange: { start: todayStart, end: todayEnd },
+    upcomingReference: now,
+  });
+  const previousCounts = getCounts(previousPeriodAppointments, {
+    todayRange: { start: previousTodayStart, end: previousTodayEnd },
+    upcomingReference: previousTodayEnd,
+  });
   const totalCounts = getCounts(appointments);
 
   return {
@@ -492,6 +538,35 @@ const endOfDay = (date) => {
   return value;
 };
 
+const getKpiComparisonRange = (query = {}) => {
+  const now = new Date();
+
+  if (query.startDate || query.endDate) {
+    const currentStart = startOfDay(query.startDate || query.endDate);
+    const currentEnd = endOfDay(query.endDate || query.startDate);
+
+    if (!Number.isNaN(currentStart.getTime()) && !Number.isNaN(currentEnd.getTime()) && currentEnd >= currentStart) {
+      const periodLengthMs = currentEnd.getTime() - currentStart.getTime() + 1;
+      const previousEnd = new Date(currentStart.getTime() - 1);
+      const previousStart = new Date(previousEnd.getTime() - periodLengthMs + 1);
+
+      return {
+        currentStart,
+        currentEnd,
+        previousStart,
+        previousEnd,
+      };
+    }
+  }
+
+  return {
+    currentStart: new Date(now.getFullYear(), now.getMonth(), 1),
+    currentEnd: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+    previousStart: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+    previousEnd: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999),
+  };
+};
+
 const sanitizeAppointment = (appointment) => ({
   id: appointment._id,
   patientName: appointment.patientName,
@@ -535,8 +610,7 @@ router.get(
       todaysAppointments,
       upcomingAppointments,
       todaysSchedule,
-      notifications,
-      recentActivity,
+      staffActivity,
     ] = await Promise.all([
       Patient.countDocuments({}),
       Appointment.countDocuments({}),
@@ -558,8 +632,10 @@ router.get(
         .sort({ appointmentTime: 1, appointmentDate: 1 })
         .limit(12)
         .lean(),
-      Notification.find({}).sort({ createdAt: -1 }).limit(5).lean(),
-      AuditLog.find({}).sort({ createdAt: -1 }).limit(8).lean(),
+      AuditLog.find({ action: { $regex: /^staff_/ } })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .lean(),
     ]);
 
     res.json({
@@ -574,8 +650,7 @@ router.get(
         totalPatients,
       },
       todaysSchedule: todaysSchedule.map(sanitizeAppointment),
-      notifications,
-      recentActivity,
+      staffActivity,
     });
   }),
 );
@@ -589,7 +664,7 @@ router.get(
     const todayEnd = endOfDay(new Date());
     const appointmentQuery = getAnalyticsFilters(req.query);
     const monthlyBaseQuery = getAnalyticsBaseFilters(req.query);
-    const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+    const kpiComparisonRange = getKpiComparisonRange(req.query);
 
     const [
       totalStaff,
@@ -628,7 +703,7 @@ router.get(
         .lean(),
       Appointment.find({
         ...monthlyBaseQuery,
-        appointmentDate: { $gte: currentMonthStart },
+        appointmentDate: { $gte: kpiComparisonRange.previousStart, $lte: kpiComparisonRange.currentEnd },
       })
         .select("appointmentDate status notes createdAt")
         .lean(),
@@ -648,7 +723,7 @@ router.get(
       Appointment.distinct("status"),
     ]);
 
-    const kpiStats = buildKpiStats(appointments, monthlyAppointments);
+    const kpiStats = buildKpiStats(appointments, monthlyAppointments, kpiComparisonRange);
     const completedAppointments = kpiStats.completedAppointments;
     const estimatedRevenue = completedAppointments * 800;
     const appointmentAnalytics = buildAppointmentAnalytics(appointments);
