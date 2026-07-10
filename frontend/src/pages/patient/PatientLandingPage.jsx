@@ -44,6 +44,14 @@ const statusStyles = {
     icon: FaTimesCircle,
     pill: 'bg-red-50 text-red-700 ring-red-100',
   },
+  declined: {
+    icon: FaTimesCircle,
+    pill: 'bg-red-50 text-red-700 ring-red-100',
+  },
+  no_show: {
+    icon: FaTimesCircle,
+    pill: 'bg-red-50 text-red-700 ring-red-100',
+  },
   completed: {
     icon: FaCheckCircle,
     pill: 'bg-sky-50 text-sky-700 ring-sky-100',
@@ -68,7 +76,7 @@ function getFirstName(user) {
 
 function isUpcoming(appointment) {
   const status = appointment.status
-  if (status === 'cancelled' || status === 'completed') return false
+  if (status === 'cancelled' || status === 'declined' || status === 'completed' || status === 'no_show') return false
 
   if (!appointment.appointmentDate) return true
 

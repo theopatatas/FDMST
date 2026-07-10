@@ -22,6 +22,8 @@ const inputClass =
 
 const statusStyles = {
   cancelled: 'bg-red-50 text-red-700 ring-red-100',
+  declined: 'bg-red-50 text-red-700 ring-red-100',
+  no_show: 'bg-red-50 text-red-700 ring-red-100',
   completed: 'bg-sky-50 text-sky-700 ring-sky-100',
   confirmed: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
   pending: 'bg-amber-50 text-amber-700 ring-amber-100',

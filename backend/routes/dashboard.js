@@ -141,6 +141,60 @@ const increment = (map, key, amount = 1) => {
   map.set(key, (map.get(key) || 0) + amount);
 };
 
+const isNoShowAppointment = (appointment) => appointment.status === "no_show" || /no[-\s]?show/i.test(appointment.notes || "");
+
+const getAppointmentRevenueEstimate = (appointment) => {
+  if (appointment.status !== "completed") return 0;
+
+  const revenue = Number(appointment.estimatedRevenueAmount);
+  if (Number.isFinite(revenue) && revenue >= 0) return revenue;
+
+  const finalPrice = Number(appointment.finalPrice);
+  if (Number.isFinite(finalPrice) && finalPrice >= 0) return finalPrice;
+
+  const snapshot = Number(appointment.servicePriceSnapshot);
+  return Number.isFinite(snapshot) && snapshot >= 0 ? snapshot : 0;
+};
+
+const buildPromotionAnalytics = (appointments = []) => {
+  const redeemedAppointments = appointments.filter((appointment) => appointment.promoCode);
+  const byPromotionMap = new Map();
+  const revenueGenerated = redeemedAppointments
+    .filter((appointment) => appointment.status === "completed")
+    .reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0);
+  const discountAmountGiven = redeemedAppointments
+    .reduce((total, appointment) => total + (Number(appointment.discountAmount) || 0), 0);
+
+  redeemedAppointments.forEach((appointment) => {
+    const label = appointment.promoTitle || appointment.promoCode || "Promotion";
+    const current = byPromotionMap.get(label) || {
+      label,
+      promoCode: appointment.promoCode,
+      redemptions: 0,
+      revenue: 0,
+      discountAmount: 0,
+    };
+
+    current.redemptions += 1;
+    current.discountAmount += Number(appointment.discountAmount) || 0;
+    if (appointment.status === "completed") {
+      current.revenue += getAppointmentRevenueEstimate(appointment);
+    }
+    byPromotionMap.set(label, current);
+  });
+
+  const byPromotion = [...byPromotionMap.values()].sort((a, b) => b.redemptions - a.redemptions || a.label.localeCompare(b.label));
+
+  return {
+    totalRedemptions: redeemedAppointments.length,
+    mostRedeemedPromotion: byPromotion[0] || null,
+    revenueGenerated,
+    discountAmountGiven,
+    redemptionRate: appointments.length ? Math.round((redeemedAppointments.length / appointments.length) * 1000) / 10 : 0,
+    byPromotion,
+  };
+};
+
 const asSeries = (map, { limit, labels } = {}) => {
   const rows = labels
     ? labels.map((label) => ({ label, value: map.get(label) || 0 }))
@@ -226,13 +280,12 @@ const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null
   const previousTodayStart = new Date(now.getFullYear(), now.getMonth() - 1, previousTodayDay);
   previousTodayStart.setHours(0, 0, 0, 0);
   const previousTodayEnd = endOfDay(previousTodayStart);
-  const isNoShow = (item) => item.status === "no_show" || /no[-\s]?show/i.test(item.notes || "");
   const getCounts = (items, { todayRange, upcomingReference = now } = {}) => ({
     totalAppointments: items.length,
     todaysAppointments: items.filter((item) => {
       const date = new Date(item.appointmentDate);
       const range = todayRange || { start: todayStart, end: todayEnd };
-      return date >= range.start && date <= range.end && item.status !== "cancelled";
+      return date >= range.start && date <= range.end && !["cancelled", "declined"].includes(item.status);
     }).length,
     upcomingAppointments: items.filter((item) => (
       new Date(item.appointmentDate) > upcomingReference && ["pending", "confirmed"].includes(item.status)
@@ -240,7 +293,7 @@ const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null
     completedAppointments: items.filter((item) => item.status === "completed").length,
     pendingAppointments: items.filter((item) => item.status === "pending").length,
     cancelledAppointments: items.filter((item) => item.status === "cancelled").length,
-    noShowAppointments: items.filter(isNoShow).length,
+    noShowAppointments: items.filter(isNoShowAppointment).length,
   });
 
   const currentPeriodAppointments = monthlyAppointments.filter((item) => {
@@ -325,7 +378,7 @@ const buildAppointmentAnalytics = (appointments) => {
   const weekdayCounts = new Map(WEEKDAYS.map((day) => [day, 0]));
   const completed = appointments.filter((appointment) => appointment.status === "completed").length;
   const cancelled = appointments.filter((appointment) => appointment.status === "cancelled").length;
-  const noShow = appointments.filter((appointment) => /no[-\s]?show/i.test(appointment.notes || "")).length;
+  const noShow = appointments.filter(isNoShowAppointment).length;
 
   appointments.forEach((appointment) => {
     const date = new Date(appointment.appointmentDate || appointment.createdAt);
@@ -498,7 +551,7 @@ const buildAdminAnalytics = (patients, users, appointments, auditLogs, feedback)
   const auditCounts = new Map();
   const activeStaff = users.filter((user) => ["staff", "dentist"].includes(user.role) && user.status === "active").length;
   const cancelled = appointments.filter((item) => item.status === "cancelled").length;
-  const noShow = appointments.filter((item) => /no[-\s]?show/i.test(item.notes || "")).length;
+  const noShow = appointments.filter(isNoShowAppointment).length;
   const pendingAppointments = appointments.filter((item) => item.status === "pending");
   const approvedAppointments = appointments.filter((item) => ["confirmed", "completed"].includes(item.status));
   const estimatedApprovalHours = approvedAppointments.length && pendingAppointments.length
@@ -617,10 +670,15 @@ router.get(
       Appointment.countDocuments({ status: "completed" }),
       Appointment.countDocuments({ status: "pending" }),
       Appointment.countDocuments({ status: "cancelled" }),
-      Appointment.countDocuments({ notes: { $regex: /no[-\s]?show/i } }),
+      Appointment.countDocuments({
+        $or: [
+          { status: "no_show" },
+          { notes: { $regex: /no[-\s]?show/i } },
+        ],
+      }),
       Appointment.countDocuments({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $ne: "cancelled" },
+        status: { $nin: ["cancelled", "declined"] },
       }),
       Appointment.countDocuments({
         appointmentDate: { $gt: now },
@@ -628,7 +686,7 @@ router.get(
       }),
       Appointment.find({})
         .where("appointmentDate").gte(todayStart).lte(todayEnd)
-        .where("status").ne("cancelled")
+        .where("status").nin(["cancelled", "declined"])
         .sort({ appointmentTime: 1, appointmentDate: 1 })
         .limit(12)
         .lean(),
@@ -689,7 +747,7 @@ router.get(
       User.countDocuments({ role: "dentist", status: "active" }),
       Appointment.countDocuments({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $ne: "cancelled" },
+        status: { $nin: ["cancelled", "declined"] },
       }),
       Inventory.countDocuments({ status: { $in: ["low_stock", "out_of_stock"] } }),
       DentalRecord.countDocuments({}),
@@ -699,7 +757,7 @@ router.get(
         .lean(),
       AuditLog.find({ action: { $regex: /^staff_/ } }).sort({ createdAt: -1 }).limit(6).lean(),
       Appointment.find(appointmentQuery)
-        .select("patient patientName email service appointmentDate appointmentTime dentistName reason notes status createdAt")
+        .select("patient patientName email service servicePriceSnapshot serviceDurationSnapshot promotion promoCode promoTitle promoDiscountType promoDiscountValue originalPrice discountAmount finalPrice estimatedRevenueAmount appointmentDate appointmentTime dentistName reason notes status createdAt completedAt completedByEmail noShowAt noShowByEmail statusUpdatedAt statusUpdatedByEmail")
         .lean(),
       Appointment.find({
         ...monthlyBaseQuery,
@@ -725,13 +783,15 @@ router.get(
 
     const kpiStats = buildKpiStats(appointments, monthlyAppointments, kpiComparisonRange);
     const completedAppointments = kpiStats.completedAppointments;
-    const estimatedRevenue = completedAppointments * 800;
+    const completedRevenueAppointments = appointments.filter((appointment) => appointment.status === "completed");
+    const estimatedRevenue = completedRevenueAppointments.reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0);
     const appointmentAnalytics = buildAppointmentAnalytics(appointments);
     const serviceAnalytics = buildServiceAnalytics(appointments);
     const patientAnalytics = buildPatientAnalytics(patients, appointments);
     const treatmentAnalytics = buildTreatmentAnalytics(dentalRecords, appointments);
     const dentistPerformance = buildDentistAnalytics(appointments, dentalRecords);
     const adminAnalytics = buildAdminAnalytics(patients, users, appointments, auditLogs, feedback);
+    const promotionAnalytics = buildPromotionAnalytics(appointments);
 
     res.json({
       stats: {
@@ -766,23 +826,25 @@ router.get(
           available: false,
           note: "No payment module exists yet. Revenue is estimated from completed appointments.",
           estimatedRevenue,
-          byService: serviceAnalytics.distribution.map((item) => ({
-            label: item.label,
-            value: item.value * 800,
-          })),
+          byService: asSeries(completedRevenueAppointments.reduce((map, appointment) => {
+            increment(map, normalizeService(appointment.service), getAppointmentRevenueEstimate(appointment));
+            return map;
+          }, new Map())),
           byDentist: dentistPerformance.map((item) => ({
             label: item.dentist,
-            value: item.completed * 800,
+            value: completedRevenueAppointments
+              .filter((appointment) => normalizeDentist(appointment.dentistName) === item.dentist)
+              .reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0),
           })),
           byMonth: appointmentAnalytics.monthlyTrend.map((item) => ({
             label: item.label,
-            value: appointments.filter((appointment) => (
-              appointment.status === "completed"
-              && getMonthLabel(getMonthKey(appointment.appointmentDate || appointment.createdAt)) === item.label
-            )).length * 800,
+            value: completedRevenueAppointments
+              .filter((appointment) => getMonthLabel(getMonthKey(appointment.appointmentDate || appointment.createdAt)) === item.label)
+              .reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0),
           })),
           byPaymentMethod: [],
         },
+        promotions: promotionAnalytics,
         admin: adminAnalytics,
         reports: {
           periods: ["daily", "weekly", "monthly", "quarterly", "yearly"],
@@ -807,7 +869,7 @@ router.get(
     const [todaysAppointments, upcomingAppointments, recentPatients] = await Promise.all([
       Appointment.find({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $ne: "cancelled" },
+        status: { $nin: ["cancelled", "declined"] },
       })
         .sort({ appointmentTime: 1 })
         .limit(10),

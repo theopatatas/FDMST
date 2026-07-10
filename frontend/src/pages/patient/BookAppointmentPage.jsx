@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   FaCalendarCheck,
   FaClock,
+  FaGift,
   FaEnvelope,
   FaInfoCircle,
+  FaMoneyBillWave,
   FaNotesMedical,
   FaPhoneAlt,
   FaRegCalendarAlt,
@@ -25,28 +28,11 @@ const iconInputClass =
 const textareaClass =
   'min-h-36 w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm font-medium leading-6 text-slate-700 outline-none transition duration-200 placeholder:text-slate-400 focus:border-sky-950 focus:ring-4 focus:ring-sky-100'
 
-const services = [
-  'Dental Prophylaxis (Cleaning)',
-  'Composite Tooth Filling',
-  'Tooth Extraction (Simple)',
-  'Tooth Extraction (Surgical)',
-  'Root Canal Treatment',
-  'Dental Crown',
-  'Dental Bridge',
-  'Orthodontic Consultation',
-  'Orthodontic Braces / Adjustment',
-  'Teeth Whitening (In-Office)',
-  'Dental Implant Consultation',
-  'Periapical X-Ray',
-  'Panoramic X-Ray (OPG)',
-  'Pit & Fissure Sealant',
-  'Oral Prophylaxis + Fluoride',
-  'Gum Treatment (Scaling & Root Planing)',
-  'TMJ Consultation',
-  'Pediatric Dental Check-Up',
-  'Denture Fitting & Adjustment',
-  'Post-Treatment Follow-Up',
-]
+const currencyFormatter = new Intl.NumberFormat('en-PH', {
+  style: 'currency',
+  currency: 'PHP',
+  maximumFractionDigits: 0,
+})
 
 const defaultAppointmentSettings = {
   openingTime: '09:00',
@@ -131,6 +117,27 @@ function SectionHeader({ icon: Icon, title, description }) {
   )
 }
 
+function formatServicePrice(value) {
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount >= 0 ? currencyFormatter.format(amount) : 'Price unavailable'
+}
+
+function formatServiceDuration(value) {
+  const minutes = Number(value)
+  return Number.isFinite(minutes) && minutes > 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : 'Duration not specified'
+}
+
+function formatPromoDiscount(promotion) {
+  if (!promotion) return ''
+
+  const value = Number(promotion.discountValue)
+  if (!Number.isFinite(value) || value <= 0) return promotion.discountLabel || ''
+
+  return promotion.discountType === 'percentage'
+    ? `${value}% OFF`
+    : `${currencyFormatter.format(value)} OFF`
+}
+
 function Field({ label, icon: Icon, error, children }) {
   return (
     <div className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
@@ -151,10 +158,13 @@ function Field({ label, icon: Icon, error, children }) {
 
 function BookAppointmentPage() {
   const toast = useToast()
+  const location = useLocation()
   const [user] = useState(() => authStorage.getUser())
   const availabilityRequestRef = useRef(0)
+  const promoRequestRef = useRef(0)
   const [dentists, setDentists] = useState([])
   const [clinicSettings, setClinicSettings] = useState(null)
+  const [bookingDataError, setBookingDataError] = useState('')
   const [availableTimeSlots, setAvailableTimeSlots] = useState([])
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(false)
   const [availabilityMessage, setAvailabilityMessage] = useState('')
@@ -168,8 +178,12 @@ function BookAppointmentPage() {
     service: '',
     notes: '',
     reason: '',
+    promoCode: '',
   })
   const [fieldErrors, setFieldErrors] = useState({})
+  const [appliedPromo, setAppliedPromo] = useState(null)
+  const [promoMessage, setPromoMessage] = useState('')
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const minDate = useMemo(() => new Date().toISOString().split('T')[0], [])
@@ -189,12 +203,18 @@ function BookAppointmentPage() {
   const timeFormat = clinicSettings?.systemPreferences?.timeFormat || '12'
   const availableServices = useMemo(() => {
     const configuredServices = clinicSettings?.services
-      ?.filter((service) => service.status !== 'inactive')
-      ?.map((service) => service.serviceName)
-      ?.filter(Boolean)
+      ?.filter((service) => service.status !== 'inactive' && service.serviceName)
+      ?.map((service) => ({
+        ...service,
+        serviceName: service.serviceName.trim(),
+      }))
 
-    return configuredServices?.length ? configuredServices : services
+    return configuredServices || []
   }, [clinicSettings])
+  const selectedService = useMemo(
+    () => availableServices.find((service) => service.serviceName === form.service) || null,
+    [availableServices, form.service],
+  )
   const fallbackTimeSlots = useMemo(
     () => generateTimeSlots(appointmentSettings, timeFormat),
     [
@@ -202,6 +222,37 @@ function BookAppointmentPage() {
       timeFormat,
     ],
   )
+  const priceSummary = useMemo(() => {
+    const originalPrice = selectedService && Number.isFinite(Number(selectedService.price)) ? Number(selectedService.price) : 0
+
+    if (appliedPromo?.valid) {
+      return {
+        originalPrice: appliedPromo.originalPrice,
+        discountAmount: appliedPromo.discountAmount,
+        finalPrice: appliedPromo.finalPrice,
+      }
+    }
+
+    return {
+      originalPrice,
+      discountAmount: 0,
+      finalPrice: originalPrice,
+    }
+  }, [appliedPromo, selectedService])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const service = params.get('service')
+    const promoCode = params.get('promoCode')
+
+    if (!service && !promoCode) return
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      service: service || currentForm.service,
+      promoCode: promoCode || currentForm.promoCode,
+    }))
+  }, [location.search])
 
   useEffect(() => {
     if (!user) return
@@ -218,15 +269,23 @@ function BookAppointmentPage() {
 
   useEffect(() => {
     const loadBookingData = async () => {
-      try {
-        const [dentistsResponse, settingsResponse] = await Promise.all([
-          fdmstApi.getDentists(),
-          fdmstApi.getPublicSettings(),
-        ])
-        setDentists(dentistsResponse.data || [])
-        setClinicSettings(settingsResponse || null)
-      } catch {
+      const [dentistsResult, settingsResult] = await Promise.allSettled([
+        fdmstApi.getDentists(),
+        fdmstApi.getPublicSettings(),
+      ])
+
+      if (dentistsResult.status === 'fulfilled') {
+        setDentists(dentistsResult.value.data || [])
+      } else {
         setDentists([])
+      }
+
+      if (settingsResult.status === 'fulfilled') {
+        setClinicSettings(settingsResult.value || null)
+        setBookingDataError('')
+      } else {
+        setClinicSettings(null)
+        setBookingDataError('Unable to load current clinic services. Please try again later.')
       }
     }
 
@@ -315,6 +374,49 @@ function BookAppointmentPage() {
     timeFormat,
   ])
 
+  useEffect(() => {
+    const requestId = promoRequestRef.current + 1
+    promoRequestRef.current = requestId
+    setAppliedPromo(null)
+    setPromoMessage('')
+
+    if (!form.service || !selectedService) return
+
+    const manualCode = form.promoCode.trim()
+    const timeoutId = window.setTimeout(async () => {
+      setIsApplyingPromo(true)
+
+      try {
+        const response = await fdmstApi.validateAppointmentPromo({
+          service: form.service,
+          promoCode: manualCode,
+          autoApply: !manualCode,
+        })
+
+        if (promoRequestRef.current !== requestId) return
+
+        if (response.valid) {
+          setAppliedPromo(response)
+          setForm((currentForm) => currentForm.promoCode
+            ? currentForm
+            : { ...currentForm, promoCode: response.promotion?.promoCode || '' })
+          setPromoMessage(response.message || 'Promotion applied.')
+        } else if (manualCode) {
+          setPromoMessage(response.message || 'Promo code could not be applied.')
+        }
+      } catch (error) {
+        if (promoRequestRef.current !== requestId) return
+        if (manualCode) {
+          setPromoMessage(error.message || 'Promo code could not be applied.')
+        }
+      } finally {
+        if (promoRequestRef.current === requestId) setIsApplyingPromo(false)
+      }
+    }, manualCode ? 350 : 150)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [form.service, form.promoCode, selectedService])
+
   const handleChange = useCallback((event) => {
     const { name, value } = event.target
     const nextValue = name === 'contactNumber' ? digitsOnly(value) : value
@@ -343,6 +445,11 @@ function BookAppointmentPage() {
     const timeError = !form.appointmentTime
       ? 'Please select an available appointment time.'
       : ''
+    const serviceError = !form.service
+      ? 'Please select a dental service.'
+      : !selectedService
+        ? 'The selected service is no longer available.'
+        : ''
 
     if (mobileError) {
       setFieldErrors({ contactNumber: mobileError })
@@ -373,6 +480,12 @@ function BookAppointmentPage() {
       return
     }
 
+    if (serviceError) {
+      setFieldErrors({ service: serviceError })
+      toast.error(serviceError)
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
@@ -385,9 +498,12 @@ function BookAppointmentPage() {
         appointmentTime: '',
         dentistName: '',
         service: '',
+        promoCode: '',
         notes: '',
         reason: '',
       }))
+      setAppliedPromo(null)
+      setPromoMessage('')
     } catch (submitError) {
       setFieldErrors(submitError.errors || {})
       toast.error(submitError.message || 'Failed to book appointment.')
@@ -528,17 +644,98 @@ function BookAppointmentPage() {
                     name="service"
                     value={form.service}
                     onChange={handleChange}
+                    disabled={!availableServices.length}
                     required
                   >
                     <option value="">Select a dental service</option>
                     {availableServices.map((service) => (
-                      <option key={service} value={service}>
-                        {service}
+                      <option key={service.id || service.serviceName} value={service.serviceName}>
+                        {service.serviceName}
                       </option>
                     ))}
                   </select>
                 </Field>
+
+                <Field label="Promo Code" icon={FaGift} error={fieldErrors.promoCode}>
+                  <input
+                    className={iconInputClass}
+                    name="promoCode"
+                    value={form.promoCode}
+                    onChange={handleChange}
+                    placeholder="Enter promo code"
+                    autoComplete="off"
+                  />
+                </Field>
               </div>
+              {bookingDataError ? (
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                  {bookingDataError}
+                </div>
+              ) : !availableServices.length ? (
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                  No active dental services are available for online booking right now.
+                </div>
+              ) : null}
+              {form.service ? (
+                <div className="grid gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-4 lg:grid-cols-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sky-950 ring-1 ring-sky-100">
+                      <FaMoneyBillWave className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Estimated Price</p>
+                      <p className="mt-1 text-sm font-semibold text-sky-950">{selectedService ? formatServicePrice(selectedService.price) : 'Price unavailable'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sky-950 ring-1 ring-sky-100">
+                      <FaClock className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Estimated Duration</p>
+                      <p className="mt-1 text-sm font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-sky-100 lg:col-span-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                        {appliedPromo?.valid ? 'Promotion Applied' : 'Promotion'}
+                      </p>
+                      {isApplyingPromo ? (
+                        <span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700">Checking...</span>
+                      ) : appliedPromo?.valid ? (
+                        <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">Applied</span>
+                      ) : null}
+                    </div>
+                    {appliedPromo?.valid ? (
+                      <div className="mt-2 space-y-1 text-sm">
+                        <p className="font-semibold text-sky-950">{appliedPromo.promotion?.title}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{appliedPromo.promotion?.promoCode}</p>
+                        <p className="text-xs font-semibold text-emerald-700">{formatPromoDiscount(appliedPromo.promotion)}</p>
+                        <div className="flex items-center justify-between text-slate-500">
+                          <span>Original Price</span>
+                          <span className="line-through">{currencyFormatter.format(priceSummary.originalPrice)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-emerald-700">
+                          <span>Discount{appliedPromo.promotion?.discountType === 'percentage' ? ` (${appliedPromo.promotion.discountValue}%)` : ''}</span>
+                          <span>-{currencyFormatter.format(priceSummary.discountAmount)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-semibold text-sky-950">
+                          <span>Final Price</span>
+                          <span>{currencyFormatter.format(priceSummary.finalPrice)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-500">
+                        {promoMessage || 'Active service promos will be applied automatically when available.'}
+                      </p>
+                    )}
+                    {promoMessage && appliedPromo?.valid ? (
+                      <p className="mt-2 text-xs font-semibold text-emerald-700">{promoMessage}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="min-h-7">
                 {availabilityMessage && form.appointmentDate ? (
                   <span

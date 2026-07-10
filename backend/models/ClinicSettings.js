@@ -42,8 +42,8 @@ const clinicSettingsSchema = new mongoose.Schema(
         {
           serviceName: { type: String, trim: true, required: true },
           category: { type: String, trim: true, default: "General" },
-          duration: { type: Number, default: 30 },
-          price: { type: Number, default: 0 },
+          duration: { type: Number, default: 30, min: [1, "Service duration must be at least 1 minute."] },
+          price: { type: Number, default: 0, min: [0, "Service price cannot be negative."] },
           status: { type: String, enum: ["active", "inactive"], default: "active" },
         },
       ],

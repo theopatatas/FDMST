@@ -5,6 +5,8 @@ const statusStyles = {
   confirmed: 'bg-emerald-50 text-emerald-700',
   completed: 'bg-sky-50 text-sky-700',
   cancelled: 'bg-red-50 text-red-700',
+  declined: 'bg-red-50 text-red-700',
+  no_show: 'bg-red-50 text-red-700',
 }
 
 function AppointmentsTable({
@@ -66,17 +68,36 @@ function AppointmentsTable({
                         type="button"
                         onClick={() => onUpdateStatus?.(appointment.id, 'confirmed')}
                         disabled={updatingId === appointment.id}
-                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="w-24 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {updatingId === appointment.id ? 'Approving...' : 'Approve'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => onUpdateStatus?.(appointment.id, 'cancelled')}
+                        onClick={() => onUpdateStatus?.(appointment.id, 'declined')}
+                        disabled={updatingId === appointment.id}
+                        className="w-24 rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === appointment.id ? 'Declining...' : 'Decline'}
+                      </button>
+                    </div>
+                  ) : appointment.status === 'confirmed' ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateStatus?.(appointment.id, 'completed')}
+                        disabled={updatingId === appointment.id}
+                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === appointment.id ? 'Saving...' : 'Completed'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateStatus?.(appointment.id, 'no_show')}
                         disabled={updatingId === appointment.id}
                         className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {updatingId === appointment.id ? 'Declining...' : 'Decline'}
+                        {updatingId === appointment.id ? 'Saving...' : 'No Show'}
                       </button>
                     </div>
                   ) : (

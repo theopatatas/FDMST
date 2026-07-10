@@ -273,9 +273,11 @@ function DashboardLayout({ portalLabel, navItems }) {
     }
 
     loadNotifications()
+    const timer = setInterval(loadNotifications, 30000)
 
     return () => {
       isMounted = false
+      clearInterval(timer)
     }
   }, [location.pathname])
 

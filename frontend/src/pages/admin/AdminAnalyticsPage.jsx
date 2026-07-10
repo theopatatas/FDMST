@@ -65,7 +65,7 @@ const officialServices = [
   'Tooth Extraction',
   'Tooth Sealant',
 ]
-const statusOptions = ['pending', 'confirmed', 'completed', 'cancelled']
+const statusOptions = ['pending', 'confirmed', 'completed', 'no_show', 'cancelled', 'declined']
 const kpiMeta = [
   { key: 'totalAppointments', label: 'Total Appointments', icon: FaCalendarCheck, tone: 'blue' },
   { key: 'todaysAppointments', label: "Today's Appointments", icon: FaCalendarDay, tone: 'green' },

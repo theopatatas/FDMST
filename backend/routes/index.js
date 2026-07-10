@@ -19,6 +19,7 @@ const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
 const { preparePatientCreateBody, preparePatientUpdateBody } = require("../utils/patientRecords");
 const { verifyPassword } = require("../utils/password");
+const { expirePromotions } = require("../utils/promotionExpiry");
 
 const router = express.Router();
 
@@ -46,7 +47,58 @@ const validatePromotionImage = (value) => {
   return imageValue;
 };
 
-const normalizePromotionBody = (body = {}, req) => {
+const slugPromoCode = (value) => String(value || "")
+  .trim()
+  .toUpperCase()
+  .replace(/[^A-Z0-9]+/g, "")
+  .slice(0, 18);
+
+const generatePromoCode = (title) => {
+  const base = slugPromoCode(title).slice(0, 10) || "PROMO";
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${base}${suffix}`;
+};
+
+const parseDiscountFromLabel = (label = "", fallbackType = "fixed") => {
+  const text = String(label || "").trim();
+  const percentageMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
+
+  if (percentageMatch) {
+    const value = Number(percentageMatch[1]);
+    if (Number.isFinite(value) && value > 0) {
+      return { discountType: "percentage", discountValue: Math.min(value, 100) };
+    }
+  }
+
+  const amountMatch = text.replace(/,/g, "").match(/(?:₱|PHP)?\s*(\d+(?:\.\d+)?)/i);
+  if (amountMatch) {
+    const value = Number(amountMatch[1]);
+    if (Number.isFinite(value) && value > 0) {
+      return { discountType: fallbackType, discountValue: value };
+    }
+  }
+
+  return null;
+};
+
+const normalizeApplicableServices = (body = {}) => {
+  const rawServices = Array.isArray(body.applicableServices)
+    ? body.applicableServices
+    : body.serviceType
+      ? [body.serviceType]
+      : [];
+  const services = rawServices
+    .map((service) => String(service || "").trim())
+    .filter(Boolean);
+
+  if (!services.length || services.some((service) => service.toLowerCase() === "all services")) {
+    return ["All Services"];
+  }
+
+  return [...new Set(services)];
+};
+
+const normalizePromotionBody = async (body = {}, req) => {
   const title = body.title?.trim();
 
   if (!title) {
@@ -58,6 +110,18 @@ const normalizePromotionBody = (body = {}, req) => {
 
   const startDate = body.startDate ? new Date(body.startDate) : undefined;
   const endDate = body.endDate ? new Date(body.endDate) : undefined;
+  let discountType = body.discountType === "percentage" ? "percentage" : "fixed";
+  let discountValue = Number(body.discountValue ?? 0);
+  const parsedDiscount = parseDiscountFromLabel(body.discountLabel, discountType);
+
+  if ((!Number.isFinite(discountValue) || discountValue <= 0) && parsedDiscount) {
+    discountType = parsedDiscount.discountType;
+    discountValue = parsedDiscount.discountValue;
+  }
+  const maxRedemptions = body.maxRedemptions === "" || body.maxRedemptions === null || body.maxRedemptions === undefined
+    ? undefined
+    : Number(body.maxRedemptions);
+  const promoCode = slugPromoCode(body.promoCode) || generatePromoCode(title);
 
   if (startDate && Number.isNaN(startDate.getTime())) {
     const error = new Error("Start date is invalid.");
@@ -80,15 +144,54 @@ const normalizePromotionBody = (body = {}, req) => {
     throw error;
   }
 
+  if (!Number.isFinite(discountValue) || discountValue <= 0 || (discountType === "percentage" && discountValue > 100)) {
+    const error = new Error(discountType === "percentage"
+      ? "Percentage discount must be greater than 0 and no more than 100."
+      : "Fixed discount must be greater than 0.");
+    error.status = 400;
+    error.errors = { discountValue: error.message };
+    throw error;
+  }
+
+  if (maxRedemptions !== undefined && (!Number.isInteger(maxRedemptions) || maxRedemptions < 1)) {
+    const error = new Error("Maximum redemption must be a whole number greater than zero.");
+    error.status = 400;
+    error.errors = { maxRedemptions: "Maximum redemption must be a whole number greater than zero." };
+    throw error;
+  }
+
+  const existingPromotion = await Promotion.findOne({
+    promoCode,
+    ...(req.params?.id ? { _id: { $ne: req.params.id } } : {}),
+  }).select("_id");
+
+  if (existingPromotion) {
+    const error = new Error("Promo code is already in use.");
+    error.status = 409;
+    error.errors = { promoCode: "Promo code is already in use." };
+    throw error;
+  }
+
+  const now = new Date();
+  const requestedStatus = body.status || "active";
+  const status = requestedStatus === "expired" && (!endDate || endDate > now)
+    ? "active"
+    : requestedStatus;
+  const applicableServices = normalizeApplicableServices(body);
+
   return {
     title,
     description: body.description?.trim() || "",
     imageUrl: validatePromotionImage(body.imageUrl),
-    serviceType: body.serviceType?.trim() || "",
-    promoCode: body.promoCode?.trim() || undefined,
-    discountLabel: body.discountLabel?.trim() || "",
+    serviceType: applicableServices.includes("All Services") ? "All Services" : applicableServices[0],
+    applicableServices,
+    promoCode,
+    discountType,
+    discountValue,
+    discountLabel: body.discountLabel?.trim() || (discountType === "percentage" ? `${discountValue}% off` : `₱${discountValue} off`),
+    maxRedemptions,
     audience: body.audience || "all",
-    status: body.status || "active",
+    status,
     startDate,
     endDate,
     createdBy: body.createdBy || req.user.id,
@@ -113,7 +216,10 @@ const notifyUsersOfPromotion = async (promotion) => {
 
   if (!users.length) return;
 
-  const detail = promotion.description || promotion.discountLabel || "A new clinic promotion is now available.";
+  const services = promotion.applicableServices?.length ? promotion.applicableServices.join(", ") : promotion.serviceType || "All Services";
+  const discount = promotion.discountLabel || (promotion.discountType === "percentage" ? `${promotion.discountValue}% off` : `₱${promotion.discountValue} off`);
+  const expiry = promotion.endDate ? ` Valid until ${promotion.endDate.toLocaleDateString()}.` : "";
+  const detail = `${promotion.description || "A new clinic promotion is now available."} Code: ${promotion.promoCode}. ${discount} for ${services}.${expiry}`;
 
   await Notification.insertMany(
     users.map((user) => ({
@@ -125,6 +231,9 @@ const notifyUsersOfPromotion = async (promotion) => {
         target: "promotion",
         promotionId: promotion._id,
         promotionTitle: promotion.title,
+        promotionCode: promotion.promoCode,
+        promotionDiscount: discount,
+        promotionServices: services,
         promotionImageUrl: promotion.imageUrl || "",
         promotionStatus: promotion.status,
         promotionEndDate: promotion.endDate || null,
@@ -174,6 +283,50 @@ const toStockStatus = ({ quantity = 0, reorderLevel = 0 }) => {
   }
 
   return "available";
+};
+
+const normalizeClinicSettingsBody = (body = {}) => {
+  const normalized = { ...body };
+
+  if (Array.isArray(body.services)) {
+    normalized.services = body.services.map((service, index) => {
+      const serviceName = String(service.serviceName || "").trim();
+      const price = Number(service.price ?? 0);
+      const duration = Number(service.duration ?? 0);
+
+      if (!serviceName) {
+        const error = new Error("Service name is required.");
+        error.status = 400;
+        error.errors = { [`services.${index}.serviceName`]: "Service name is required." };
+        throw error;
+      }
+
+      if (!Number.isFinite(price) || price < 0) {
+        const error = new Error("Service price must be a valid non-negative amount.");
+        error.status = 400;
+        error.errors = { [`services.${index}.price`]: "Service price must be a valid non-negative amount." };
+        throw error;
+      }
+
+      if (!Number.isFinite(duration) || duration < 1) {
+        const error = new Error("Service duration must be a valid number of minutes.");
+        error.status = 400;
+        error.errors = { [`services.${index}.duration`]: "Service duration must be a valid number of minutes." };
+        throw error;
+      }
+
+      return {
+        ...service,
+        serviceName,
+        category: String(service.category || "General").trim() || "General",
+        price,
+        duration,
+        status: service.status === "inactive" ? "inactive" : "active",
+      };
+    });
+  }
+
+  return normalized;
 };
 
 const sanitizePublicSettings = (settings) => ({
@@ -319,6 +472,7 @@ router.use(
 router.use("/feedback", authorize("admin", "staff", "dentist"), createCrudRouter(Feedback));
 router.get("/promotions", authorize("admin", "staff", "dentist", "patient"), async (req, res, next) => {
   try {
+    await expirePromotions();
     const now = new Date();
     const query = req.user.role === "admin"
       ? {}
@@ -368,6 +522,13 @@ router.use(
     }),
   }),
 );
-router.use("/clinic-settings", authorize("admin"), createCrudRouter(ClinicSettings));
+router.use(
+  "/clinic-settings",
+  authorize("admin"),
+  createCrudRouter(ClinicSettings, {
+    beforeCreate: normalizeClinicSettingsBody,
+    beforeUpdate: normalizeClinicSettingsBody,
+  }),
+);
 
 module.exports = router;

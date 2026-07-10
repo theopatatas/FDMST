@@ -3,6 +3,7 @@ import { FaFileCsv, FaFileExcel, FaPrint } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import { inputClass } from '../../components/AdminUi.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
+import { formatStatus } from '../../utils/auth.js'
 
 function inRange(dateValue, start, end) {
   const date = new Date(dateValue)
@@ -24,6 +25,21 @@ function downloadCsv(filename, rows) {
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function formatPeso(value) {
+  const amount = Number(value || 0)
+  return `PHP ${amount.toLocaleString()}`
+}
+
+function appointmentRevenue(item) {
+  if (item.status !== 'completed') return 0
+  const revenue = Number(item.estimatedRevenueAmount)
+  if (Number.isFinite(revenue) && revenue >= 0) return revenue
+  const finalPrice = Number(item.finalPrice)
+  if (Number.isFinite(finalPrice) && finalPrice >= 0) return finalPrice
+  const snapshot = Number(item.servicePriceSnapshot)
+  return Number.isFinite(snapshot) && snapshot >= 0 ? snapshot : 0
 }
 
 function getPresetRange(period) {
@@ -57,7 +73,7 @@ function AdminReportsPage() {
   const loadReports = useCallback(async () => {
     try {
       const [appointmentResponse, patientResponse, recordResponse, inventoryResponse, staffResponse] = await Promise.all([
-        fdmstApi.getAppointments(),
+        fdmstApi.getAppointments({ period: 'all', limit: 100 }),
         fdmstApi.list('patients'),
         fdmstApi.list('dentalrecords'),
         fdmstApi.list('inventory'),
@@ -81,13 +97,15 @@ function AdminReportsPage() {
   const filteredPatients = useMemo(() => patients.filter((item) => inRange(item.createdAt, startDate, endDate)), [patients, startDate, endDate])
   const filteredRecords = useMemo(() => records.filter((item) => inRange(item.visitDate || item.createdAt, startDate, endDate)), [records, startDate, endDate])
   const completed = filteredAppointments.filter((item) => item.status === 'completed').length
-  const estimatedRevenue = completed * 800
+  const noShow = filteredAppointments.filter((item) => item.status === 'no_show').length
+  const estimatedRevenue = filteredAppointments.reduce((total, item) => total + appointmentRevenue(item), 0)
   const lowStock = inventory.filter((item) => ['low_stock', 'out_of_stock'].includes(item.status)).length
 
   const summary = [
     ['Appointments', filteredAppointments.length],
     ['Completed Appointments', completed],
-    ['Revenue Estimate', `PHP ${estimatedRevenue}`],
+    ['No-Show Appointments', noShow],
+    ['Revenue Estimate', formatPeso(estimatedRevenue)],
     ['New Patients', filteredPatients.length],
     ['Treatments', filteredRecords.length],
     ['Inventory Alerts', lowStock],
@@ -98,13 +116,22 @@ function AdminReportsPage() {
     ['Metric', 'Value'],
     ...summary,
     [],
-    ['Appointment Date', 'Patient', 'Service', 'Dentist', 'Status'],
+    ['Appointment ID', 'Appointment Date', 'Appointment Time', 'Patient', 'Service', 'Dentist', 'Final Status', 'Service Price', 'Promo Code', 'Discount', 'Final Price', 'Estimated Revenue', 'Updated By', 'Completion/No-Show Timestamp'],
     ...filteredAppointments.map((item) => [
+      item.id || item._id || '',
       item.appointmentDate ? new Date(item.appointmentDate).toLocaleDateString() : '',
+      item.appointmentTime || '',
       item.patientName || '',
       item.service || '',
       item.dentistName || '',
       item.status || '',
+      formatPeso(item.servicePriceSnapshot || 0),
+      item.promoCode || '',
+      formatPeso(item.discountAmount || 0),
+      formatPeso(item.finalPrice ?? item.servicePriceSnapshot ?? 0),
+      formatPeso(appointmentRevenue(item)),
+      item.completedByEmail || item.noShowByEmail || item.statusUpdatedByEmail || '',
+      item.completedAt || item.noShowAt ? new Date(item.completedAt || item.noShowAt).toLocaleString() : '',
     ]),
   ], [filteredAppointments, summary])
 
@@ -150,7 +177,7 @@ function AdminReportsPage() {
               <p className="mt-1 text-sm text-slate-500">Filtered appointment records for export and print review.</p>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-[760px] w-full text-left text-sm">
+              <table className="min-w-[1080px] w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Date</th>
@@ -158,6 +185,13 @@ function AdminReportsPage() {
                     <th className="px-4 py-3 font-semibold">Service</th>
                     <th className="px-4 py-3 font-semibold">Dentist</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Service Price</th>
+                    <th className="px-4 py-3 font-semibold">Promo Code</th>
+                    <th className="px-4 py-3 font-semibold">Discount</th>
+                    <th className="px-4 py-3 font-semibold">Final Price</th>
+                    <th className="px-4 py-3 font-semibold">Estimated Revenue</th>
+                    <th className="px-4 py-3 font-semibold">Updated By</th>
+                    <th className="px-4 py-3 font-semibold">Outcome Time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -167,10 +201,17 @@ function AdminReportsPage() {
                       <td className="px-4 py-3 font-medium text-sky-950">{item.patientName || 'Unknown patient'}</td>
                       <td className="px-4 py-3">{item.service || 'Not specified'}</td>
                       <td className="px-4 py-3">{item.dentistName || 'Unassigned'}</td>
-                      <td className="px-4 py-3 capitalize">{item.status || 'Unknown'}</td>
+                      <td className="px-4 py-3">{formatStatus(item.status) || 'Unknown'}</td>
+                      <td className="px-4 py-3">{formatPeso(item.servicePriceSnapshot || 0)}</td>
+                      <td className="px-4 py-3">{item.promoCode || '—'}</td>
+                      <td className="px-4 py-3">{formatPeso(item.discountAmount || 0)}</td>
+                      <td className="px-4 py-3">{formatPeso(item.finalPrice ?? item.servicePriceSnapshot ?? 0)}</td>
+                      <td className="px-4 py-3">{formatPeso(appointmentRevenue(item))}</td>
+                      <td className="px-4 py-3">{item.completedByEmail || item.noShowByEmail || item.statusUpdatedByEmail || '—'}</td>
+                      <td className="px-4 py-3">{item.completedAt || item.noShowAt ? new Date(item.completedAt || item.noShowAt).toLocaleString() : '—'}</td>
                     </tr>
                   )) : (
-                    <tr><td className="px-4 py-8 text-center text-slate-500" colSpan="5">No appointment records found for this report.</td></tr>
+                    <tr><td className="px-4 py-8 text-center text-slate-500" colSpan="12">No appointment records found for this report.</td></tr>
                   )}
                 </tbody>
               </table>

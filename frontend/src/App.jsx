@@ -140,6 +140,7 @@ function App() {
             <AppointmentsPage
               title="Appointments"
               description="Review scheduled visits and pending booking requests."
+              allowApproval
             />
           }
         />
@@ -180,6 +181,7 @@ function App() {
             <AppointmentsPage
               title="Appointments"
               description="Review scheduled visits and patient appointment requests."
+              allowApproval
             />
           }
         />

@@ -20,10 +20,14 @@ const initialForm = {
   description: '',
   imageUrl: '',
   discountLabel: '',
+  discountType: 'fixed',
+  discountValue: '',
   serviceType: 'All Services',
+  applicableServices: ['All Services'],
   promoCode: '',
   startDate: '',
   endDate: '',
+  maxRedemptions: '',
   status: 'active',
   audience: 'all',
 }
@@ -88,6 +92,8 @@ function AdminPromotionsPage() {
 
   useEffect(() => {
     Promise.resolve().then(loadPromotions)
+    const timer = setInterval(loadPromotions, 30000)
+    return () => clearInterval(timer)
   }, [loadPromotions])
 
   const filteredPromotions = useMemo(() => {
@@ -114,8 +120,27 @@ function AdminPromotionsPage() {
 
   const handleChange = (event) => {
     const { name, value } = event.target
-    setForm((current) => ({ ...current, [name]: value }))
+    setForm((current) => {
+      const next = { ...current, [name]: value }
+      if (name === 'endDate' && current.status === 'expired') {
+        const selectedEndDate = value ? new Date(`${value}T23:59:59`) : null
+        if (!selectedEndDate || selectedEndDate > new Date()) {
+          next.status = 'active'
+        }
+      }
+      return next
+    })
     setFieldErrors((current) => ({ ...current, [name]: '' }))
+  }
+
+  const handleServiceChange = (event) => {
+    const selectedValues = Array.from(event.target.selectedOptions || []).map((option) => option.value)
+    const selected = selectedValues.includes('All Services') || !selectedValues.length ? ['All Services'] : selectedValues
+    setForm((current) => ({
+      ...current,
+      serviceType: selected[0],
+      applicableServices: selected,
+    }))
   }
 
   const handleImageFileChange = (event) => {
@@ -153,6 +178,13 @@ function AdminPromotionsPage() {
   const validate = () => {
     const errors = {}
     if (!form.title.trim()) errors.title = 'Promotion title is required.'
+    if (!form.promoCode.trim()) errors.promoCode = 'Promo code is required.'
+    const discountValue = Number(form.discountValue)
+    if (!Number.isFinite(discountValue) || discountValue <= 0 || (form.discountType === 'percentage' && discountValue > 100)) {
+      errors.discountValue = form.discountType === 'percentage'
+        ? 'Percentage discount must be greater than 0 and no more than 100.'
+        : 'Fixed discount must be greater than 0.'
+    }
     if (form.endDate && form.startDate && form.endDate < form.startDate) {
       errors.endDate = 'End date must be after the start date.'
     }
@@ -171,8 +203,12 @@ function AdminPromotionsPage() {
       description: form.description.trim(),
       imageUrl: form.imageUrl.trim(),
       discountLabel: form.discountLabel.trim(),
+      discountType: form.discountType,
+      discountValue: Number(form.discountValue || 0),
       serviceType: form.serviceType.trim(),
+      applicableServices: form.applicableServices?.length ? form.applicableServices : [form.serviceType],
       promoCode: form.promoCode.trim(),
+      maxRedemptions: form.maxRedemptions ? Number(form.maxRedemptions) : undefined,
     }
 
     try {
@@ -199,6 +235,9 @@ function AdminPromotionsPage() {
       ...promotion,
       startDate: promotion.startDate ? promotion.startDate.slice(0, 10) : '',
       endDate: promotion.endDate ? promotion.endDate.slice(0, 10) : '',
+      discountValue: promotion.discountValue ?? '',
+      maxRedemptions: promotion.maxRedemptions ?? '',
+      applicableServices: promotion.applicableServices?.length ? promotion.applicableServices : [promotion.serviceType || 'All Services'],
     })
     setFieldErrors({})
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -278,21 +317,51 @@ function AdminPromotionsPage() {
               Discount / Details
               <input className={promotionInputClass} name="discountLabel" value={form.discountLabel} onChange={handleChange} placeholder="20% off, Free consultation, etc." />
             </label>
-            <div className="grid gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-semibold text-sky-950">
-                Service
-                <select className={promotionInputClass} name="serviceType" value={form.serviceType || 'All Services'} onChange={handleChange}>
-                  {promoServices.map((service) => (
-                    <option key={service} value={service}>{service}</option>
-                  ))}
-                  {form.serviceType && !promoServices.includes(form.serviceType) ? (
-                    <option value={form.serviceType}>{form.serviceType}</option>
-                  ) : null}
+                Discount Type
+                <select className={promotionInputClass} name="discountType" value={form.discountType} onChange={handleChange}>
+                  <option value="fixed">Fixed Amount</option>
+                  <option value="percentage">Percentage</option>
                 </select>
               </label>
               <label className="grid gap-2 text-sm font-semibold text-sky-950">
+                Discount Value
+                <input
+                  className={promotionInputClass}
+                  name="discountValue"
+                  type="number"
+                  min="0"
+                  max={form.discountType === 'percentage' ? 100 : undefined}
+                  step="0.01"
+                  value={form.discountValue}
+                  onChange={handleChange}
+                  placeholder={form.discountType === 'percentage' ? '20' : '500'}
+                  required
+                />
+                {fieldErrors.discountValue ? <span className="text-xs text-red-600">{fieldErrors.discountValue}</span> : null}
+              </label>
+            </div>
+            <div className="grid gap-4">
+              <label className="grid gap-2 text-sm font-semibold text-sky-950">
+                Applicable Service(s)
+                <select
+                  className={`${promotionInputClass} h-32 py-3`}
+                  name="applicableServices"
+                  value={form.applicableServices || ['All Services']}
+                  onChange={handleServiceChange}
+                  multiple
+                >
+                  {promoServices.map((service) => (
+                    <option key={service} value={service}>{service}</option>
+                  ))}
+                </select>
+                <span className="text-xs font-medium text-slate-400">Hold Cmd/Ctrl to select multiple services. Choose All Services to apply clinic-wide.</span>
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-sky-950">
                 Promo Code
-                <input className={promotionInputClass} name="promoCode" value={form.promoCode} onChange={handleChange} placeholder="FD2026" />
+                <input className={promotionInputClass} name="promoCode" value={form.promoCode} onChange={handleChange} placeholder="FD2026" required />
+                {fieldErrors.promoCode ? <span className="text-xs text-red-600">{fieldErrors.promoCode}</span> : null}
               </label>
             </div>
             <div className="grid gap-4">
@@ -306,6 +375,11 @@ function AdminPromotionsPage() {
                 {fieldErrors.endDate ? <span className="text-xs text-red-600">{fieldErrors.endDate}</span> : null}
               </label>
             </div>
+            <label className="grid gap-2 text-sm font-semibold text-sky-950">
+              Maximum Redemption
+              <input className={promotionInputClass} name="maxRedemptions" type="number" min="1" value={form.maxRedemptions} onChange={handleChange} placeholder="Optional" />
+              {fieldErrors.maxRedemptions ? <span className="text-xs text-red-600">{fieldErrors.maxRedemptions}</span> : null}
+            </label>
             <label className="grid gap-2 text-sm font-semibold text-sky-950">
               Status
               <select className={promotionInputClass} name="status" value={form.status} onChange={handleChange}>
@@ -346,11 +420,12 @@ function AdminPromotionsPage() {
             <p className="p-6 text-sm text-slate-500">Loading promotions...</p>
           ) : filteredPromotions.length ? (
             <div className="overflow-x-auto">
-              <table className="min-w-[820px] w-full text-left text-sm">
+              <table className="min-w-[920px] w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-5 py-4">Promotion</th>
                     <th className="px-5 py-4">Details</th>
+                    <th className="px-5 py-4">Promo Code</th>
                     <th className="px-5 py-4">Dates</th>
                     <th className="px-5 py-4">Status</th>
                     <th className="px-5 py-4 text-right">Actions</th>
@@ -372,7 +447,23 @@ function AdminPromotionsPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-5 text-slate-600">{promotion.discountLabel || promotion.serviceType || promotion.promoCode || 'General offer'}</td>
+                      <td className="px-5 py-5 text-slate-600">
+                        <div className="font-semibold text-slate-700">
+                          {promotion.discountLabel || (promotion.discountType === 'percentage' ? `${promotion.discountValue || 0}% off` : `₱${promotion.discountValue || 0} off`) || 'General offer'}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {(promotion.applicableServices?.length ? promotion.applicableServices : [promotion.serviceType || 'All Services']).join(', ')}
+                        </div>
+                      </td>
+                      <td className="px-5 py-5">
+                        {promotion.promoCode ? (
+                          <span className="inline-flex rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-950 ring-1 ring-sky-100">
+                            {promotion.promoCode}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">No code</span>
+                        )}
+                      </td>
                       <td className="px-5 py-5 text-slate-600">{promotion.startDate ? formatDate(promotion.startDate) : 'Anytime'} - {promotion.endDate ? formatDate(promotion.endDate) : 'No end date'}</td>
                       <td className="px-5 py-5">{statusBadge(promotion.status)}</td>
                       <td className="px-5 py-5">

@@ -6,6 +6,7 @@ const AuditLog = require("../models/AuditLog");
 const ClinicSettings = require("../models/ClinicSettings");
 const Notification = require("../models/Notification");
 const Patient = require("../models/Patient");
+const Promotion = require("../models/Promotion");
 const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const { authenticate, authorize } = require("../middleware/auth");
@@ -48,6 +49,12 @@ const endOfDay = (date) => {
   return value;
 };
 
+const addDays = (date, days) => {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+};
+
 const toMinutes = (value) => {
   const normalized = String(value || "").trim();
   const meridiemMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -78,6 +85,178 @@ const formatTime = (minutes, timeFormat = "12") => {
   const period = hours >= 12 ? "PM" : "AM";
   const displayHours = hours % 12 || 12;
   return `${String(displayHours).padStart(2, "0")}:${String(mins).padStart(2, "0")} ${period}`;
+};
+
+const getScheduledDateTime = (appointment) => {
+  const date = new Date(appointment.appointmentDate);
+  if (Number.isNaN(date.getTime())) return new Date(0);
+
+  const minutes = toMinutes(appointment.appointmentTime);
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date;
+};
+
+const compareAppointmentsBySchedule = (left, right) => {
+  const leftTime = getScheduledDateTime(left).getTime();
+  const rightTime = getScheduledDateTime(right).getTime();
+  return leftTime - rightTime;
+};
+
+const fullName = (user) => [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+
+const normalizeServiceName = (value) => String(value || "").trim().toLowerCase();
+
+const promotionAppliesToService = (promotion, serviceName) => {
+  const selected = normalizeServiceName(serviceName);
+  const services = Array.isArray(promotion.applicableServices) && promotion.applicableServices.length
+    ? promotion.applicableServices
+    : promotion.serviceType
+      ? [promotion.serviceType]
+      : ["All Services"];
+
+  return services.some((service) => {
+    const normalized = normalizeServiceName(service);
+    return normalized === "all services" || normalized === selected;
+  });
+};
+
+const isPromotionAvailableByDate = (promotion, now = new Date()) => {
+  if (!promotion || promotion.status !== "active") return false;
+  if (promotion.startDate && startOfDay(promotion.startDate) > now) return false;
+  if (promotion.endDate && endOfDay(promotion.endDate) < now) return false;
+  return true;
+};
+
+const calculatePromotionPrice = (promotion, originalPrice) => {
+  const price = Math.max(Number(originalPrice) || 0, 0);
+  const discountType = promotion.effectiveDiscountType || promotion.discountType;
+  const discountValue = Math.max(Number(promotion.effectiveDiscountValue ?? promotion.discountValue) || 0, 0);
+  const discountAmount = discountType === "percentage"
+    ? price * Math.min(discountValue, 100) / 100
+    : Math.min(discountValue, price);
+  const normalizedDiscount = Math.min(Math.max(Math.round(discountAmount * 100) / 100, 0), price);
+
+  return {
+    originalPrice: price,
+    discountAmount: normalizedDiscount,
+    finalPrice: Math.max(Math.round((price - normalizedDiscount) * 100) / 100, 0),
+  };
+};
+
+const resolvePromotionDiscount = (promotion) => {
+  const currentType = promotion.discountType === "percentage" ? "percentage" : "fixed";
+  const currentValue = Number(promotion.discountValue);
+
+  if (Number.isFinite(currentValue) && currentValue > 0) {
+    return {
+      discountType: currentType,
+      discountValue: currentType === "percentage" ? Math.min(currentValue, 100) : currentValue,
+    };
+  }
+
+  const label = String(promotion.discountLabel || "").trim();
+  const percentageMatch = label.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (percentageMatch) {
+    const value = Number(percentageMatch[1]);
+    if (Number.isFinite(value) && value > 0) {
+      return { discountType: "percentage", discountValue: Math.min(value, 100) };
+    }
+  }
+
+  const amountMatch = label.replace(/,/g, "").match(/(?:₱|PHP)?\s*(\d+(?:\.\d+)?)/i);
+  if (amountMatch) {
+    const value = Number(amountMatch[1]);
+    if (Number.isFinite(value) && value > 0) {
+      return { discountType: "fixed", discountValue: value };
+    }
+  }
+
+  return { discountType: currentType, discountValue: 0 };
+};
+
+const validatePromotionForBooking = async ({ patientId, serviceName, servicePrice, promoCode, autoApply = false }) => {
+  if (!patientId) {
+    return {
+      valid: false,
+      message: "Patient profile is required before applying a promo code.",
+    };
+  }
+
+  const now = new Date();
+  const baseQuery = {
+    status: "active",
+    $or: [
+      { startDate: { $exists: false } },
+      { startDate: null },
+      { startDate: { $lte: now } },
+    ],
+  };
+
+  const query = promoCode
+    ? { ...baseQuery, promoCode: String(promoCode).trim().toUpperCase() }
+    : baseQuery;
+
+  const candidates = await Promotion.find(query).sort({ discountValue: -1, endDate: 1, createdAt: -1 });
+  const promotion = candidates.find((item) => isPromotionAvailableByDate(item, now) && promotionAppliesToService(item, serviceName));
+
+  if (!promotion) {
+    return {
+      valid: false,
+      message: promoCode
+        ? "Promo code is invalid, expired, inactive, or not applicable to this service."
+        : "No active promotion is available for this service.",
+    };
+  }
+
+  const resolvedDiscount = resolvePromotionDiscount(promotion);
+
+  if (!resolvedDiscount.discountValue) {
+    return {
+      valid: false,
+      message: "This promotion does not have a valid discount amount configured.",
+      promotion,
+    };
+  }
+
+  const existingRedemption = await Appointment.findOne({
+    patient: patientId,
+    promotion: promotion._id,
+  }).select("_id");
+
+  if (existingRedemption) {
+    return {
+      valid: false,
+      message: "This promo code has already been redeemed on your account.",
+      promotion,
+    };
+  }
+
+  if (promotion.maxRedemptions) {
+    const redemptionCount = await Appointment.countDocuments({ promotion: promotion._id });
+    if (redemptionCount >= promotion.maxRedemptions) {
+      return {
+        valid: false,
+        message: "This promo code has reached its redemption limit.",
+        promotion,
+      };
+    }
+  }
+
+  const promotionWithResolvedDiscount = {
+    ...(promotion.toObject?.() || promotion),
+    effectiveDiscountType: resolvedDiscount.discountType,
+    effectiveDiscountValue: resolvedDiscount.discountValue,
+  };
+  const price = calculatePromotionPrice(promotionWithResolvedDiscount, servicePrice);
+  return {
+    valid: true,
+    autoApplied: autoApply,
+    promotion,
+    discountType: resolvedDiscount.discountType,
+    discountValue: resolvedDiscount.discountValue,
+    ...price,
+    message: autoApply ? "Promotion applied automatically." : "Promo code applied.",
+  };
 };
 
 const getCurrentSettings = async () => {
@@ -143,8 +322,9 @@ const notifyAdminsOfNewAppointment = async (appointment, settings) => {
 
 const notifyPatientOfStatus = async (appointment, settings) => {
   const shouldNotify =
+    ["completed", "no_show"].includes(appointment.status) ||
     (appointment.status === "confirmed" && settings?.notifications?.appointmentConfirmationEmail !== false) ||
-    (appointment.status === "cancelled" && settings?.notifications?.appointmentCancellationNotification !== false);
+    (["cancelled", "declined"].includes(appointment.status) && settings?.notifications?.appointmentCancellationNotification !== false);
 
   if (!shouldNotify) return;
 
@@ -157,12 +337,29 @@ const notifyPatientOfStatus = async (appointment, settings) => {
   await Notification.create({
     user: patient.userId,
     patient: patient._id,
-    title: appointment.status === "confirmed" ? "Appointment confirmed" : "Appointment cancelled",
+    title: appointment.status === "confirmed"
+      ? "Appointment confirmed"
+      : appointment.status === "declined"
+        ? "Appointment declined"
+        : appointment.status === "completed"
+          ? "Appointment completed"
+          : appointment.status === "no_show"
+            ? "Appointment marked as no-show"
+            : "Appointment cancelled",
     message:
       appointment.status === "confirmed"
         ? `Your ${appointment.service} appointment is confirmed for ${appointment.appointmentTime}.`
-        : `Your ${appointment.service} appointment has been cancelled.${appointment.declineReason ? ` Reason: ${appointment.declineReason}` : " Please contact the clinic for assistance."}`,
+        : appointment.status === "completed"
+          ? `Your ${appointment.service} appointment has been marked as completed. Thank you for visiting the clinic.`
+          : appointment.status === "no_show"
+            ? `Your ${appointment.service} appointment has been marked as no-show. Please contact the clinic if you need to reschedule.`
+            : `Your ${appointment.service} appointment has been ${appointment.status === "declined" ? "declined" : "cancelled"}.${appointment.declineReason ? ` Reason: ${appointment.declineReason}` : " Please contact the clinic for assistance."}`,
     type: "appointment",
+    metadata: {
+      appointmentId: appointment._id,
+      event: appointment.status === "no_show" ? "appointment_no_show" : appointment.status === "declined" ? "appointment_declined" : `appointment_${appointment.status}`,
+      declineReason: appointment.declineReason,
+    },
   });
 };
 
@@ -173,12 +370,36 @@ const sanitizeAppointment = (appointment) => ({
   contactNumber: appointment.contactNumber,
   email: appointment.email,
   service: appointment.service,
+  serviceRef: appointment.serviceRef,
+  servicePriceSnapshot: appointment.servicePriceSnapshot,
+  serviceDurationSnapshot: appointment.serviceDurationSnapshot,
+  promotion: appointment.promotion,
+  promoCode: appointment.promoCode,
+  promoTitle: appointment.promoTitle,
+  promoDiscountType: appointment.promoDiscountType,
+  promoDiscountValue: appointment.promoDiscountValue,
+  originalPrice: appointment.originalPrice,
+  discountAmount: appointment.discountAmount,
+  finalPrice: appointment.finalPrice,
   appointmentDate: appointment.appointmentDate,
   appointmentTime: appointment.appointmentTime,
   dentistName: appointment.dentistName,
   reason: appointment.reason,
   notes: appointment.notes,
   declineReason: appointment.declineReason,
+  requestSubmittedAt: appointment.requestSubmittedAt || appointment.createdAt,
+  autoDeclineWarningSentAt: appointment.autoDeclineWarningSentAt,
+  autoDeclinedAt: appointment.autoDeclinedAt,
+  completedAt: appointment.completedAt,
+  completedBy: appointment.completedBy,
+  completedByEmail: appointment.completedByEmail,
+  noShowAt: appointment.noShowAt,
+  noShowBy: appointment.noShowBy,
+  noShowByEmail: appointment.noShowByEmail,
+  statusUpdatedAt: appointment.statusUpdatedAt,
+  statusUpdatedBy: appointment.statusUpdatedBy,
+  statusUpdatedByEmail: appointment.statusUpdatedByEmail,
+  estimatedRevenueAmount: appointment.estimatedRevenueAmount,
   status: appointment.status,
   createdAt: appointment.createdAt,
 });
@@ -277,6 +498,78 @@ router.get(
 );
 
 router.post(
+  "/promo/validate",
+  authenticate,
+  authorize("patient"),
+  asyncHandler(async (req, res) => {
+    const { service, promoCode, autoApply } = req.body || {};
+    const selectedServiceName = String(service || "").trim();
+
+    if (!selectedServiceName) {
+      return res.status(400).json({
+        message: "Please select a dental service before applying a promo code.",
+        errors: { service: "Please select a dental service before applying a promo code." },
+      });
+    }
+
+    const [settings, patientRecord] = await Promise.all([
+      getCurrentSettings(),
+      Patient.findOne({ userId: req.user.id }),
+    ]);
+    const activeServices = (settings.services || []).filter((item) => item.status !== "inactive");
+    const selectedService = activeServices.find((item) => item.serviceName === selectedServiceName);
+
+    if (!selectedService) {
+      return res.status(400).json({
+        message: "The selected service is no longer available for new appointments.",
+        errors: { service: "The selected service is no longer available for new appointments." },
+      });
+    }
+
+    if (!autoApply && !String(promoCode || "").trim()) {
+      return res.status(400).json({
+        message: "Please enter a promo code.",
+        errors: { promoCode: "Please enter a promo code." },
+      });
+    }
+
+    const result = await validatePromotionForBooking({
+      patientId: patientRecord?._id,
+      serviceName: selectedService.serviceName,
+      servicePrice: selectedService.price,
+      promoCode,
+      autoApply: Boolean(autoApply),
+    });
+
+    if (!result.valid) {
+      return res.status(autoApply ? 200 : 400).json({
+        valid: false,
+        message: result.message,
+      });
+    }
+
+    res.json({
+      valid: true,
+      message: result.message,
+      autoApplied: result.autoApplied,
+      promotion: {
+        id: result.promotion._id,
+        title: result.promotion.title,
+        promoCode: result.promotion.promoCode,
+        discountType: result.discountType,
+        discountValue: result.discountValue,
+        discountLabel: result.promotion.discountLabel,
+        applicableServices: result.promotion.applicableServices,
+        endDate: result.promotion.endDate,
+      },
+      originalPrice: result.originalPrice,
+      discountAmount: result.discountAmount,
+      finalPrice: result.finalPrice,
+    });
+  }),
+);
+
+router.post(
   "/book",
   authenticate,
   authorize("patient"),
@@ -289,6 +582,7 @@ router.post(
       appointmentTime,
       dentistName,
       service,
+      promoCode,
       notes,
       reason,
     } = req.body;
@@ -333,9 +627,11 @@ router.post(
       });
     }
 
+    const selectedServiceName = service.trim();
     const activeServices = (settings.services || []).filter((item) => item.status !== "inactive");
+    const selectedService = activeServices.find((item) => item.serviceName === selectedServiceName);
 
-    if (activeServices.length && !activeServices.some((item) => item.serviceName === service.trim())) {
+    if (!selectedService) {
       return res.status(400).json({
         message: "The selected service is no longer available for new appointments.",
         errors: { service: "The selected service is no longer available for new appointments." },
@@ -378,6 +674,32 @@ router.post(
     }
 
     const patientRecord = await Patient.findOne({ userId: req.user.id });
+    const servicePrice = Number.isFinite(Number(selectedService.price)) ? Number(selectedService.price) : 0;
+    const promotionResult = String(promoCode || "").trim()
+      ? await validatePromotionForBooking({
+          patientId: patientRecord?._id,
+          serviceName: selectedService.serviceName,
+          servicePrice,
+          promoCode,
+        })
+      : await validatePromotionForBooking({
+          patientId: patientRecord?._id,
+          serviceName: selectedService.serviceName,
+          servicePrice,
+          autoApply: true,
+        });
+
+    if (String(promoCode || "").trim() && !promotionResult.valid) {
+      return res.status(400).json({
+        message: promotionResult.message,
+        errors: { promoCode: promotionResult.message },
+      });
+    }
+
+    const appliedPromotion = promotionResult.valid ? promotionResult.promotion : null;
+    const originalPrice = promotionResult.valid ? promotionResult.originalPrice : servicePrice;
+    const discountAmount = promotionResult.valid ? promotionResult.discountAmount : 0;
+    const finalPrice = promotionResult.valid ? promotionResult.finalPrice : servicePrice;
 
     const appointment = await Appointment.create({
       patient: patientRecord?._id,
@@ -387,10 +709,22 @@ router.post(
       appointmentDate: parsedDate,
       appointmentTime: appointmentTime.trim(),
       dentistName: normalizedDentistName,
-      service: service.trim(),
+      service: selectedService.serviceName,
+      serviceRef: selectedService._id,
+      servicePriceSnapshot: servicePrice,
+      serviceDurationSnapshot: Number.isFinite(Number(selectedService.duration)) ? Number(selectedService.duration) : undefined,
+      promotion: appliedPromotion?._id,
+      promoCode: appliedPromotion?.promoCode,
+      promoTitle: appliedPromotion?.title,
+      promoDiscountType: promotionResult.valid ? promotionResult.discountType : undefined,
+      promoDiscountValue: promotionResult.valid ? promotionResult.discountValue : undefined,
+      originalPrice,
+      discountAmount,
+      finalPrice,
       notes: notes?.trim(),
       reason: reason?.trim(),
       status: "pending",
+      requestSubmittedAt: new Date(),
     });
 
     await Promise.allSettled([
@@ -401,7 +735,13 @@ router.post(
         entityId: appointment._id,
         performedBy: req.user.id,
         performedByEmail: req.user.email,
-        metadata: { service: appointment.service, status: appointment.status },
+        metadata: {
+          service: appointment.service,
+          status: appointment.status,
+          promoCode: appointment.promoCode,
+          discountAmount: appointment.discountAmount,
+          finalPrice: appointment.finalPrice,
+        },
       }),
     ]);
 
@@ -445,34 +785,110 @@ router.patch(
 
     const { status, declineReason } = req.body;
     const settings = await getCurrentSettings();
-    const allowedStatuses = ["pending", "confirmed", "completed", "cancelled"];
+    const allowedStatuses = ["pending", "confirmed", "completed", "cancelled", "declined", "no_show"];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
-        message: "Status must be one of: pending, confirmed, completed, cancelled.",
+        message: "Status must be one of: pending, confirmed, completed, cancelled, declined, no_show.",
       });
     }
 
     const normalizedDeclineReason = String(declineReason || "").trim();
 
-    if (status === "cancelled" && !normalizedDeclineReason) {
+    if (["cancelled", "declined"].includes(status) && !normalizedDeclineReason) {
       return res.status(400).json({
-        message: "Please provide a reason for declining this appointment.",
+        message: `Please provide a reason for ${status === "declined" ? "declining" : "cancelling"} this appointment.`,
       });
     }
 
-    const update = status === "cancelled"
-      ? { status, declineReason: normalizedDeclineReason }
-      : { status, $unset: { declineReason: "" } };
+    const existingAppointment = await Appointment.findById(req.params.id);
 
-    const appointment = await Appointment.findByIdAndUpdate(
-      req.params.id,
-      update,
+    if (!existingAppointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    if (req.user.role === "dentist") {
+      const assignedDentist = String(existingAppointment.dentistName || "").trim().toLowerCase();
+      const currentDentist = fullName(req.user).toLowerCase();
+
+      if (!assignedDentist || assignedDentist === "any available dentist" || assignedDentist !== currentDentist) {
+        return res.status(403).json({ message: "Only the assigned dentist can update this appointment outcome." });
+      }
+    }
+
+    const transitionRules = {
+      confirmed: ["pending"],
+      declined: ["pending"],
+      cancelled: ["pending", "confirmed"],
+      completed: ["confirmed"],
+      no_show: ["confirmed"],
+      pending: [],
+    };
+    const allowedCurrentStatuses = transitionRules[status] || [];
+
+    if (!allowedCurrentStatuses.includes(existingAppointment.status)) {
+      return res.status(400).json({
+        message:
+          status === "completed" || status === "no_show"
+            ? "Only confirmed appointments can be marked as completed or no-show."
+            : "This appointment can no longer be updated to the selected status.",
+      });
+    }
+
+    const now = new Date();
+    const update = {
+      status,
+      statusUpdatedAt: now,
+      statusUpdatedBy: req.user.id,
+      statusUpdatedByEmail: req.user.email,
+    };
+    const unset = {};
+
+    if (["cancelled", "declined"].includes(status)) {
+      update.declineReason = normalizedDeclineReason;
+    } else {
+      unset.declineReason = "";
+    }
+
+    if (status === "completed") {
+      const currentService = (settings.services || []).find((service) => service.serviceName === existingAppointment.service);
+      const revenueAmount = Number.isFinite(Number(existingAppointment.finalPrice))
+        ? Number(existingAppointment.finalPrice)
+        : Number.isFinite(Number(existingAppointment.servicePriceSnapshot))
+          ? Number(existingAppointment.servicePriceSnapshot)
+        : Number.isFinite(Number(currentService?.price))
+          ? Number(currentService.price)
+          : 0;
+
+      update.completedAt = now;
+      update.completedBy = req.user.id;
+      update.completedByEmail = req.user.email;
+      update.estimatedRevenueAmount = revenueAmount;
+      if (!existingAppointment.servicePriceSnapshot && currentService) update.servicePriceSnapshot = revenueAmount;
+      if (!existingAppointment.serviceDurationSnapshot && currentService?.duration) update.serviceDurationSnapshot = Number(currentService.duration);
+      if (!existingAppointment.serviceRef && currentService?._id) update.serviceRef = currentService._id;
+    }
+
+    if (status === "no_show") {
+      update.noShowAt = now;
+      update.noShowBy = req.user.id;
+      update.noShowByEmail = req.user.email;
+      update.estimatedRevenueAmount = 0;
+    }
+
+    const updatePayload = {
+      $set: update,
+      ...(Object.keys(unset).length ? { $unset: unset } : {}),
+    };
+
+    const appointment = await Appointment.findOneAndUpdate(
+      { _id: req.params.id, status: existingAppointment.status },
+      updatePayload,
       { new: true, runValidators: true },
     );
 
     if (!appointment) {
-      return res.status(404).json({ message: "Appointment not found." });
+      return res.status(409).json({ message: "Appointment status changed before this action could be completed. Please refresh and try again." });
     }
 
     await Promise.allSettled([
@@ -483,7 +899,13 @@ router.patch(
         entityId: appointment._id,
         performedBy: req.user.id,
         performedByEmail: req.user.email,
-        metadata: { status, declineReason: status === "cancelled" ? normalizedDeclineReason : undefined },
+        metadata: {
+          status,
+          declineReason: ["cancelled", "declined"].includes(status) ? normalizedDeclineReason : undefined,
+          estimatedRevenueAmount: status === "completed" ? appointment.estimatedRevenueAmount || 0 : undefined,
+          completedAt: status === "completed" ? appointment.completedAt : undefined,
+          noShowAt: status === "no_show" ? appointment.noShowAt : undefined,
+        },
       }),
     ]);
 
@@ -491,6 +913,12 @@ router.patch(
       message:
         status === "confirmed"
           ? "Appointment approved and confirmed."
+          : status === "declined"
+            ? "Appointment declined."
+            : status === "completed"
+              ? "Appointment marked as completed."
+              : status === "no_show"
+                ? "Appointment marked as no-show."
           : "Appointment status updated.",
       appointment: sanitizeAppointment(appointment),
     });
@@ -504,20 +932,91 @@ router.get(
   asyncHandler(async (req, res) => {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
-    const skip = (page - 1) * limit;
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = addDays(todayStart, 1);
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const period = req.query.period || "default";
+    const query = {};
 
-    const [appointments, total] = await Promise.all([
-      Appointment.find({}).sort({ appointmentDate: 1, appointmentTime: 1 }).skip(skip).limit(limit),
-      Appointment.countDocuments({}),
+    if (req.query.dentist && req.query.dentist !== "all") {
+      query.dentistName = req.query.dentist;
+    }
+
+    if (req.query.status && req.query.status !== "all") {
+      query.status = req.query.status;
+    }
+
+    if (req.query.service && req.query.service !== "all") {
+      query.service = req.query.service;
+    }
+
+    if (req.query.patient) {
+      const pattern = new RegExp(String(req.query.patient).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      query.$or = [{ patientName: pattern }, { email: pattern }];
+    }
+
+    if (req.query.date) {
+      const parsedDate = parseAppointmentDate(req.query.date);
+      if (!parsedDate) {
+        return res.status(400).json({ message: "Appointment date filter is invalid." });
+      }
+      query.appointmentDate = { $gte: parsedDate, $lte: endOfDay(parsedDate) };
+    } else if (period === "today") {
+      query.appointmentDate = { $gte: todayStart, $lt: tomorrowStart };
+    } else if (period === "upcoming") {
+      query.appointmentDate = { $gte: todayStart };
+    } else if (period === "past") {
+      query.appointmentDate = { $lt: todayStart };
+    } else if (period === "last7") {
+      query.appointmentDate = { $gte: addDays(todayStart, -7), $lte: now };
+    } else if (period === "last30") {
+      query.appointmentDate = { $gte: addDays(todayStart, -30), $lte: now };
+    } else if (period === "custom") {
+      const startDate = req.query.startDate ? parseAppointmentDate(req.query.startDate) : null;
+      const endDate = req.query.endDate ? parseAppointmentDate(req.query.endDate) : null;
+
+      if (req.query.startDate && !startDate) return res.status(400).json({ message: "Start date filter is invalid." });
+      if (req.query.endDate && !endDate) return res.status(400).json({ message: "End date filter is invalid." });
+
+      if (startDate || endDate) {
+        query.appointmentDate = {
+          ...(startDate ? { $gte: startDate } : {}),
+          ...(endDate ? { $lte: endOfDay(endDate) } : {}),
+        };
+      }
+    } else if (period !== "all") {
+      query.appointmentDate = { $gte: todayStart };
+    }
+
+    const [allMatchingAppointments, serviceOptions] = await Promise.all([
+      Appointment.find(query)
+        .sort({ appointmentDate: 1, appointmentTime: 1 })
+        .lean(),
+      Appointment.distinct("service", { service: { $nin: [null, ""] } }),
     ]);
+
+    const includeHiddenHistory = ["past", "last7", "last30", "custom", "all"].includes(period) || Boolean(req.query.date);
+    const visibleAppointments = includeHiddenHistory
+      ? allMatchingAppointments
+      : allMatchingAppointments.filter((appointment) => getScheduledDateTime(appointment) >= cutoff);
+    const sortedAppointments = visibleAppointments.sort(compareAppointmentsBySchedule);
+    const total = sortedAppointments.length;
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const currentPage = Math.min(page, totalPages);
+    const skip = (currentPage - 1) * limit;
+    const appointments = sortedAppointments.slice(skip, skip + limit);
 
     res.json({
       data: appointments.map(sanitizeAppointment),
       pagination: {
-        page,
+        page: currentPage,
         limit,
         total,
-        pages: Math.ceil(total / limit),
+        pages: totalPages,
+      },
+      filters: {
+        services: serviceOptions.filter(Boolean).sort(),
       },
     });
   }),

@@ -19,6 +19,16 @@ function PatientPromotionsPage() {
   }, [location.search])
   const actionPath = userRole === 'dentist' ? '/dentist/appointments' : userRole === 'staff' ? '/staff/appointments' : '/patient/book-appointment'
   const actionLabel = userRole === 'patient' ? 'Book Appointment' : 'View Appointments'
+  const getPromotionActionPath = (promotion) => {
+    if (userRole !== 'patient') return actionPath
+
+    const params = new URLSearchParams()
+    const service = promotion.applicableServices?.find((item) => item && item !== 'All Services') || promotion.serviceType
+    if (service && service !== 'All Services') params.set('service', service)
+    if (promotion.promoCode) params.set('promoCode', promotion.promoCode)
+    const query = params.toString()
+    return `${actionPath}${query ? `?${query}` : ''}`
+  }
 
   const loadPromotions = useCallback(() => {
     let isActive = true
@@ -134,7 +144,7 @@ function PatientPromotionsPage() {
                       <p className="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
                         Expires {promotion.endDate ? formatDate(promotion.endDate) : 'soon'}
                       </p>
-                      <Link to={actionPath} className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
+                      <Link to={getPromotionActionPath(promotion)} className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
                         {actionLabel}
                       </Link>
                     </div>

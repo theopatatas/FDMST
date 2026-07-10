@@ -19,16 +19,37 @@ const promotionSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    applicableServices: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
     promoCode: {
       type: String,
       trim: true,
       uppercase: true,
       unique: true,
       sparse: true,
+      required: true,
+    },
+    discountType: {
+      type: String,
+      enum: ["percentage", "fixed"],
+      default: "fixed",
+    },
+    discountValue: {
+      type: Number,
+      min: [0, "Discount value cannot be negative."],
+      default: 0,
     },
     discountLabel: {
       type: String,
       trim: true,
+    },
+    maxRedemptions: {
+      type: Number,
+      min: [1, "Maximum redemption must be at least 1."],
     },
     audience: {
       type: String,

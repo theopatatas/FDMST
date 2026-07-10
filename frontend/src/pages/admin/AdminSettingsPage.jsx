@@ -324,13 +324,32 @@ function AdminSettingsPage() {
   const saveService = (event) => {
     event.preventDefault()
     const service = serviceModal.service
+    const price = Number(service.price)
+    const duration = Number(service.duration)
+
     if (!service.serviceName.trim()) {
       toast.error('Service name is required.')
       return
     }
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error('Service price must be a valid non-negative amount.')
+      return
+    }
+    if (!Number.isFinite(duration) || duration < 1) {
+      toast.error('Service duration must be a valid number of minutes.')
+      return
+    }
+
+    const normalizedService = {
+      ...service,
+      serviceName: service.serviceName.trim(),
+      category: service.category?.trim() || 'General',
+      price,
+      duration,
+    }
     const nextServices = serviceModal.index >= 0
-      ? settings.services.map((item, index) => index === serviceModal.index ? service : item)
-      : [{ ...service, serviceName: service.serviceName.trim() }, ...settings.services]
+      ? settings.services.map((item, index) => index === serviceModal.index ? normalizedService : item)
+      : [normalizedService, ...settings.services]
     const nextSettings = { ...settings, services: nextServices }
     const auditAction = serviceModal.index >= 0 ? 'Service Edited' : 'Service Added'
     setSettings(nextSettings)
@@ -679,14 +698,14 @@ function AdminSettingsPage() {
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <Field label="Duration">
                   <div className="relative">
-                    <input className={`${inputClass} pr-14`} type="number" min="1" value={serviceModal.service.duration} onChange={(event) => setServiceModal((current) => ({ ...current, service: { ...current.service, duration: Number(event.target.value) } }))} />
+                    <input className={`${inputClass} pr-14`} type="number" min="1" value={serviceModal.service.duration} onFocus={(event) => event.target.select()} onChange={(event) => setServiceModal((current) => ({ ...current, service: { ...current.service, duration: event.target.value } }))} />
                     <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">min</span>
                   </div>
                 </Field>
                 <Field label="Price">
                   <div className="relative">
                     <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">PHP</span>
-                    <input className={`${inputClass} pl-14`} type="number" min="0" value={serviceModal.service.price} onChange={(event) => setServiceModal((current) => ({ ...current, service: { ...current.service, price: Number(event.target.value) } }))} />
+                    <input className={`${inputClass} pl-14`} type="number" min="0" value={serviceModal.service.price} onFocus={(event) => event.target.select()} onChange={(event) => setServiceModal((current) => ({ ...current, service: { ...current.service, price: event.target.value } }))} />
                   </div>
                 </Field>
                 <Field label="Status" className="md:col-span-2 xl:col-span-1">

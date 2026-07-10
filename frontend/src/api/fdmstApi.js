@@ -155,6 +155,11 @@ export const fdmstApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  validateAppointmentPromo: (payload) =>
+    request('/appointments/promo/validate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getMyAppointments: () => request('/appointments/my'),
   getMyDentalRecords: () => request('/dentalrecords/my'),
   getStaff: () => request('/users/staff'),
@@ -178,7 +183,14 @@ export const fdmstApi = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  getAppointments: () => request('/appointments'),
+  getAppointments: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/appointments${query ? `?${query}` : ''}`)
+  },
   updateAppointmentStatus: (id, payload) =>
     request(`/appointments/${id}/status`, {
       method: 'PATCH',
