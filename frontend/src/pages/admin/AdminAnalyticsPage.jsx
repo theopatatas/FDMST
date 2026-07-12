@@ -24,6 +24,7 @@ import {
   FaTimes,
   FaTimesCircle,
   FaUserClock,
+  FaUserPlus,
 } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -68,6 +69,7 @@ const officialServices = [
 const statusOptions = ['pending', 'confirmed', 'completed', 'no_show', 'cancelled', 'declined']
 const kpiMeta = [
   { key: 'totalAppointments', label: 'Total Appointments', icon: FaCalendarCheck, tone: 'blue' },
+  { key: 'newPatients', label: 'New Patients', icon: FaUserPlus, tone: 'blue' },
   { key: 'todaysAppointments', label: "Today's Appointments", icon: FaCalendarDay, tone: 'green' },
   { key: 'upcomingAppointments', label: 'Upcoming Appointments', icon: FaCalendarPlus, tone: 'violet' },
   { key: 'completedAppointments', label: 'Completed Appointments', icon: FaCheckCircle, tone: 'green' },
@@ -553,7 +555,7 @@ function AdminAnalyticsPage() {
 
       {isLoading ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
             {kpiMeta.map((item) => <SkeletonCard key={item.key} />)}
           </section>
           <SkeletonSection />
@@ -568,7 +570,7 @@ function AdminAnalyticsPage() {
         </section>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
             {kpiMeta.map((item) => (
               <KpiCard change={stats.monthlyChange?.[item.key] || 0} item={item} key={item.key} value={stats[item.key]} />
             ))}

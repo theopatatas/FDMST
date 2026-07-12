@@ -322,6 +322,11 @@ const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null
   };
 };
 
+const countPatientsRegisteredInRange = (patients = [], start, end) => patients.filter((patient) => {
+  const createdAt = new Date(patient.createdAt);
+  return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt <= end;
+}).length;
+
 const buildServiceAnalytics = (appointments) => {
   const serviceCounts = new Map(OFFICIAL_SERVICES.map((service) => [service, 0]));
   const monthlyCounts = new Map();
@@ -782,6 +787,8 @@ router.get(
     ]);
 
     const kpiStats = buildKpiStats(appointments, monthlyAppointments, kpiComparisonRange);
+    const newPatients = countPatientsRegisteredInRange(patients, kpiComparisonRange.currentStart, kpiComparisonRange.currentEnd);
+    const previousNewPatients = countPatientsRegisteredInRange(patients, kpiComparisonRange.previousStart, kpiComparisonRange.previousEnd);
     const completedAppointments = kpiStats.completedAppointments;
     const completedRevenueAppointments = appointments.filter((appointment) => appointment.status === "completed");
     const estimatedRevenue = completedRevenueAppointments.reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0);
@@ -799,6 +806,7 @@ router.get(
         totalStaff,
         totalDentists,
         totalServices: OFFICIAL_SERVICES.length,
+        newPatients,
         totalAppointments: kpiStats.totalAppointments,
         completedAppointments,
         pendingAppointments: kpiStats.pendingAppointments,
@@ -809,7 +817,10 @@ router.get(
         totalTreatments,
         upcomingAppointments: kpiStats.upcomingAppointments,
         estimatedRevenue,
-        monthlyChange: kpiStats.monthlyChange,
+        monthlyChange: {
+          ...kpiStats.monthlyChange,
+          newPatients: calculateChange(newPatients, previousNewPatients),
+        },
       },
       filters: {
         dentists: dentistOptions.filter(Boolean).sort(),
@@ -866,7 +877,7 @@ router.get(
     const todayEnd = endOfDay(new Date());
     const now = new Date();
 
-    const [todaysAppointments, upcomingAppointments, recentPatients] = await Promise.all([
+    const [todaysAppointments, upcomingAppointments, recentPatients, recentActivity] = await Promise.all([
       Appointment.find({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
         status: { $nin: ["cancelled", "declined"] },
@@ -882,12 +893,29 @@ router.get(
       Patient.find({ createdAt: { $lte: now } })
         .sort({ createdAt: -1 })
         .limit(8),
+      AuditLog.find({
+        action: { $regex: /Appointment checked_in|Appointment in_consultation|Appointment completed|Appointment rescheduled/i },
+      })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .lean(),
     ]);
 
+    const stats = {
+      todaysAppointments: todaysAppointments.length,
+      checkedInPatients: todaysAppointments.filter((appointment) => appointment.status === "checked_in").length,
+      patientsInConsultation: todaysAppointments.filter((appointment) => appointment.status === "in_consultation").length,
+      completedToday: todaysAppointments.filter((appointment) => appointment.status === "completed").length,
+      cancelledToday: todaysAppointments.filter((appointment) => appointment.status === "cancelled").length,
+    };
+
     res.json({
+      stats,
+      todaysQueue: todaysAppointments.map(sanitizeAppointment),
       todaysAppointments: todaysAppointments.map(sanitizeAppointment),
       upcomingAppointments: upcomingAppointments.map(sanitizeAppointment),
       recentPatients: recentPatients.map(sanitizePatient),
+      recentActivity,
     });
   }),
 );

@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const Appointment = require("../models/Appointment");
 const AuditLog = require("../models/AuditLog");
 const ClinicSettings = require("../models/ClinicSettings");
+const DentalRecord = require("../models/DentalRecord");
 const Notification = require("../models/Notification");
 const Patient = require("../models/Patient");
 const Promotion = require("../models/Promotion");
@@ -24,6 +25,7 @@ const DEFAULT_APPOINTMENT_SETTINGS = {
   allowWeekendAppointments: true,
   allowOnlineBooking: true,
 };
+const ACTIVE_APPOINTMENT_STATUSES = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "rescheduled"];
 
 const startOfDay = (date) => {
   const value = new Date(date);
@@ -408,7 +410,7 @@ router.get(
   "/dentists",
   asyncHandler(async (req, res) => {
     const dentists = await User.find({
-      role: { $in: ["dentist", "staff"] },
+      role: "dentist",
       status: "active",
     })
       .sort({ firstName: 1, lastName: 1 })
@@ -458,7 +460,7 @@ router.get(
 
     const dayQuery = {
       appointmentDate: parsedDate,
-      status: { $in: ["pending", "confirmed", "completed"] },
+      status: { $in: ACTIVE_APPOINTMENT_STATUSES },
     };
     const dentistName = req.query.dentistName?.trim();
 
@@ -469,7 +471,7 @@ router.get(
     const [appointmentsForDay, bookedAppointments] = await Promise.all([
       Appointment.countDocuments({
         appointmentDate: parsedDate,
-        status: { $in: ["pending", "confirmed", "completed"] },
+        status: { $in: ACTIVE_APPOINTMENT_STATUSES },
       }),
       Appointment.find(dayQuery).select("appointmentTime dentistName status").lean(),
     ]);
@@ -649,7 +651,7 @@ router.post(
 
     const appointmentsForDay = await Appointment.countDocuments({
       appointmentDate: parsedDate,
-      status: { $in: ["pending", "confirmed", "completed"] },
+      status: { $in: ACTIVE_APPOINTMENT_STATUSES },
     });
 
     if (appointmentsForDay >= Number(appointmentSettings.maxAppointmentsPerDay || 20)) {
@@ -664,7 +666,7 @@ router.post(
       appointmentDate: parsedDate,
       appointmentTime: appointmentTime.trim(),
       dentistName: normalizedDentistName,
-      status: { $in: ["pending", "confirmed", "completed"] },
+      status: { $in: ACTIVE_APPOINTMENT_STATUSES },
     });
 
     if (existingBooking) {
@@ -783,13 +785,13 @@ router.patch(
       return res.status(400).json({ message: "Invalid appointment ID." });
     }
 
-    const { status, declineReason } = req.body;
+    const { status, declineReason, treatmentRecord = {}, clinicalNotes = {}, followUp = {} } = req.body;
     const settings = await getCurrentSettings();
-    const allowedStatuses = ["pending", "confirmed", "completed", "cancelled", "declined", "no_show"];
+    const allowedStatuses = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "declined", "no_show", "rescheduled"];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
-        message: "Status must be one of: pending, confirmed, completed, cancelled, declined, no_show.",
+        message: "Status must be one of: pending, confirmed, checked_in, in_consultation, completed, cancelled, declined, no_show, rescheduled.",
       });
     }
 
@@ -819,9 +821,12 @@ router.patch(
     const transitionRules = {
       confirmed: ["pending"],
       declined: ["pending"],
-      cancelled: ["pending", "confirmed"],
-      completed: ["confirmed"],
-      no_show: ["confirmed"],
+      checked_in: ["confirmed"],
+      in_consultation: ["checked_in"],
+      cancelled: ["pending", "confirmed", "checked_in", "in_consultation"],
+      completed: ["confirmed", "checked_in", "in_consultation"],
+      no_show: ["confirmed", "checked_in"],
+      rescheduled: ["pending", "confirmed", "checked_in", "in_consultation"],
       pending: [],
     };
     const allowedCurrentStatuses = transitionRules[status] || [];
@@ -830,7 +835,7 @@ router.patch(
       return res.status(400).json({
         message:
           status === "completed" || status === "no_show"
-            ? "Only confirmed appointments can be marked as completed or no-show."
+            ? "Only active appointments can be marked as completed or no-show."
             : "This appointment can no longer be updated to the selected status.",
       });
     }
@@ -891,6 +896,58 @@ router.patch(
       return res.status(409).json({ message: "Appointment status changed before this action could be completed. Please refresh and try again." });
     }
 
+    const createdRecords = [];
+    const createdFollowUps = [];
+
+    if (status === "completed" && (treatmentRecord.servicePerformed || treatmentRecord.chiefComplaint || treatmentRecord.diagnosis || treatmentRecord.treatmentPerformed || treatmentRecord.dentistNotes || clinicalNotes.observation || clinicalNotes.assessment || clinicalNotes.recommendations || clinicalNotes.additionalNotes)) {
+      const record = await DentalRecord.create({
+        patient: appointment.patient,
+        appointment: appointment._id,
+        patientName: appointment.patientName,
+        visitDate: now,
+        servicePerformed: treatmentRecord.servicePerformed || appointment.service,
+        chiefComplaint: treatmentRecord.chiefComplaint || "",
+        diagnosis: treatmentRecord.diagnosis || "",
+        treatment: treatmentRecord.treatmentPerformed || appointment.service,
+        treatmentPerformed: treatmentRecord.treatmentPerformed || "",
+        procedure: treatmentRecord.servicePerformed || appointment.service,
+        recommendations: treatmentRecord.recommendations || "",
+        nextVisitRecommendation: treatmentRecord.nextVisitRecommendation || "",
+        dentistName: appointment.dentistName,
+        notes: treatmentRecord.dentistNotes || "",
+        clinicalNotes: {
+          observation: clinicalNotes.observation || "",
+          assessment: clinicalNotes.assessment || "",
+          recommendations: clinicalNotes.recommendations || "",
+          additionalNotes: clinicalNotes.additionalNotes || "",
+        },
+      });
+      createdRecords.push(record);
+    }
+
+    if (status === "completed" && followUp.date && followUp.time) {
+      const parsedFollowUpDate = parseAppointmentDate(followUp.date);
+      if (parsedFollowUpDate) {
+        const followUpAppointment = await Appointment.create({
+          patient: appointment.patient,
+          patientName: appointment.patientName,
+          contactNumber: appointment.contactNumber,
+          email: appointment.email,
+          service: appointment.service,
+          serviceRef: appointment.serviceRef,
+          servicePriceSnapshot: appointment.servicePriceSnapshot,
+          serviceDurationSnapshot: appointment.serviceDurationSnapshot,
+          appointmentDate: parsedFollowUpDate,
+          appointmentTime: String(followUp.time).trim(),
+          dentistName: appointment.dentistName,
+          reason: String(followUp.reason || "Follow-up visit").trim(),
+          status: "pending",
+          requestSubmittedAt: now,
+        });
+        createdFollowUps.push(followUpAppointment);
+      }
+    }
+
     await Promise.allSettled([
       notifyPatientOfStatus(appointment, settings),
       AuditLog.create({
@@ -905,6 +962,8 @@ router.patch(
           estimatedRevenueAmount: status === "completed" ? appointment.estimatedRevenueAmount || 0 : undefined,
           completedAt: status === "completed" ? appointment.completedAt : undefined,
           noShowAt: status === "no_show" ? appointment.noShowAt : undefined,
+          treatmentRecordCreated: createdRecords.length > 0,
+          followUpCreated: createdFollowUps.length > 0,
         },
       }),
     ]);
@@ -913,14 +972,22 @@ router.patch(
       message:
         status === "confirmed"
           ? "Appointment approved and confirmed."
+          : status === "checked_in"
+            ? "Patient checked in."
+            : status === "in_consultation"
+              ? "Consultation started."
           : status === "declined"
             ? "Appointment declined."
             : status === "completed"
               ? "Appointment marked as completed."
               : status === "no_show"
                 ? "Appointment marked as no-show."
+                : status === "rescheduled"
+                  ? "Appointment marked for rescheduling."
           : "Appointment status updated.",
       appointment: sanitizeAppointment(appointment),
+      treatmentRecord: createdRecords[0],
+      followUpAppointment: createdFollowUps[0] ? sanitizeAppointment(createdFollowUps[0]) : undefined,
     });
   }),
 );

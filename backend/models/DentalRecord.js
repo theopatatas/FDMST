@@ -23,9 +23,47 @@ const dentalRecordSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    chiefComplaint: {
+      type: String,
+      trim: true,
+    },
     treatment: {
       type: String,
       trim: true,
+    },
+    servicePerformed: {
+      type: String,
+      trim: true,
+    },
+    treatmentPerformed: {
+      type: String,
+      trim: true,
+    },
+    recommendations: {
+      type: String,
+      trim: true,
+    },
+    nextVisitRecommendation: {
+      type: String,
+      trim: true,
+    },
+    clinicalNotes: {
+      observation: {
+        type: String,
+        trim: true,
+      },
+      assessment: {
+        type: String,
+        trim: true,
+      },
+      recommendations: {
+        type: String,
+        trim: true,
+      },
+      additionalNotes: {
+        type: String,
+        trim: true,
+      },
     },
     procedure: {
       type: String,

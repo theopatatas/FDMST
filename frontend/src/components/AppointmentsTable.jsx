@@ -3,10 +3,62 @@ import { formatDate, formatStatus } from '../utils/auth.js'
 const statusStyles = {
   pending: 'bg-amber-50 text-amber-700',
   confirmed: 'bg-emerald-50 text-emerald-700',
+  checked_in: 'bg-blue-50 text-blue-700',
+  in_consultation: 'bg-violet-50 text-violet-700',
   completed: 'bg-sky-50 text-sky-700',
   cancelled: 'bg-red-50 text-red-700',
   declined: 'bg-red-50 text-red-700',
   no_show: 'bg-red-50 text-red-700',
+  rescheduled: 'bg-slate-100 text-slate-700',
+}
+
+const actionClass = {
+  primary: 'bg-sky-950 text-white hover:bg-slate-900',
+  success: 'bg-emerald-600 text-white hover:bg-emerald-700',
+  warning: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
+  danger: 'bg-red-50 text-red-700 hover:bg-red-100',
+}
+
+function StatusActions({ appointment, onUpdateStatus, updatingId }) {
+  const actionsByStatus = {
+    pending: [
+      ['confirmed', 'Approve', 'success'],
+      ['declined', 'Decline', 'danger'],
+    ],
+    confirmed: [
+      ['checked_in', 'Check In', 'primary'],
+      ['no_show', 'No Show', 'danger'],
+      ['rescheduled', 'Skip', 'warning'],
+    ],
+    checked_in: [
+      ['in_consultation', 'Start Consultation', 'primary'],
+      ['no_show', 'No Show', 'danger'],
+      ['rescheduled', 'Skip', 'warning'],
+    ],
+    in_consultation: [
+      ['completed', 'Completed', 'success'],
+      ['rescheduled', 'Skip', 'warning'],
+    ],
+  }
+  const actions = actionsByStatus[appointment.status] || []
+
+  if (!actions.length) return <span className="text-xs text-slate-400">—</span>
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {actions.map(([nextStatus, label, tone]) => (
+        <button
+          type="button"
+          key={nextStatus}
+          onClick={() => onUpdateStatus?.(appointment.id, nextStatus)}
+          disabled={updatingId === appointment.id}
+          className={`min-w-24 rounded-xl px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${actionClass[tone] || actionClass.primary}`}
+        >
+          {updatingId === appointment.id ? 'Saving...' : label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 function AppointmentsTable({
@@ -62,47 +114,7 @@ function AppointmentsTable({
               </td>
               {showActions && (
                 <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                  {appointment.status === 'pending' ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus?.(appointment.id, 'confirmed')}
-                        disabled={updatingId === appointment.id}
-                        className="w-24 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {updatingId === appointment.id ? 'Approving...' : 'Approve'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus?.(appointment.id, 'declined')}
-                        disabled={updatingId === appointment.id}
-                        className="w-24 rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {updatingId === appointment.id ? 'Declining...' : 'Decline'}
-                      </button>
-                    </div>
-                  ) : appointment.status === 'confirmed' ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus?.(appointment.id, 'completed')}
-                        disabled={updatingId === appointment.id}
-                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {updatingId === appointment.id ? 'Saving...' : 'Completed'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus?.(appointment.id, 'no_show')}
-                        disabled={updatingId === appointment.id}
-                        className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {updatingId === appointment.id ? 'Saving...' : 'No Show'}
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-400">—</span>
-                  )}
+                  <StatusActions appointment={appointment} onUpdateStatus={onUpdateStatus} updatingId={updatingId} />
                 </td>
               )}
             </tr>

@@ -95,16 +95,16 @@ function PatientNotificationsPage() {
   const handleOpenNotification = async (notification) => {
     if (!notification) return
 
-    if (!notification.isRead) {
-      try {
-        await fdmstApi.markNotificationRead(notification.id)
-        setNotifications((current) =>
-          current.map((item) => item.id === notification.id ? { ...item, isRead: true } : item),
-        )
+    try {
+      await fdmstApi.markNotificationRead(notification.id)
+      setNotifications((current) =>
+        current.map((item) => item.id === notification.id ? { ...item, isRead: true } : item),
+      )
+      if (!notification.isRead) {
         setUnreadCount((current) => Math.max(current - 1, 0))
-      } catch (error) {
-        toast.error(error.message || 'Unable to update notification.')
       }
+    } catch (error) {
+      toast.error(error.message || 'Unable to update notification.')
     }
 
     if (notification.type === 'promotion' || notification.metadata?.target === 'promotion') {

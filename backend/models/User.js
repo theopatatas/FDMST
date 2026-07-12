@@ -47,6 +47,21 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    recoveryEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    lastLoginAt: Date,
+    lastPasswordChangedAt: Date,
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    totalLogins: {
+      type: Number,
+      default: 0,
+    },
     status: {
       type: String,
       enum: ["active", "inactive"],

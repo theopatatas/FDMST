@@ -7,7 +7,7 @@ const User = require("../models/User");
 const AUTO_DECLINE_AFTER_MS = 24 * 60 * 60 * 1000;
 const WARNING_BEFORE_DEADLINE_MS = 2 * 60 * 60 * 1000;
 const JOB_INTERVAL_MS = 15 * 60 * 1000;
-const AUTO_DECLINE_REASON = "Automatically declined because the appointment request was not reviewed within 24 hours.";
+const AUTO_DECLINE_REASON = "Automatically cancelled because the appointment request was not reviewed within 24 hours.";
 
 let intervalId = null;
 let isRunning = false;
@@ -44,8 +44,8 @@ const notifyPatientOfAutoDecline = async (appointment) => {
     },
     {
       ...recipient,
-      title: "Appointment request declined",
-      message: `Your ${appointment.service} appointment request was automatically declined because it was not reviewed within 24 hours.`,
+      title: "Appointment request cancelled",
+      message: `Your ${appointment.service} appointment request was automatically cancelled because it was not reviewed within 24 hours.`,
       type: "appointment",
       metadata: {
         appointmentId: appointment._id,
@@ -76,7 +76,7 @@ const notifyClinicUsersOfExpiringAppointment = async (appointment) => {
   if (!recipients.length) return;
 
   const deadline = new Date(getAppointmentSubmittedAt(appointment).getTime() + AUTO_DECLINE_AFTER_MS);
-  const message = `${appointment.patientName}'s ${appointment.service} request will be automatically declined if it is not reviewed by ${deadline.toLocaleString()}.`;
+  const message = `${appointment.patientName}'s ${appointment.service} request will be automatically cancelled if it is not reviewed by ${deadline.toLocaleString()}.`;
 
   await Promise.all(recipients.map((user) =>
     createNotificationOnce(
@@ -88,7 +88,7 @@ const notifyClinicUsersOfExpiringAppointment = async (appointment) => {
       },
       {
         user: user._id,
-        title: "Appointment request nearing expiration",
+        title: "Appointment request nearing auto-cancellation",
         message,
         type: "appointment",
         scheduledFor: deadline,
@@ -149,33 +149,35 @@ const declineOverduePendingAppointments = async (now) => {
     .lean();
 
   for (const appointment of overdueAppointments) {
-    const declined = await Appointment.findOneAndUpdate(
+    const cancelled = await Appointment.findOneAndUpdate(
       {
         _id: appointment._id,
         status: "pending",
         autoDeclinedAt: { $exists: false },
       },
       {
-        status: "declined",
+        status: "cancelled",
         declineReason: AUTO_DECLINE_REASON,
         autoDeclinedAt: now,
+        statusUpdatedAt: now,
+        statusUpdatedByEmail: "system@fdmst.local",
       },
       { new: true },
     );
 
-    if (!declined) continue;
+    if (!cancelled) continue;
 
     await Promise.allSettled([
-      notifyPatientOfAutoDecline(declined),
+      notifyPatientOfAutoDecline(cancelled),
       AuditLog.create({
-        action: "Appointment Auto Declined",
+        action: "Appointment Auto Cancelled",
         entityType: "Appointments",
-        entityId: declined._id,
+        entityId: cancelled._id,
         performedByEmail: "system@fdmst.local",
         metadata: {
-          status: "declined",
+          status: "cancelled",
           reason: AUTO_DECLINE_REASON,
-          submittedAt: declined.requestSubmittedAt || declined.createdAt,
+          submittedAt: cancelled.requestSubmittedAt || cancelled.createdAt,
           autoDeclinedAt: now,
         },
       }),

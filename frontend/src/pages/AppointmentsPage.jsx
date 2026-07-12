@@ -27,6 +27,22 @@ function AppointmentsPage({ allowApproval = false }) {
   const [declineReason, setDeclineReason] = useState('')
   const [declineError, setDeclineError] = useState('')
   const [outcomeTarget, setOutcomeTarget] = useState(null)
+  const [completionForm, setCompletionForm] = useState({
+    servicePerformed: '',
+    chiefComplaint: '',
+    diagnosis: '',
+    treatmentPerformed: '',
+    recommendations: '',
+    nextVisitRecommendation: '',
+    dentistNotes: '',
+    observation: '',
+    assessment: '',
+    clinicalRecommendations: '',
+    additionalNotes: '',
+    followUpDate: '',
+    followUpTime: '',
+    followUpReason: '',
+  })
 
   const loadAppointments = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -44,7 +60,7 @@ function AppointmentsPage({ allowApproval = false }) {
         ...(appointmentResponse.pagination || {}),
       }))
       setServiceOptions(appointmentResponse.filters?.services || [])
-      setDentists(dentistResponse.data || [])
+      setDentists((dentistResponse.data || []).filter((dentist) => dentist.role === 'dentist'))
     } catch (loadError) {
       if (!silent) toast.error(loadError.message || 'Unable to load appointments.')
     } finally {
@@ -87,6 +103,10 @@ function AppointmentsPage({ allowApproval = false }) {
     if (status === 'completed' || status === 'no_show') {
       const appointment = appointments.find((item) => item.id === appointmentId)
       setOutcomeTarget({ appointment: appointment || { id: appointmentId }, status })
+      setCompletionForm((current) => ({
+        ...current,
+        servicePerformed: appointment?.service || '',
+      }))
       return
     }
 
@@ -107,6 +127,11 @@ function AppointmentsPage({ allowApproval = false }) {
     setOutcomeTarget(null)
   }
 
+  const handleCompletionChange = (event) => {
+    const { name, value } = event.target
+    setCompletionForm((current) => ({ ...current, [name]: value }))
+  }
+
   const confirmOutcome = async () => {
     if (!outcomeTarget) return
 
@@ -114,12 +139,53 @@ function AppointmentsPage({ allowApproval = false }) {
     setUpdatingId(appointment.id)
 
     try {
-      const response = await fdmstApi.updateAppointmentStatus(appointment.id, { status })
+      const payload = { status }
+      if (status === 'completed') {
+        payload.treatmentRecord = {
+          servicePerformed: completionForm.servicePerformed,
+          chiefComplaint: completionForm.chiefComplaint,
+          diagnosis: completionForm.diagnosis,
+          treatmentPerformed: completionForm.treatmentPerformed,
+          recommendations: completionForm.recommendations,
+          nextVisitRecommendation: completionForm.nextVisitRecommendation,
+          dentistNotes: completionForm.dentistNotes,
+        }
+        payload.clinicalNotes = {
+          observation: completionForm.observation,
+          assessment: completionForm.assessment,
+          recommendations: completionForm.clinicalRecommendations,
+          additionalNotes: completionForm.additionalNotes,
+        }
+        if (completionForm.followUpDate && completionForm.followUpTime) {
+          payload.followUp = {
+            date: completionForm.followUpDate,
+            time: completionForm.followUpTime,
+            reason: completionForm.followUpReason,
+          }
+        }
+      }
+      const response = await fdmstApi.updateAppointmentStatus(appointment.id, payload)
       toast.success(response.message || 'Appointment status updated.', { duration: 5000 })
       setAppointments((current) => current.map((item) => (
         item.id === appointment.id ? { ...item, ...response.appointment } : item
       )))
       setOutcomeTarget(null)
+      setCompletionForm({
+        servicePerformed: '',
+        chiefComplaint: '',
+        diagnosis: '',
+        treatmentPerformed: '',
+        recommendations: '',
+        nextVisitRecommendation: '',
+        dentistNotes: '',
+        observation: '',
+        assessment: '',
+        clinicalRecommendations: '',
+        additionalNotes: '',
+        followUpDate: '',
+        followUpTime: '',
+        followUpReason: '',
+      })
       loadAppointments({ silent: true })
     } catch (updateError) {
       toast.error(updateError.message || 'Unable to update appointment.', { duration: 5000 })
@@ -181,7 +247,7 @@ function AppointmentsPage({ allowApproval = false }) {
           <input className={inputClass} type="date" value={filters.date} onChange={(event) => updateFilter('date', event.target.value)} title="Exact appointment date" />
           <select className={inputClass} value={filters.dentist} onChange={(event) => updateFilter('dentist', event.target.value)}><option value="all">All dentists</option>{dentists.map((dentist) => <option key={dentist.id} value={dentist.name}>{dentist.name}</option>)}</select>
           <select className={inputClass} value={filters.service} onChange={(event) => updateFilter('service', event.target.value)}><option value="all">All services</option>{serviceOptions.map((service) => <option key={service} value={service}>{service}</option>)}</select>
-          <select className={inputClass} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="no_show">No Show</option><option value="cancelled">Cancelled</option><option value="declined">Declined</option></select>
+          <select className={inputClass} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="checked_in">Checked In</option><option value="in_consultation">In Consultation</option><option value="completed">Completed</option><option value="no_show">No Show</option><option value="cancelled">Cancelled</option><option value="declined">Declined</option><option value="rescheduled">Rescheduled</option></select>
           <input className={inputClass} value={filters.patient} onChange={(event) => updateFilter('patient', event.target.value)} placeholder="Patient or email" />
           {filters.period === 'custom' ? (
             <>
@@ -310,17 +376,44 @@ function AppointmentsPage({ allowApproval = false }) {
               {outcomeTarget.status === 'completed' ? 'Confirm Appointment Completion' : 'Confirm No-Show Status'}
             </h2>
             {outcomeTarget.status === 'completed' ? (
-              <div className="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm font-medium leading-6 text-sky-800">
-                <p>
-                  You are about to mark {outcomeTarget.appointment.patientName ? `${outcomeTarget.appointment.patientName}'s` : "this patient's"} appointment as Completed.
-                </p>
-                <p className="mt-3">
-                  This action confirms that the scheduled dental service has been successfully performed. The appointment will be recorded as completed, the patient will be notified, and the service amount will be included in the clinic's Estimated Revenue. Related Analytics, Reports, and the appointment activity history will also be updated.
-                </p>
-                <p className="mt-3">
-                  This action cannot be undone without administrative intervention.
-                </p>
-              </div>
+              <>
+                <div className="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm font-medium leading-6 text-sky-800">
+                  <p>
+                    You are about to mark {outcomeTarget.appointment.patientName ? `${outcomeTarget.appointment.patientName}'s` : "this patient's"} appointment as Completed.
+                  </p>
+                  <p className="mt-3">
+                    This action confirms that the scheduled dental service has been successfully performed. The appointment will be recorded as completed, the patient will be notified, and the service amount will be included in the clinic's Estimated Revenue. Related Analytics, Reports, and the appointment activity history will also be updated.
+                  </p>
+                  <p className="mt-3">
+                    This action cannot be undone without administrative intervention.
+                  </p>
+                </div>
+                <div className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4">
+                  <h3 className="text-sm font-semibold text-sky-950">Treatment Record</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <input className={inputClass} name="servicePerformed" value={completionForm.servicePerformed} onChange={handleCompletionChange} placeholder="Service performed" />
+                    <input className={inputClass} name="chiefComplaint" value={completionForm.chiefComplaint} onChange={handleCompletionChange} placeholder="Chief complaint" />
+                    <input className={inputClass} name="diagnosis" value={completionForm.diagnosis} onChange={handleCompletionChange} placeholder="Diagnosis" />
+                    <input className={inputClass} name="treatmentPerformed" value={completionForm.treatmentPerformed} onChange={handleCompletionChange} placeholder="Treatment performed" />
+                    <input className={inputClass} name="recommendations" value={completionForm.recommendations} onChange={handleCompletionChange} placeholder="Recommendations" />
+                    <input className={inputClass} name="nextVisitRecommendation" value={completionForm.nextVisitRecommendation} onChange={handleCompletionChange} placeholder="Next visit recommendation" />
+                  </div>
+                  <textarea className={`${inputClass} mt-3 min-h-24 py-3`} name="dentistNotes" value={completionForm.dentistNotes} onChange={handleCompletionChange} placeholder="Dentist notes" />
+                  <h3 className="mt-4 text-sm font-semibold text-sky-950">Private Clinical Notes</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <input className={inputClass} name="observation" value={completionForm.observation} onChange={handleCompletionChange} placeholder="Observation" />
+                    <input className={inputClass} name="assessment" value={completionForm.assessment} onChange={handleCompletionChange} placeholder="Assessment" />
+                    <input className={inputClass} name="clinicalRecommendations" value={completionForm.clinicalRecommendations} onChange={handleCompletionChange} placeholder="Clinical recommendations" />
+                    <input className={inputClass} name="additionalNotes" value={completionForm.additionalNotes} onChange={handleCompletionChange} placeholder="Additional notes" />
+                  </div>
+                  <h3 className="mt-4 text-sm font-semibold text-sky-950">Follow-up Appointment</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <input className={inputClass} type="date" name="followUpDate" value={completionForm.followUpDate} onChange={handleCompletionChange} />
+                    <input className={inputClass} type="time" name="followUpTime" value={completionForm.followUpTime} onChange={handleCompletionChange} />
+                    <input className={inputClass} name="followUpReason" value={completionForm.followUpReason} onChange={handleCompletionChange} placeholder="Reason" />
+                  </div>
+                </div>
+              </>
             ) : (
               <div className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-medium leading-6 text-red-700">
                 <p>

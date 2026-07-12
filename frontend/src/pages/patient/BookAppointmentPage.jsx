@@ -275,7 +275,7 @@ function BookAppointmentPage() {
       ])
 
       if (dentistsResult.status === 'fulfilled') {
-        setDentists(dentistsResult.value.data || [])
+        setDentists((dentistsResult.value.data || []).filter((dentist) => dentist.role === 'dentist'))
       } else {
         setDentists([])
       }

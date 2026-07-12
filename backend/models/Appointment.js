@@ -87,7 +87,7 @@ const appointmentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "completed", "cancelled", "declined", "no_show"],
+      enum: ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "declined", "no_show", "rescheduled"],
       default: "pending",
     },
     dentistName: {
@@ -151,7 +151,7 @@ appointmentSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: { $in: ["pending", "confirmed", "completed"] },
+      status: { $in: ["pending", "confirmed", "checked_in", "in_consultation", "completed", "rescheduled"] },
     },
   },
 );

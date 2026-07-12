@@ -285,6 +285,299 @@ const toStockStatus = ({ quantity = 0, reorderLevel = 0 }) => {
   return "available";
 };
 
+const inventoryListHandler = async (req, res, next) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      Inventory.find({}).sort({ itemName: 1 }).skip(skip).limit(limit),
+      Inventory.countDocuments({}),
+    ]);
+
+    res.json({
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const inventoryUsageHandler = async (req, res, next) => {
+  try {
+    const quantityUsed = Number(req.body.quantity);
+
+    if (!Number.isFinite(quantityUsed) || quantityUsed <= 0) {
+      return res.status(400).json({ message: "Quantity used must be greater than zero." });
+    }
+
+    const appointment = req.body.appointmentId
+      ? await Appointment.findById(req.body.appointmentId).lean()
+      : null;
+
+    if (req.body.appointmentId && !appointment) {
+      return res.status(404).json({ message: "Appointment or treatment record was not found." });
+    }
+
+    if (appointment && appointment.status !== "completed") {
+      return res.status(400).json({ message: "Inventory usage can only be recorded for completed treatments." });
+    }
+
+    if (req.user.role === "dentist" && appointment?.dentistName) {
+      const dentistName = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ").trim();
+      if (dentistName && appointment.dentistName !== dentistName) {
+        return res.status(403).json({ message: "Dentists can only record usage for their assigned treatments." });
+      }
+    }
+
+    const inventoryItem = await Inventory.findById(req.params.id);
+
+    if (!inventoryItem) {
+      return res.status(404).json({ message: "Inventory item was not found." });
+    }
+
+    if (Number(inventoryItem.quantity || 0) < quantityUsed) {
+      return res.status(400).json({ message: "Insufficient stock. Inventory quantity cannot go below zero." });
+    }
+
+    const treatmentRecord = appointment
+      ? await DentalRecord.findOne({ appointment: appointment._id }).sort({ createdAt: -1 }).lean()
+      : null;
+    const staffName = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ").trim() || req.user.email;
+    const updatedQuantity = Number(inventoryItem.quantity || 0) - quantityUsed;
+    const usageEntry = {
+      quantity: quantityUsed,
+      patient: appointment?.patient,
+      patientName: appointment?.patientName || req.body.patientName || "",
+      appointment: appointment?._id,
+      treatmentRecord: treatmentRecord?._id,
+      dentistName: appointment?.dentistName || req.body.dentistName || "",
+      staffMember: req.user.id,
+      staffName,
+      note: String(req.body.note || "").trim(),
+      recordedAt: new Date(),
+    };
+
+    inventoryItem.quantity = updatedQuantity;
+    inventoryItem.status = toStockStatus({
+      quantity: updatedQuantity,
+      reorderLevel: inventoryItem.reorderLevel,
+    });
+    inventoryItem.usageHistory.push(usageEntry);
+    inventoryItem.transactionHistory.push({
+      type: "treatment_usage",
+      quantityBefore: Number(inventoryItem.quantity || 0) + quantityUsed,
+      quantityChanged: -quantityUsed,
+      quantityAfter: updatedQuantity,
+      patientName: usageEntry.patientName,
+      appointment: appointment?._id,
+      dentistName: usageEntry.dentistName,
+      processedBy: req.user.id,
+      processedByName: usageEntry.staffName,
+      notes: usageEntry.note,
+      recordedAt: usageEntry.recordedAt,
+    });
+    await inventoryItem.save();
+
+    await AuditLog.create({
+      action: "Inventory usage recorded",
+      entityType: "Inventory",
+      entityId: inventoryItem._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        inventoryItem: inventoryItem.itemName,
+        quantityDeducted: quantityUsed,
+        remainingQuantity: updatedQuantity,
+        patient: usageEntry.patientName,
+        appointmentId: appointment?._id,
+        treatmentRecordId: treatmentRecord?._id,
+        dentist: usageEntry.dentistName,
+        staffMember: usageEntry.staffName,
+      },
+    });
+
+    res.json({
+      message: "Inventory usage recorded and stock updated.",
+      item: inventoryItem,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const inventorySaleHandler = async (req, res, next) => {
+  try {
+    const quantitySold = Number(req.body.quantity);
+
+    if (!Number.isFinite(quantitySold) || quantitySold <= 0) {
+      return res.status(400).json({ message: "Quantity must be greater than zero." });
+    }
+
+    const inventoryItem = await Inventory.findById(req.params.id);
+
+    if (!inventoryItem || inventoryItem.isActive === false) {
+      return res.status(404).json({ message: "Inventory item is unavailable." });
+    }
+
+    if (Number(inventoryItem.quantity || 0) < quantitySold) {
+      return res.status(400).json({ message: "Insufficient stock. Inventory quantity cannot go below zero." });
+    }
+
+    const appointment = req.body.appointmentId
+      ? await Appointment.findById(req.body.appointmentId).lean()
+      : null;
+
+    if (req.body.appointmentId && !appointment) {
+      return res.status(404).json({ message: "Connected appointment was not found." });
+    }
+
+    if (inventoryItem.requiresPrescription) {
+      const prescriptionReference = String(req.body.prescriptionReference || "").trim();
+      const dentistName = String(req.body.dentistName || appointment?.dentistName || "").trim();
+
+      if (req.user.role === "staff" && (!prescriptionReference || !dentistName)) {
+        return res.status(400).json({ message: "A dentist prescription or approval is required before releasing this item." });
+      }
+    }
+
+    const unitPrice = Math.max(Number(inventoryItem.sellingPrice ?? inventoryItem.purchasePrice ?? 0) || 0, 0);
+    const totalAmount = Math.round(unitPrice * quantitySold * 100) / 100;
+    const quantityBefore = Number(inventoryItem.quantity || 0);
+    const quantityAfter = quantityBefore - quantitySold;
+    const transactionId = `SALE-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const processedByName = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ").trim() || req.user.email;
+    const transaction = {
+      transactionId,
+      type: "sale",
+      quantityBefore,
+      quantityChanged: -quantitySold,
+      quantityAfter,
+      unitPrice,
+      totalAmount,
+      patientName: String(req.body.patientName || appointment?.patientName || "").trim(),
+      appointment: appointment?._id,
+      prescriptionReference: String(req.body.prescriptionReference || "").trim(),
+      dentistName: String(req.body.dentistName || appointment?.dentistName || "").trim(),
+      processedBy: req.user.id,
+      processedByName,
+      notes: String(req.body.notes || "").trim(),
+      recordedAt: new Date(),
+    };
+
+    inventoryItem.quantity = quantityAfter;
+    inventoryItem.status = toStockStatus({
+      quantity: quantityAfter,
+      reorderLevel: inventoryItem.reorderLevel,
+    });
+    inventoryItem.transactionHistory.push(transaction);
+    await inventoryItem.save();
+
+    await AuditLog.create({
+      action: "Inventory sale recorded",
+      entityType: "Inventory",
+      entityId: inventoryItem._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        transactionId,
+        inventoryItem: inventoryItem.itemName,
+        quantitySold,
+        unitPrice,
+        totalAmount,
+        patientName: transaction.patientName,
+        appointmentId: appointment?._id,
+        prescriptionReference: transaction.prescriptionReference,
+        dentistName: transaction.dentistName,
+        quantityBefore,
+        quantityAfter,
+      },
+    });
+
+    res.json({
+      message: "Sale/release recorded and stock updated.",
+      transactionId,
+      item: inventoryItem,
+      transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const inventoryAdjustmentHandler = async (req, res, next) => {
+  try {
+    const type = req.body.type === "deduct" ? "manual_adjustment" : "restock";
+    const quantity = Number(req.body.quantity);
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return res.status(400).json({ message: "Adjustment quantity must be greater than zero." });
+    }
+
+    const inventoryItem = await Inventory.findById(req.params.id);
+
+    if (!inventoryItem) {
+      return res.status(404).json({ message: "Inventory item was not found." });
+    }
+
+    const quantityBefore = Number(inventoryItem.quantity || 0);
+    const quantityChanged = type === "restock" ? quantity : -quantity;
+    const quantityAfter = quantityBefore + quantityChanged;
+
+    if (quantityAfter < 0) {
+      return res.status(400).json({ message: "Insufficient stock. Inventory quantity cannot go below zero." });
+    }
+
+    const processedByName = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ").trim() || req.user.email;
+    const transaction = {
+      type,
+      quantityBefore,
+      quantityChanged,
+      quantityAfter,
+      processedBy: req.user.id,
+      processedByName,
+      notes: String(req.body.note || "").trim(),
+      recordedAt: new Date(),
+    };
+
+    inventoryItem.quantity = quantityAfter;
+    inventoryItem.status = toStockStatus({ quantity: quantityAfter, reorderLevel: inventoryItem.reorderLevel });
+    inventoryItem.transactionHistory.push(transaction);
+    await inventoryItem.save();
+
+    await AuditLog.create({
+      action: type === "restock" ? "Inventory restocked" : "Inventory manually adjusted",
+      entityType: "Inventory",
+      entityId: inventoryItem._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        inventoryItem: inventoryItem.itemName,
+        transactionType: type,
+        quantityBefore,
+        quantityChanged,
+        quantityAfter,
+        notes: transaction.notes,
+      },
+    });
+
+    res.json({
+      message: type === "restock" ? "Inventory restocked successfully." : "Inventory deducted successfully.",
+      item: inventoryItem,
+      transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const normalizeClinicSettingsBody = (body = {}) => {
   const normalized = { ...body };
 
@@ -327,6 +620,12 @@ const normalizeClinicSettingsBody = (body = {}) => {
   }
 
   return normalized;
+};
+
+const sanitizePatientDentalRecord = (record) => {
+  const value = record.toObject ? record.toObject() : { ...record };
+  delete value.clinicalNotes;
+  return value;
 };
 
 const sanitizePublicSettings = (settings) => ({
@@ -440,7 +739,7 @@ router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => 
     ]);
 
     res.json({
-      data: records,
+      data: records.map(sanitizePatientDentalRecord),
       appointments,
       patient,
     });
@@ -449,14 +748,34 @@ router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => 
   }
 });
 router.use("/dentalrecords", authorize("admin", "staff", "dentist"), createCrudRouter(DentalRecord));
+router.get("/inventory", authorize("admin", "staff", "dentist"), inventoryListHandler);
+router.post("/inventory/:id/usage", authorize("admin", "staff", "dentist"), inventoryUsageHandler);
+router.post("/inventory/:id/sale", authorize("admin", "staff", "dentist"), inventorySaleHandler);
+router.post("/inventory/:id/adjust", authorize("admin"), inventoryAdjustmentHandler);
 router.use(
   "/inventory",
-  authorize("admin", "staff", "dentist"),
+  authorize("admin"),
   createCrudRouter(Inventory, {
     defaultSort: { itemName: 1 },
     beforeCreate: (body) => ({
       ...body,
+      costPrice: Number(body.costPrice ?? body.purchasePrice ?? 0) || 0,
+      expirationDate: body.expirationDate || undefined,
+      isActive: body.isActive ?? true,
+      requiresPrescription: Boolean(body.requiresPrescription),
+      sellingPrice: Number(body.sellingPrice ?? 0) || 0,
       status: toStockStatus(body),
+      transactionHistory: [
+        {
+          type: "initial_stock",
+          quantityBefore: 0,
+          quantityChanged: Number(body.quantity || 0),
+          quantityAfter: Number(body.quantity || 0),
+          unitPrice: Number(body.sellingPrice ?? 0) || 0,
+          notes: "Initial stock entry",
+          recordedAt: new Date(),
+        },
+      ],
     }),
     beforeUpdate: async (body, req) => {
       const existing = await Inventory.findById(req.params.id).lean();
@@ -464,6 +783,9 @@ router.use(
 
       return {
         ...body,
+        costPrice: body.costPrice === undefined ? undefined : Number(body.costPrice) || 0,
+        sellingPrice: body.sellingPrice === undefined ? undefined : Number(body.sellingPrice) || 0,
+        requiresPrescription: body.requiresPrescription === undefined ? undefined : Boolean(body.requiresPrescription),
         status: toStockStatus(merged),
       };
     },

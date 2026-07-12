@@ -21,7 +21,11 @@ import PatientRecordsPage from './pages/patient/PatientRecordsPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import SignInPage from './pages/SignInPage.jsx'
+import StaffClinicalNotesPage from './pages/staff/StaffClinicalNotesPage.jsx'
+import StaffInventoryPage from './pages/staff/StaffInventoryPage.jsx'
 import StaffLandingPage from './pages/staff/StaffLandingPage.jsx'
+import StaffReportsPage from './pages/staff/StaffReportsPage.jsx'
+import StaffTreatmentRecordsPage from './pages/staff/StaffTreatmentRecordsPage.jsx'
 
 const adminNavItems = [
   { label: 'Dashboard', to: '/admin', end: true, icon: 'dashboard' },
@@ -40,7 +44,12 @@ const staffNavItems = [
   { label: 'Dashboard', to: '/staff', end: true, icon: 'dashboard' },
   { label: 'Appointments', to: '/staff/appointments', icon: 'appointments' },
   { label: 'Patients', to: '/staff/patients', icon: 'patients' },
+  { label: 'Treatment Records', to: '/staff/treatment-records', icon: 'treatmentRecords' },
+  { label: 'Clinical Notes', to: '/staff/clinical-notes', icon: 'clinicalNotes' },
+  { label: 'Reports', to: '/staff/reports', icon: 'reports' },
+  { label: 'Inventory', to: '/staff/inventory', icon: 'inventory' },
   { label: 'Promotions', to: '/staff/promotions', icon: 'promotions' },
+  { label: 'Settings', to: '/staff/settings', icon: 'settings' },
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
@@ -48,7 +57,12 @@ const dentistNavItems = [
   { label: 'Dashboard', to: '/dentist', end: true, icon: 'dashboard' },
   { label: 'Appointments', to: '/dentist/appointments', icon: 'appointments' },
   { label: 'Patients', to: '/dentist/patients', icon: 'patients' },
+  { label: 'Treatment Records', to: '/dentist/treatment-records', icon: 'treatmentRecords' },
+  { label: 'Clinical Notes', to: '/dentist/clinical-notes', icon: 'clinicalNotes' },
+  { label: 'Reports', to: '/dentist/reports', icon: 'reports' },
+  { label: 'Inventory', to: '/dentist/inventory', icon: 'inventory' },
   { label: 'Promotions', to: '/dentist/promotions', icon: 'promotions' },
+  { label: 'Settings', to: '/dentist/settings', icon: 'settings' },
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
@@ -162,7 +176,12 @@ function App() {
             />
           }
         />
+        <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
+        <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
+        <Route path="reports" element={<StaffReportsPage />} />
+        <Route path="inventory" element={<StaffInventoryPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
+        <Route path="settings" element={<ProfilePage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
 
@@ -203,7 +222,12 @@ function App() {
             />
           }
         />
+        <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
+        <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
+        <Route path="reports" element={<StaffReportsPage />} />
+        <Route path="inventory" element={<StaffInventoryPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
+        <Route path="settings" element={<ProfilePage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
     </Routes>

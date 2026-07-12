@@ -35,6 +35,11 @@ const sanitizeUser = (user) => ({
   accountStatus: user.accountStatus,
   contactNumber: user.contactNumber,
   profilePhoto: user.profilePhoto,
+  recoveryEmail: user.recoveryEmail,
+  lastLoginAt: user.lastLoginAt,
+  lastPasswordChangedAt: user.lastPasswordChangedAt,
+  failedLoginAttempts: user.failedLoginAttempts || 0,
+  totalLogins: user.totalLogins || 0,
   status: user.status,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
@@ -130,11 +135,19 @@ router.get(
     const patient = user.role === "patient"
       ? await Patient.findOne({ userId: user._id })
       : null;
+    const recentActivity = user.role === "admin"
+      ? await AuditLog.find({ performedBy: user._id })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select("action entityType metadata createdAt")
+        .lean()
+      : [];
 
     res.json({
       user: {
         ...sanitizeUser(user),
         patient: sanitizePatientProfile(patient),
+        recentActivity,
       },
     });
   }),
@@ -267,6 +280,7 @@ router.patch(
       email,
       contactNumber,
       profilePhoto,
+      recoveryEmail,
       currentPassword,
       newPassword,
       confirmPassword,
@@ -300,6 +314,13 @@ router.patch(
       return res.status(400).json({
         message: MOBILE_NUMBER_MESSAGE,
         errors: { contactNumber: MOBILE_NUMBER_MESSAGE },
+      });
+    }
+
+    if (recoveryEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(recoveryEmail).trim())) {
+      return res.status(400).json({
+        message: "Enter a valid recovery email address.",
+        errors: { recoveryEmail: "Enter a valid recovery email address." },
       });
     }
 
@@ -337,6 +358,7 @@ router.patch(
       }
 
       user.passwordHash = await hashPasswordScrypt(newPassword);
+      user.lastPasswordChangedAt = new Date();
     }
 
     user.firstName = firstName.trim();
@@ -344,6 +366,10 @@ router.patch(
     user.email = normalizedEmail;
     user.contactNumber = normalizeMobileNumber(contactNumber);
     user.profilePhoto = profilePhoto || "";
+
+    if (user.role === "admin") {
+      user.recoveryEmail = recoveryEmail ? String(recoveryEmail).trim().toLowerCase() : "";
+    }
 
     await user.save();
 

@@ -12,8 +12,10 @@ import {
   FaCog,
   FaCreditCard,
   FaFileAlt,
+  FaFileMedicalAlt,
   FaHome,
   FaMoneyBillWave,
+  FaNotesMedical,
   FaSignOutAlt,
   FaTimes,
   FaTooth,
@@ -28,6 +30,7 @@ const iconMap = {
   analytics: FaChartLine,
   appointments: FaCalendarCheck,
   billing: FaCreditCard,
+  clinicalNotes: FaNotesMedical,
   dashboard: FaHome,
   dentists: FaUserMd,
   inventory: FaBoxOpen,
@@ -40,12 +43,14 @@ const iconMap = {
   records: FaFileAlt,
   settings: FaCog,
   staff: FaUserTie,
+  treatmentRecords: FaFileMedicalAlt,
 }
 
 const iconColorMap = {
   analytics: 'text-teal-700 bg-teal-50 ring-teal-100',
   appointments: 'text-emerald-600 bg-emerald-50 ring-emerald-100',
   billing: 'text-amber-600 bg-amber-50 ring-amber-100',
+  clinicalNotes: 'text-fuchsia-700 bg-fuchsia-50 ring-fuchsia-100',
   dashboard: 'text-sky-950 bg-sky-50 ring-sky-100',
   dentists: 'text-cyan-700 bg-cyan-50 ring-cyan-100',
   inventory: 'text-indigo-700 bg-indigo-50 ring-indigo-100',
@@ -58,6 +63,7 @@ const iconColorMap = {
   records: 'text-blue-700 bg-blue-50 ring-blue-100',
   settings: 'text-slate-700 bg-slate-50 ring-slate-100',
   staff: 'text-rose-700 bg-rose-50 ring-rose-100',
+  treatmentRecords: 'text-blue-700 bg-blue-50 ring-blue-100',
 }
 
 const roleLabels = {
@@ -305,16 +311,16 @@ function DashboardLayout({ portalLabel, navItems }) {
   const handleOpenNotification = async (notification) => {
     if (!notification) return
 
-    if (!notification.isRead) {
-      try {
-        await fdmstApi.markNotificationRead(notification.id)
-      } catch {
-        // Navigation should still work if the read-state update is temporarily unavailable.
-      }
+    try {
+      await fdmstApi.markNotificationRead(notification.id)
+    } catch {
+      // Navigation should still work if the read-state update is temporarily unavailable.
+    }
 
-      setNotifications((current) =>
-        current.map((item) => item.id === notification.id ? { ...item, isRead: true } : item),
-      )
+    setNotifications((current) =>
+      current.map((item) => item.id === notification.id ? { ...item, isRead: true } : item),
+    )
+    if (!notification.isRead) {
       setUnreadCount((current) => Math.max(current - 1, 0))
     }
 

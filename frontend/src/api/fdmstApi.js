@@ -196,6 +196,21 @@ export const fdmstApi = {
       method: 'PATCH',
       body: JSON.stringify(typeof payload === 'string' ? { status: payload } : payload),
     }),
+  recordInventoryUsage: (id, payload) =>
+    request(`/inventory/${id}/usage`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  sellInventoryItem: (id, payload) =>
+    request(`/inventory/${id}/sale`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  adjustInventoryStock: (id, payload) =>
+    request(`/inventory/${id}/adjust`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   list: (resource) => request(`/${resource}`),
   getById: (resource, id) => request(`/${resource}/${id}`),
   create: (resource, payload) =>

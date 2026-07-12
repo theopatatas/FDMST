@@ -14,7 +14,6 @@ import {
   FaPlus,
   FaSave,
   FaSearch,
-  FaShieldAlt,
   FaStethoscope,
   FaTimes,
   FaTooth,
@@ -108,7 +107,6 @@ const navItems = [
   { id: 'clinic', label: 'Clinic Information', icon: FaTooth },
   { id: 'services', label: 'Services & Pricing', icon: FaStethoscope },
   { id: 'appointments', label: 'Appointment Settings', icon: FaCalendarAlt },
-  { id: 'security', label: 'Security', icon: FaShieldAlt },
   { id: 'preferences', label: 'System Preferences', icon: FaCog },
   { id: 'backup', label: 'Backup & Restore', icon: FaDatabase },
   { id: 'audit', label: 'Audit Logs', icon: FaHistory },
@@ -210,7 +208,6 @@ function AdminSettingsPage() {
   const [serviceCategory, setServiceCategory] = useState('all')
   const [serviceModal, setServiceModal] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
-  const [securityForm, setSecurityForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '', sessionTimeout: 30 })
   const [auditLogs, setAuditLogs] = useState([])
   const [auditQuery, setAuditQuery] = useState('')
   const [auditDate, setAuditDate] = useState('')
@@ -223,10 +220,8 @@ function AdminSettingsPage() {
         setSettingsId(existing._id)
         const merged = mergeSettings(existing)
         setSettings(merged)
-        setSecurityForm((current) => ({ ...current, sessionTimeout: merged.security.sessionTimeout }))
       } else {
         setSettings(defaultSettings)
-        setSecurityForm((current) => ({ ...current, sessionTimeout: defaultSettings.security.sessionTimeout }))
       }
     } catch (error) {
       toast.error(error.message || 'Unable to load settings.')
@@ -384,28 +379,6 @@ function AdminSettingsPage() {
     toast.info('Appointment settings reset. Save to apply changes.')
   }
 
-  const handlePasswordSubmit = async (event) => {
-    event.preventDefault()
-    setSavingSection('security')
-    try {
-      await fdmstApi.updatePassword(securityForm)
-      const nextSettings = {
-        ...settings,
-        security: {
-          ...settings.security,
-          sessionTimeout: Number(securityForm.sessionTimeout) || 30,
-        },
-      }
-      await saveSettings(nextSettings, 'security', 'Security Updated')
-      setSecurityForm({ currentPassword: '', newPassword: '', confirmPassword: '', sessionTimeout: securityForm.sessionTimeout })
-      toast.success('Password updated successfully.')
-    } catch (error) {
-      toast.error(error.message || 'Unable to update password.')
-    } finally {
-      setSavingSection('')
-    }
-  }
-
   const handleBackup = (type) => {
     if (type === 'restore') {
       setConfirmAction({
@@ -560,20 +533,6 @@ function AdminSettingsPage() {
             <PrimaryButton loading={savingSection === 'appointments'} onClick={() => saveSettings(settings, 'appointments')} type="button"><FaSave /> Save Settings</PrimaryButton>
             <button type="button" onClick={handleAppointmentReset} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"><FaUndo className="mr-2 inline" />Reset</button>
           </div>
-        </SettingsCard>
-      )
-    }
-
-    if (activeSection === 'security') {
-      return (
-        <SettingsCard title="Security" description="Update admin password and session behavior.">
-          <form className="grid gap-4" onSubmit={handlePasswordSubmit}>
-            <PasswordField inputClassName={inputClass} label="Current Password" name="currentPassword" value={securityForm.currentPassword} onChange={(event) => setSecurityForm((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" required />
-            <PasswordField inputClassName={inputClass} label="New Password" name="newPassword" value={securityForm.newPassword} onChange={(event) => setSecurityForm((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" required />
-            <PasswordField inputClassName={inputClass} label="Confirm Password" name="confirmPassword" value={securityForm.confirmPassword} onChange={(event) => setSecurityForm((current) => ({ ...current, confirmPassword: event.target.value }))} autoComplete="new-password" required />
-            <Field label="Session Timeout"><select className={inputClass} value={securityForm.sessionTimeout} onChange={(event) => setSecurityForm((current) => ({ ...current, sessionTimeout: Number(event.target.value) }))}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={120}>2 hours</option></select></Field>
-            <PrimaryButton loading={savingSection === 'security'} type="submit"><FaShieldAlt /> Update Password</PrimaryButton>
-          </form>
         </SettingsCard>
       )
     }

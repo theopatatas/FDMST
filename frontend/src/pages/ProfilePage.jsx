@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   FaAddressCard,
   FaBirthdayCake,
   FaCamera,
+  FaCheckCircle,
+  FaDesktop,
   FaEnvelope,
+  FaExclamationTriangle,
   FaHeart,
   FaIdBadge,
+  FaKey,
   FaLock,
   FaMapMarkerAlt,
   FaPhoneAlt,
   FaSave,
   FaShieldAlt,
+  FaSignInAlt,
+  FaTimes,
   FaTrash,
   FaUser,
   FaUserEdit,
@@ -38,6 +44,7 @@ function userToForm(user) {
     email: user?.email || '',
     contactNumber: user?.contactNumber || '',
     profilePhoto: user?.profilePhoto || '',
+    recoveryEmail: user?.recoveryEmail || '',
     ...emptyPasswordFields,
   }
 }
@@ -88,6 +95,29 @@ function formatGender(value) {
   return labels[value] || 'Not provided'
 }
 
+function formatRelativeAge(value) {
+  if (!value) return 'Not provided'
+
+  const created = new Date(value)
+  if (Number.isNaN(created.getTime())) return 'Not provided'
+
+  const days = Math.max(Math.floor((Date.now() - created.getTime()) / 86400000), 0)
+  if (days < 1) return 'Today'
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'}`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'}`
+  const years = Math.floor(months / 12)
+  return `${years} year${years === 1 ? '' : 's'}`
+}
+
+function getDeviceInfo() {
+  const userAgent = navigator.userAgent || ''
+  const browser = userAgent.includes('Chrome') ? 'Chrome' : userAgent.includes('Safari') ? 'Safari' : userAgent.includes('Firefox') ? 'Firefox' : 'Current Browser'
+  const os = userAgent.includes('Mac') ? 'macOS' : userAgent.includes('Windows') ? 'Windows' : userAgent.includes('Linux') ? 'Linux' : 'Current Device'
+
+  return { browser, os }
+}
+
 function DetailCard({ icon: Icon, label, value, tone = 'sky' }) {
   const tones = {
     amber: 'bg-amber-50 text-amber-600 ring-amber-100',
@@ -98,8 +128,8 @@ function DetailCard({ icon: Icon, label, value, tone = 'sky' }) {
   }
 
   return (
-    <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start gap-4">
+    <article className="flex h-full rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex min-h-20 w-full items-start gap-4">
         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 ${tones[tone] || tones.sky}`}>
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
@@ -112,18 +142,47 @@ function DetailCard({ icon: Icon, label, value, tone = 'sky' }) {
   )
 }
 
+function StatCard({ icon: Icon, label, value, tone = 'sky', caption }) {
+  return (
+    <article className="flex h-full rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className="flex min-h-20 w-full items-center gap-4">
+        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone === 'emerald' ? 'bg-emerald-50 text-emerald-600' : tone === 'amber' ? 'bg-amber-50 text-amber-600' : tone === 'rose' ? 'bg-rose-50 text-rose-600' : 'bg-sky-50 text-sky-950'}`}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
+          <p className="mt-1 text-xl font-semibold text-sky-950">{value}</p>
+          {caption ? <p className="mt-1 text-xs text-slate-500">{caption}</p> : null}
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function ProfilePage() {
   const toast = useToast()
+  const navigate = useNavigate()
+  const location = useLocation()
   const outletContext = useOutletContext()
   const layoutUser = outletContext?.user
   const setLayoutUser = outletContext?.setUser
   const [form, setForm] = useState(() => userToForm(layoutUser || authStorage.getUser()))
   const [isSaving, setIsSaving] = useState(false)
+  const [isAdminProfileVerified, setIsAdminProfileVerified] = useState(false)
+  const [profileAccessPassword, setProfileAccessPassword] = useState('')
+  const [profileAccessError, setProfileAccessError] = useState('')
+  const [isVerifyingProfileAccess, setIsVerifyingProfileAccess] = useState(false)
   const [photoError, setPhotoError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
 
   const user = useMemo(() => layoutUser || authStorage.getUser(), [layoutUser])
   const patient = user?.patient || {}
+  const isAdmin = user?.role === 'admin'
+  const deviceInfo = useMemo(() => getDeviceInfo(), [])
+
+  const lockedFallbackPath = location.state?.from && location.state.from !== '/admin/profile'
+    ? location.state.from
+    : '/admin'
 
   useEffect(() => {
     if (!user) return
@@ -143,6 +202,46 @@ function ProfilePage() {
       isActive = false
     }
   }, [user])
+
+  useEffect(() => {
+    if (!isAdmin || isAdminProfileVerified) return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        toast.info('Admin profile remains locked.')
+        navigate(lockedFallbackPath, { replace: true })
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isAdmin, isAdminProfileVerified, lockedFallbackPath, navigate, toast])
+
+  const handleProfileAccessSubmit = async (event) => {
+    event.preventDefault()
+    setIsVerifyingProfileAccess(true)
+    setProfileAccessError('')
+
+    try {
+      await fdmstApi.verifyAdminPassword(profileAccessPassword)
+      setIsAdminProfileVerified(true)
+      setProfileAccessPassword('')
+      toast.success('Admin profile access verified.')
+    } catch (error) {
+      const message = error.message || 'Admin password could not be verified.'
+      setProfileAccessError(message)
+      toast.error(message)
+    } finally {
+      setIsVerifyingProfileAccess(false)
+    }
+  }
+
+  const handleProfileAccessDismiss = () => {
+    setProfileAccessPassword('')
+    setProfileAccessError('')
+    toast.info('Admin profile remains locked.')
+    navigate(lockedFallbackPath, { replace: true })
+  }
 
   const handleChange = useCallback((event) => {
     const { name, value } = event.target
@@ -197,6 +296,11 @@ function ProfilePage() {
       return 'Enter a valid email address.'
     }
 
+    if (user?.role === 'admin' && form.recoveryEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.recoveryEmail.trim())) {
+      setFieldErrors({ recoveryEmail: 'Enter a valid recovery email address.' })
+      return 'Enter a valid recovery email address.'
+    }
+
     const mobileError = validateMobileNumber(form.contactNumber)
 
     if (mobileError) {
@@ -249,6 +353,10 @@ function ProfilePage() {
         profilePhoto: form.profilePhoto,
       }
 
+      if (user?.role === 'admin') {
+        payload.recoveryEmail = form.recoveryEmail.trim()
+      }
+
       if (form.newPassword) {
         payload.currentPassword = form.currentPassword
         payload.newPassword = form.newPassword
@@ -276,17 +384,97 @@ function ProfilePage() {
     }
   }
 
+  if (isAdmin && !isAdminProfileVerified) {
+    return (
+      <main className="px-4 py-6 sm:px-6 lg:px-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <form
+            className="w-full max-w-md animate-[fadeIn_180ms_ease-out] rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-2xl"
+            onSubmit={handleProfileAccessSubmit}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+                  <FaShieldAlt className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
+                    Admin Verification
+                  </p>
+                  <h2 className="text-xl font-semibold text-sky-950">Unlock Admin Profile</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleProfileAccessDismiss}
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-sky-950 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                aria-label="Close admin profile unlock modal"
+              >
+                <FaTimes className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-slate-500">
+              Re-enter your admin password before viewing or updating administrator profile details.
+            </p>
+
+            <div className="mt-6">
+              <PasswordField
+                inputClassName={inputClass}
+                label="Admin Password"
+                name="adminProfilePassword"
+                value={profileAccessPassword}
+                onChange={(event) => {
+                  setProfileAccessPassword(event.target.value)
+                  setProfileAccessError('')
+                }}
+                autoComplete="current-password"
+                required
+              />
+              {profileAccessError ? <p className="mt-2 text-xs font-medium text-red-600">{profileAccessError}</p> : null}
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleProfileAccessDismiss}
+                disabled={isVerifyingProfileAccess}
+                className="h-12 rounded-2xl border border-gray-200 bg-white px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isVerifyingProfileAccess}
+                className="h-12 rounded-2xl bg-sky-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isVerifyingProfileAccess ? 'Verifying...' : 'Unlock'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
         <section className="mb-8 overflow-hidden rounded-2xl bg-sky-950 p-6 text-white shadow-xl sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-sky-200">Profile</p>
-              <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">Account Overview</h2>
+              <p className="text-sm font-medium uppercase tracking-[0.2em] text-sky-200">{isAdmin ? 'Administrator Profile' : 'Profile'}</p>
+              <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">{isAdmin ? getDisplayName(user) : 'Account Overview'}</h2>
               <p className="mt-3 max-w-2xl text-sky-100">
-                View your patient profile, contact details, account status, and security settings in one place.
+                {isAdmin
+                  ? 'Manage administrator identity, access details, security status, and operational shortcuts.'
+                  : 'View your patient profile, contact details, account status, and security settings in one place.'}
               </p>
+              {isAdmin ? (
+                <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold">
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-sky-100 ring-1 ring-white/15">Administrator</span>
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <a
@@ -307,36 +495,101 @@ function ProfilePage() {
           </div>
         </section>
 
-        <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <DetailCard icon={FaIdBadge} label="Patient ID" value={patient.patientId || user?.id} tone="amber" />
-          <DetailCard icon={FaShieldAlt} label="Account Status" value={formatAccountStatus(user?.accountStatus)} tone="emerald" />
-          <DetailCard icon={FaPhoneAlt} label="Contact Number" value={user?.contactNumber} />
-          <DetailCard icon={FaEnvelope} label="Email Address" value={user?.email} />
-          <DetailCard icon={FaBirthdayCake} label="Date of Birth" value={formatDate(patient.dateOfBirth)} tone="rose" />
-          <DetailCard icon={FaVenusMars} label="Gender" value={formatGender(patient.gender)} tone="slate" />
-          <DetailCard icon={FaMapMarkerAlt} label="Address" value={patient.address} />
-          <DetailCard
-            icon={FaAddressCard}
-            label="Emergency Contact"
-            value={[patient.emergencyContactName, patient.emergencyContactNumber].filter(Boolean).join(' - ')}
-            tone="amber"
-          />
-        </section>
+        {isAdmin ? (
+          <>
+            <section className="mb-8 grid auto-rows-fr gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <DetailCard icon={FaUser} label="Full Name" value={getDisplayName(user)} />
+              <DetailCard icon={FaShieldAlt} label="Role" value="Administrator" tone="emerald" />
+              <DetailCard icon={FaEnvelope} label="Email" value={user?.email} />
+              <DetailCard icon={FaPhoneAlt} label="Contact Number" value={user?.contactNumber} />
+            </section>
 
-        <section className="mb-8 grid gap-4 lg:grid-cols-2">
-          <DetailCard
-            icon={FaHeart}
-            label="Medical Information"
-            value={patient.medicalHistory || (patient.allergies?.length ? `Allergies: ${patient.allergies.join(', ')}` : '')}
-            tone="rose"
-          />
-          <DetailCard
-            icon={FaUser}
-            label="Dental Information"
-            value={patient.dentalHistory}
-            tone="sky"
-          />
-        </section>
+            <section className="mb-8 grid auto-rows-fr gap-4 md:grid-cols-2">
+              <StatCard icon={FaBirthdayCake} label="Account Age" value={formatRelativeAge(user?.createdAt)} caption="Since creation" tone="amber" />
+              <StatCard icon={FaDesktop} label="Current Session" value="Active" caption={deviceInfo.browser} />
+            </section>
+
+            <section className="mb-8 grid gap-6">
+              <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-3 border-b border-gray-100 pb-5">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-50 text-sky-950"><FaShieldAlt /></span>
+                  <div>
+                    <h3 className="text-lg font-semibold text-sky-950">Security Center</h3>
+                    <p className="text-sm text-slate-500">Password, login, and session health.</p>
+                  </div>
+                </div>
+                <div className="mt-5 grid auto-rows-fr gap-4 md:grid-cols-3">
+                  <StatCard icon={FaKey} label="Last Password Change" value={formatDate(user?.lastPasswordChangedAt)} />
+                  <StatCard icon={FaSignInAlt} label="Last Login" value={formatDate(user?.lastLoginAt)} tone="emerald" />
+                  <StatCard icon={FaExclamationTriangle} label="Failed Login Attempts" value={user?.failedLoginAttempts || 0} tone={user?.failedLoginAttempts ? 'rose' : 'emerald'} />
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <a href="#password-section" className="inline-flex h-11 items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-900">Change Password</a>
+                  <button type="button" className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">Login History</button>
+                  <button type="button" className="inline-flex h-11 items-center justify-center rounded-xl border border-red-100 px-4 text-sm font-semibold text-red-600 transition hover:bg-red-50">Logout Other Devices</button>
+                </div>
+              </article>
+            </section>
+
+            <section className="mb-8 grid gap-6 xl:grid-cols-2">
+              <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-sky-950">Recent Activity</h3>
+                <div className="mt-5 grid gap-3">
+                  {user?.recentActivity?.length ? user.recentActivity.map((activity) => (
+                    <div key={activity._id || `${activity.action}-${activity.createdAt}`} className="flex gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm">
+                      <FaCheckCircle className="mt-1 h-4 w-4 text-emerald-600" />
+                      <div><p className="font-semibold text-sky-950">{activity.action}</p><p className="text-xs text-slate-500">{activity.entityType} • {formatDate(activity.createdAt)}</p></div>
+                    </div>
+                  )) : <p className="rounded-2xl bg-slate-50 px-4 py-5 text-sm text-slate-500">No administrator activity has been recorded yet.</p>}
+                </div>
+              </article>
+
+              <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-sky-950">Connected Devices</h3>
+                <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-sky-950">Current Device</p>
+                  <p className="mt-2 text-sm text-slate-500">Browser: {deviceInfo.browser}</p>
+                  <p className="text-sm text-slate-500">Operating System: {deviceInfo.os}</p>
+                  <p className="text-sm text-slate-500">IP Address: Not available</p>
+                  <p className="text-sm text-slate-500">Last Active: Now</p>
+                </div>
+              </article>
+            </section>
+          </>
+        ) : (
+          <>
+            <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <DetailCard icon={FaIdBadge} label="Patient ID" value={patient.patientId || user?.id} tone="amber" />
+              <DetailCard icon={FaShieldAlt} label="Account Status" value={formatAccountStatus(user?.accountStatus)} tone="emerald" />
+              <DetailCard icon={FaPhoneAlt} label="Contact Number" value={user?.contactNumber} />
+              <DetailCard icon={FaEnvelope} label="Email Address" value={user?.email} />
+              <DetailCard icon={FaBirthdayCake} label="Date of Birth" value={formatDate(patient.dateOfBirth)} tone="rose" />
+              <DetailCard icon={FaVenusMars} label="Gender" value={formatGender(patient.gender)} tone="slate" />
+              <DetailCard icon={FaMapMarkerAlt} label="Address" value={patient.address} />
+              <DetailCard
+                icon={FaAddressCard}
+                label="Emergency Contact"
+                value={[patient.emergencyContactName, patient.emergencyContactNumber].filter(Boolean).join(' - ')}
+                tone="amber"
+              />
+            </section>
+
+            <section className="mb-8 grid gap-4 lg:grid-cols-2">
+              <DetailCard
+                icon={FaHeart}
+                label="Medical Information"
+                value={patient.medicalHistory || (patient.allergies?.length ? `Allergies: ${patient.allergies.join(', ')}` : '')}
+                tone="rose"
+              />
+              <DetailCard
+                icon={FaUser}
+                label="Dental Information"
+                value={patient.dentalHistory}
+                tone="sky"
+              />
+            </section>
+          </>
+        )}
 
         <form id="profile-form" className="grid gap-6 xl:grid-cols-[20rem_1fr]" onSubmit={handleSubmit}>
           <section className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
@@ -451,6 +704,22 @@ function ProfilePage() {
                   <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span>
                 ) : null}
               </label>
+              {isAdmin ? (
+                <label className="grid gap-2 text-sm font-semibold text-slate-500 sm:col-span-2">
+                  Recovery Email
+                  <input
+                    className={inputClass}
+                    type="email"
+                    name="recoveryEmail"
+                    value={form.recoveryEmail}
+                    onChange={handleChange}
+                    placeholder="recovery@example.com"
+                  />
+                  {fieldErrors.recoveryEmail ? (
+                    <span className="text-xs font-medium text-red-600">{fieldErrors.recoveryEmail}</span>
+                  ) : null}
+                </label>
+              ) : null}
             </div>
 
             <div id="password-section" className="mt-8 flex items-center gap-3 border-b border-gray-100 pb-5">
