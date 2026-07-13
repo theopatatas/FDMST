@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   FaArrowRight,
+  FaBell,
   FaCalendarCheck,
   FaCheckCircle,
   FaClock,
@@ -10,6 +11,7 @@ import {
   FaRegCalendarAlt,
   FaTimesCircle,
   FaTooth,
+  FaUserMd,
 } from 'react-icons/fa'
 import { AUTH_CHANGED_EVENT, authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -64,6 +66,37 @@ const statusStyles = {
     icon: FaClock,
     pill: 'bg-amber-50 text-amber-700 ring-amber-100',
   },
+}
+
+const progressSteps = ['pending', 'confirmed', 'checked_in', 'in_consultation', 'completed']
+
+function formatDateTimeHeader(date = new Date()) {
+  return date.toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+function formatClock(date = new Date()) {
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function formatRelativeTime(value) {
+  if (!value) return 'Just now'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Just now'
+  const minutes = Math.max(Math.floor((Date.now() - date.getTime()) / 60000), 0)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.floor(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
 }
 
 function getDisplayName(user) {
@@ -122,6 +155,40 @@ function AppointmentStatus({ status }) {
       <Icon className="h-3 w-3" aria-hidden="true" />
       {formatStatus(status)}
     </span>
+  )
+}
+
+function AppointmentTimeline({ appointment }) {
+  const timeline = Array.isArray(appointment?.timeline) ? appointment.timeline : []
+
+  return (
+    <div className="mt-6 rounded-2xl bg-slate-50 p-4">
+      <p className="text-sm font-semibold text-sky-950">Appointment Timeline</p>
+      <div className="mt-4 grid gap-3">
+        {progressSteps.map((step, index) => {
+          const entry = timeline.find((item) => item.status === step)
+          const isCurrent = appointment?.status === step
+          const isDone = progressSteps.indexOf(appointment?.status) >= index || Boolean(entry)
+
+          return (
+            <div key={step} className="flex items-start gap-3">
+              <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full ${isDone ? 'bg-sky-950' : 'bg-slate-300'} ${isCurrent ? 'ring-4 ring-sky-100' : ''}`} />
+              <div className="min-w-0">
+                <p className={`text-sm font-semibold ${isDone ? 'text-sky-950' : 'text-slate-400'}`}>{formatStatus(step)}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {entry?.changedAt ? formatDate(entry.changedAt) : isCurrent ? 'Current status' : 'Pending update'}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {['cancelled', 'declined', 'no_show', 'rescheduled'].includes(appointment?.status) ? (
+        <div className="mt-4 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-600 ring-1 ring-slate-100">
+          Final status: {formatStatus(appointment.status)}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -220,8 +287,12 @@ function PatientLandingPage() {
   const location = useLocation()
   const [user, setUser] = useState(() => authStorage.getUser())
   const [appointments, setAppointments] = useState([])
+  const [records, setRecords] = useState([])
+  const [promotions, setPromotions] = useState([])
+  const [notifications, setNotifications] = useState([])
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [now, setNow] = useState(() => new Date())
 
   const loadDashboard = useCallback(({ silent = false } = {}) => {
     let isActive = true
@@ -239,17 +310,31 @@ function PatientLandingPage() {
       }
     }
 
-    Promise.all([
+    Promise.allSettled([
       fdmstApi.getMyAppointments(),
+      fdmstApi.getMyDentalRecords(),
+      fdmstApi.list('promotions'),
+      fdmstApi.getNotifications(),
+      fdmstApi.getProfile(),
     ])
-      .then(([appointmentResponse]) => {
+      .then(([appointmentResult, recordsResult, promotionsResult, notificationsResult, profileResult]) => {
         if (!isActive) return
-        setAppointments(Array.isArray(appointmentResponse.data) ? appointmentResponse.data : [])
+        setAppointments(appointmentResult.status === 'fulfilled' && Array.isArray(appointmentResult.value.data) ? appointmentResult.value.data : [])
+        setRecords(recordsResult.status === 'fulfilled' && Array.isArray(recordsResult.value.data) ? recordsResult.value.data : [])
+        setPromotions(promotionsResult.status === 'fulfilled' && Array.isArray(promotionsResult.value.data) ? promotionsResult.value.data : [])
+        setNotifications(notificationsResult.status === 'fulfilled' && Array.isArray(notificationsResult.value.data) ? notificationsResult.value.data : [])
+        if (profileResult.status === 'fulfilled' && profileResult.value.user) {
+          authStorage.saveSession({ user: profileResult.value.user })
+          setUser(profileResult.value.user)
+        }
       })
       .catch((loadError) => {
         if (!isActive) return
         if (!silent) toast.error(loadError.message || 'Failed to load your dashboard.')
         setAppointments([])
+        setRecords([])
+        setPromotions([])
+        setNotifications([])
       })
       .finally(() => {
         if (isActive) setIsLoading(false)
@@ -273,6 +358,11 @@ function PatientLandingPage() {
   }, [loadDashboard, location.state?.refreshDashboard])
 
   useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     const syncUser = () => setUser(authStorage.getUser())
 
     window.addEventListener(AUTH_CHANGED_EVENT, syncUser)
@@ -282,8 +372,13 @@ function PatientLandingPage() {
   const firstName = getFirstName(user)
   const upcomingAppointments = useMemo(() => appointments.filter(isUpcoming), [appointments])
   const nextAppointment = upcomingAppointments[0]
-  const pendingCount = useMemo(() => appointments.filter((appointment) => appointment.status === 'pending').length, [appointments])
   const completedCount = useMemo(() => appointments.filter((appointment) => appointment.status === 'completed').length, [appointments])
+  const activePromotionCount = useMemo(() => promotions.filter((promotion) => promotion.status === 'active').length, [promotions])
+  const activeAppointment = useMemo(
+    () => upcomingAppointments.find((appointment) => progressSteps.includes(appointment.status)) || nextAppointment,
+    [nextAppointment, upcomingAppointments],
+  )
+  const currentProgressIndex = activeAppointment ? Math.max(progressSteps.indexOf(activeAppointment.status), 0) : -1
 
   if (!user) {
     return (
@@ -302,7 +397,7 @@ function PatientLandingPage() {
               <p className="text-sm font-medium uppercase tracking-[0.2em] text-sky-200">Patient Portal</p>
               <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Welcome back, {firstName}!</h1>
               <p className="mt-3 max-w-2xl text-sky-100">
-                Manage appointments, records, reminders, and patient offers from your Flores-Dizon Dental dashboard.
+                {formatDateTimeHeader(now)} | {formatClock(now)}
               </p>
             </div>
 
@@ -326,10 +421,69 @@ function PatientLandingPage() {
         </section>
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard icon={FaCalendarCheck} label="Upcoming Appointment" value={upcomingAppointments.length ? upcomingAppointments.length : 0} helper={nextAppointment ? formatDate(nextAppointment.appointmentDate) : 'No active schedule'} />
-          <SummaryCard icon={FaRegCalendarAlt} label="Total Appointments" value={appointments.length} helper="All booking records" tone="violet" />
-          <SummaryCard icon={FaClock} label="Pending Requests" value={pendingCount} helper="Awaiting clinic confirmation" tone="amber" />
-          <SummaryCard icon={FaCheckCircle} label="Completed Treatments" value={completedCount} helper="Finished appointments" tone="emerald" />
+          <SummaryCard icon={FaCalendarCheck} label="Upcoming Appointments" value={upcomingAppointments.length} helper={nextAppointment ? formatDate(nextAppointment.appointmentDate) : 'No active schedule'} />
+          <SummaryCard icon={FaCheckCircle} label="Completed Appointments" value={completedCount} helper="Finished clinic visits" tone="emerald" />
+          <SummaryCard icon={FaFileMedical} label="Treatment Records" value={records.length} helper="Official dental records" tone="violet" />
+          <SummaryCard icon={FaGift} label="Active Promotions" value={activePromotionCount} helper="Current clinic offers" tone="amber" />
+        </section>
+
+        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-sky-950">Appointment Progress</h2>
+                <p className="mt-2 text-sm text-slate-500">Track your nearest active appointment from request to completion.</p>
+              </div>
+              {activeAppointment ? <AppointmentStatus status={activeAppointment.status} /> : null}
+            </div>
+            {activeAppointment ? (
+              <div className="mt-6">
+                <div className="grid gap-3 sm:grid-cols-5">
+                  {progressSteps.map((step, index) => {
+                    const isActive = index <= currentProgressIndex
+                    return (
+                      <div key={step} className="min-w-0">
+                        <div className={`h-2 rounded-full ${isActive ? 'bg-sky-950' : 'bg-slate-100'}`} />
+                        <p className={`mt-2 text-xs font-semibold ${isActive ? 'text-sky-950' : 'text-slate-400'}`}>{formatStatus(step)}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                  {activeAppointment.service || 'Dental Visit'} with {activeAppointment.dentistName || 'Any available dentist'} on {formatDate(activeAppointment.appointmentDate)} at {activeAppointment.appointmentTime}.
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                No active appointment to track.
+              </div>
+            )}
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-sky-950">Appointment Reminder</h2>
+                <p className="mt-2 text-sm text-slate-500">Your nearest upcoming visit.</p>
+              </div>
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
+                <FaClock className="h-4 w-4" aria-hidden="true" />
+              </span>
+            </div>
+            {nextAppointment ? (
+              <div className="mt-5 space-y-3 text-sm">
+                <p className="text-lg font-semibold text-sky-950">{nextAppointment.service || 'Dental Visit'}</p>
+                <p className="text-slate-500">{formatDate(nextAppointment.appointmentDate)} at {nextAppointment.appointmentTime}</p>
+                <p className="text-slate-500">{nextAppointment.dentistName || 'Any available dentist'}</p>
+                <AppointmentStatus status={nextAppointment.status} />
+                <button type="button" onClick={() => setSelectedAppointment(nextAppointment)} className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
+                  View Appointment
+                </button>
+              </div>
+            ) : (
+              <p className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">No upcoming appointments.</p>
+            )}
+          </article>
         </section>
 
         <section className="mt-10">
@@ -361,6 +515,52 @@ function PatientLandingPage() {
               )
             })}
           </div>
+        </section>
+
+        <section className="mt-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-sky-950">Recent Notifications</h2>
+                <p className="mt-2 text-sm text-slate-500">Latest appointment, promotion, and account updates.</p>
+              </div>
+              <Link to="/patient/notifications" className="text-sm font-semibold text-sky-950 hover:text-amber-600">View All</Link>
+            </div>
+            <div className="mt-5 grid gap-3">
+              {notifications.slice(0, 5).length ? notifications.slice(0, 5).map((notification) => (
+                <Link
+                  key={notification.id}
+                  to="/patient/notifications"
+                  className={`flex gap-3 rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${notification.isRead ? 'border-slate-200 bg-white' : 'border-sky-100 bg-sky-50'}`}
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
+                    <FaBell className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-sky-950">{notification.title || 'Clinic update'}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{notification.message || 'No additional details.'}</p>
+                    <p className="mt-2 text-xs font-medium text-slate-400">{formatRelativeTime(notification.createdAt || notification.scheduledFor)}</p>
+                  </div>
+                </Link>
+              )) : (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">No notifications yet.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="text-xl font-semibold text-sky-950">Preferred Dentist</h2>
+            <div className="mt-5 rounded-2xl bg-slate-50 p-5">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-sky-950 ring-1 ring-sky-100">
+                <FaUserMd className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <p className="mt-4 font-semibold text-sky-950">{user?.patient?.preferredDentistName || 'No preferred dentist set'}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Set a preferred dentist in your profile. Booking will preselect them when available.</p>
+              <Link to="/patient/profile" className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
+                Update Preference
+              </Link>
+            </div>
+          </article>
         </section>
 
         <section className="mt-10">
@@ -397,8 +597,12 @@ function PatientLandingPage() {
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Date</dt><dd className="font-semibold text-sky-950">{formatDate(selectedAppointment.appointmentDate)}</dd></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Time</dt><dd className="font-semibold text-sky-950">{selectedAppointment.appointmentTime}</dd></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Dentist</dt><dd className="font-semibold text-sky-950">{selectedAppointment.dentistName || 'Any available dentist'}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Estimated Duration</dt><dd className="font-semibold text-sky-950">{selectedAppointment.serviceDurationSnapshot ? `${selectedAppointment.serviceDurationSnapshot} minutes` : 'Not specified'}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Final Price</dt><dd className="font-semibold text-sky-950">{selectedAppointment.finalPrice !== undefined ? new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(Number(selectedAppointment.finalPrice) || 0) : 'Not specified'}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Promotion</dt><dd className="font-semibold text-sky-950">{selectedAppointment.promoCode || 'None'}</dd></div>
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Status</dt><dd><AppointmentStatus status={selectedAppointment.status} /></dd></div>
             </dl>
+            <AppointmentTimeline appointment={selectedAppointment} />
           </div>
         </div>
       ) : null}

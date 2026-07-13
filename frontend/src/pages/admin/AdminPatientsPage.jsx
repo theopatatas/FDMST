@@ -4,7 +4,6 @@ import {
   FaEdit,
   FaEnvelope,
   FaEye,
-  FaFilter,
   FaMapMarkerAlt,
   FaNotesMedical,
   FaPhone,
@@ -14,8 +13,8 @@ import {
   FaSearch,
   FaShieldAlt,
   FaTimes,
-  FaUndo,
   FaUser,
+  FaUserMd,
   FaUserPlus,
   FaUsers,
   FaVenusMars,
@@ -35,8 +34,16 @@ const initialForm = {
   gender: 'prefer_not_to_say',
   address: '',
   allergies: '',
+  medicalConditions: '',
   medicalHistory: '',
   dentalHistory: '',
+  emergencyContact: '',
+  emergencyContactName: '',
+  emergencyContactNumber: '',
+  username: '',
+  temporaryPassword: '',
+  assignedDentist: '',
+  assignedDentistName: '',
   registrationStatus: 'unverified',
   status: 'active',
 }
@@ -77,15 +84,24 @@ function PatientAvatar({ patient, index = 0 }) {
   )
 }
 
+function patientDisplayStatus(patient) {
+  if ((patient?.status || 'active') === 'inactive') return 'Inactive'
+  return patient?.registrationStatus === 'verified' ? 'Verified' : 'New'
+}
+
 function PatientStatusBadge({ status, registrationStatus }) {
   const normalized = status || 'active'
-  if (registrationStatus === 'unverified') {
-    return <span className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">Unverified</span>
+  if (normalized === 'inactive') {
+    return <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-100">Inactive</span>
+  }
+
+  if (registrationStatus === 'verified') {
+    return <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">Verified</span>
   }
 
   return (
-    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${normalized === 'active' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-red-50 text-red-700 ring-red-100'}`}>
-      {normalized === 'active' ? 'Active' : 'Inactive'}
+    <span className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">
+      New
     </span>
   )
 }
@@ -116,29 +132,35 @@ function AdminPatientsPage() {
   const [patients, setPatients] = useState([])
   const [appointments, setAppointments] = useState([])
   const [records, setRecords] = useState([])
+  const [dentists, setDentists] = useState([])
   const [form, setForm] = useState(initialForm)
   const [editingId, setEditingId] = useState('')
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [genderFilter, setGenderFilter] = useState('all')
+  const [dentistFilter, setDentistFilter] = useState('all')
+  const [registrationDateFilter, setRegistrationDateFilter] = useState('')
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isConfirming, setIsConfirming] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
   const [confirmation, setConfirmation] = useState(initialConfirmation)
   const [fieldErrors, setFieldErrors] = useState({})
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
   const loadData = useCallback(async () => {
     try {
-      const [patientResponse, appointmentResponse, recordResponse] = await Promise.all([
+      const [patientResponse, appointmentResponse, recordResponse, staffResponse] = await Promise.all([
         fdmstApi.list('patients'),
         fdmstApi.getAppointments(),
         fdmstApi.list('dentalrecords'),
+        fdmstApi.getStaff(),
       ])
       setPatients(patientResponse.data || [])
       setAppointments(appointmentResponse.data || [])
       setRecords(recordResponse.data || [])
+      setDentists((staffResponse.data || []).filter((user) => user.role === 'dentist' && (user.status || 'active') === 'active'))
     } catch (error) {
       toast.error(error.message || 'Unable to load patient records.')
     } finally {
@@ -156,12 +178,14 @@ function AdminPatientsPage() {
       const matchesQuery = !normalizedQuery || [fullName(patient), patient.email, patient.patientId, patient.contactNumber]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalizedQuery))
-      const normalizedStatus = patient.registrationStatus === 'unverified' ? 'unverified' : (patient.status || 'active')
+      const normalizedStatus = patientDisplayStatus(patient).toLowerCase()
       const matchesStatus = statusFilter === 'all' || normalizedStatus === statusFilter
       const matchesGender = genderFilter === 'all' || patient.gender === genderFilter
-      return matchesQuery && matchesStatus && matchesGender
+      const matchesDentist = dentistFilter === 'all' || String(patient.assignedDentist || '') === dentistFilter
+      const matchesRegistrationDate = !registrationDateFilter || (patient.createdAt || '').slice(0, 10) === registrationDateFilter
+      return matchesQuery && matchesStatus && matchesGender && matchesDentist && matchesRegistrationDate
     })
-  }, [genderFilter, patients, query, statusFilter])
+  }, [dentistFilter, genderFilter, patients, query, registrationDateFilter, statusFilter])
 
   const pageSize = 6
   const totalPages = Math.max(Math.ceil(filteredPatients.length / pageSize), 1)
@@ -169,15 +193,7 @@ function AdminPatientsPage() {
 
   useEffect(() => {
     queueMicrotask(() => setPage(1))
-  }, [genderFilter, query, statusFilter])
-
-  const getPatientLastAppointment = useCallback((patient) => {
-    const patientAppointments = appointments
-      .filter((appointment) => appointment.email === patient.email || appointment.patientName === fullName(patient))
-      .sort((left, right) => new Date(right.appointmentDate || 0) - new Date(left.appointmentDate || 0))
-
-    return patientAppointments[0]
-  }, [appointments])
+  }, [dentistFilter, genderFilter, query, registrationDateFilter, statusFilter])
 
   const selectedAppointments = useMemo(
     () => appointments.filter((appointment) => {
@@ -190,7 +206,7 @@ function AdminPatientsPage() {
   const selectedRecords = useMemo(
     () => records.filter((record) => {
       if (!selectedPatient) return false
-      return record.patient === selectedPatient.id || record.patientName === fullName(selectedPatient)
+      return record.patient === selectedPatient.id || record.patient === selectedPatient._id || record.patientName === fullName(selectedPatient)
     }),
     [records, selectedPatient],
   )
@@ -199,6 +215,16 @@ function AdminPatientsPage() {
     setForm(initialForm)
     setEditingId('')
     setFieldErrors({})
+  }
+
+  const openCreate = () => {
+    resetForm()
+    setIsDrawerOpen(true)
+  }
+
+  const closeDrawer = () => {
+    resetForm()
+    setIsDrawerOpen(false)
   }
 
   const closeConfirmation = () => {
@@ -213,7 +239,13 @@ function AdminPatientsPage() {
 
   const handleChange = (event) => {
     const { name, value } = event.target
-    setForm((current) => ({ ...current, [name]: name === 'contactNumber' ? digitsOnly(value) : value }))
+    const nextValue = ['contactNumber', 'emergencyContactNumber'].includes(name) ? digitsOnly(value) : value
+    if (name === 'assignedDentist') {
+      const dentist = dentists.find((item) => String(item._id) === value)
+      setForm((current) => ({ ...current, assignedDentist: value, assignedDentistName: dentist ? `${dentist.firstName || ''} ${dentist.lastName || ''}`.trim() : '' }))
+      return
+    }
+    setForm((current) => ({ ...current, [name]: nextValue }))
     setFieldErrors((current) => ({ ...current, [name]: '' }))
   }
 
@@ -224,6 +256,8 @@ function AdminPatientsPage() {
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Enter a valid email address.'
     const mobileError = validateMobileNumber(form.contactNumber)
     if (mobileError) errors.contactNumber = mobileError
+    const emergencyMobileError = form.emergencyContactNumber ? validateMobileNumber(form.emergencyContactNumber) : ''
+    if (emergencyMobileError) errors.emergencyContactNumber = emergencyMobileError
     setFieldErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -239,6 +273,12 @@ function AdminPatientsPage() {
       email: form.email.trim(),
       contactNumber: form.contactNumber.trim(),
       allergies: form.allergies.trim(),
+      medicalConditions: form.medicalConditions.trim(),
+      emergencyContact: form.emergencyContact.trim(),
+      emergencyContactName: form.emergencyContactName.trim(),
+      emergencyContactNumber: form.emergencyContactNumber.trim(),
+      username: form.username.trim(),
+      temporaryPassword: form.temporaryPassword.trim(),
     }
 
     openConfirmation({
@@ -261,8 +301,16 @@ function AdminPatientsPage() {
       allergies: Array.isArray(patient.allergies) ? patient.allergies.join(', ') : patient.allergies || '',
       dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
       status: patient.status || 'active',
+      medicalConditions: patient.medicalConditions || '',
+      emergencyContact: patient.emergencyContact || '',
+      emergencyContactName: patient.emergencyContactName || '',
+      emergencyContactNumber: patient.emergencyContactNumber || '',
+      username: patient.username || '',
+      temporaryPassword: '',
+      assignedDentist: patient.assignedDentist || '',
+      assignedDentistName: patient.assignedDentistName || '',
     })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setIsDrawerOpen(true)
   }
 
   const handleViewPrompt = (patient) => {
@@ -344,7 +392,7 @@ function AdminPatientsPage() {
 
         toast.success(confirmation.target ? 'Patient updated successfully.' : 'Patient added successfully.')
         setPatients((current) => confirmation.target ? current.map((patient) => patient._id === saved._id ? saved : patient) : [saved, ...current])
-        resetForm()
+        closeDrawer()
         closeConfirmation()
       }
     } catch (error) {
@@ -357,97 +405,7 @@ function AdminPatientsPage() {
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <section className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
-        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
-                <FaUserPlus className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <h2 className="text-xl font-semibold text-sky-950">{editingId ? 'Edit Patient' : 'Add Patient'}</h2>
-            </div>
-            {editingId ? <button type="button" onClick={resetForm} className="rounded-xl border border-gray-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-sky-950" aria-label="Cancel editing"><FaUndo /></button> : null}
-          </div>
-          <div className="mt-5 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800">
-            <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
-            <p>Sensitive patient changes require admin password verification.</p>
-          </div>
-
-          <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              First Name
-              <IconField icon={FaUser}>
-                <input className={patientIconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
-              </IconField>
-              {fieldErrors.firstName ? <span className="text-xs text-red-600">{fieldErrors.firstName}</span> : null}
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Last Name
-              <IconField icon={FaUser}>
-                <input className={patientIconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
-              </IconField>
-              {fieldErrors.lastName ? <span className="text-xs text-red-600">{fieldErrors.lastName}</span> : null}
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Birth Date
-              <IconField icon={FaCalendarAlt}>
-                <input className={patientIconInputClass} name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} />
-              </IconField>
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Gender
-              <IconField icon={FaVenusMars}>
-                <select className={patientIconInputClass} name="gender" value={form.gender} onChange={handleChange}><option value="prefer_not_to_say">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select>
-              </IconField>
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Email
-              <IconField icon={FaEnvelope}>
-                <input className={patientIconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" />
-              </IconField>
-              {fieldErrors.email ? <span className="text-xs text-red-600">{fieldErrors.email}</span> : null}
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Mobile Number
-              <IconField icon={FaPhone}>
-                <input className={patientIconInputClass} name="contactNumber" inputMode="numeric" maxLength={11} value={form.contactNumber} onChange={handleChange} placeholder="09XXXXXXXXX" />
-              </IconField>
-              {fieldErrors.contactNumber ? <span className="text-xs text-red-600">{fieldErrors.contactNumber}</span> : null}
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Address
-              <IconField icon={FaMapMarkerAlt}>
-                <textarea className={`${patientTextareaClass} pl-12`} name="address" value={form.address || ''} onChange={handleChange} placeholder="Enter full address" />
-              </IconField>
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Allergies
-              <IconField icon={FaNotesMedical}>
-                <textarea className={`${patientTextareaClass} pl-12`} name="allergies" value={form.allergies || ''} onChange={handleChange} placeholder="Enter allergies (optional)" />
-              </IconField>
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Medical History
-              <IconField icon={FaNotesMedical}>
-                <textarea className={`${patientTextareaClass} pl-12`} name="medicalHistory" value={form.medicalHistory || ''} onChange={handleChange} placeholder="Enter medical history (optional)" />
-              </IconField>
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Dental History
-              <IconField icon={FaNotesMedical}>
-                <textarea className={`${patientTextareaClass} pl-12`} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} placeholder="Enter dental history (optional)" />
-              </IconField>
-            </label>
-            <button className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900">
-              <FaPlus className="h-4 w-4" aria-hidden="true" />
-              {editingId ? 'Save Patient' : 'Create Patient'}
-            </button>
-          </form>
-        </article>
-
-        <article className="flex min-h-[52rem] flex-col rounded-[1.35rem] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
+      <section className="flex min-h-[52rem] flex-col rounded-[1.35rem] border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
           <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
@@ -458,44 +416,56 @@ function AdminPatientsPage() {
                 <p className="mt-1 text-sm text-slate-500">View and manage all patient records.</p>
               </div>
             </div>
-            <button type="button" onClick={() => { resetForm(); window.scrollTo({ top: 0, behavior: 'smooth' }) }} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900">
+          </div>
+
+          <div className="grid gap-3 px-5 pb-4 xl:grid-cols-[minmax(360px,1fr)_auto] xl:items-center">
+            <label className="relative block">
+              <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input className={`${patientIconInputClass} h-11 pl-11`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, ID, contact, or email..." />
+            </label>
+            <button type="button" onClick={openCreate} className="inline-flex h-11 whitespace-nowrap items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-bold text-white transition hover:bg-sky-900">
               <FaPlus className="h-4 w-4" aria-hidden="true" />
               Add Patient
             </button>
           </div>
 
-          <div className="grid gap-3 border-b border-slate-100 px-5 pb-5 lg:grid-cols-[minmax(0,1fr)_11rem_11rem_auto_auto]">
-            <label className="relative">
-              <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-              <input className={patientIconInputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients by name, email, or ID..." />
-            </label>
-            <select className={patientInputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All Statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="unverified">Unverified</option>
+          <div className="grid items-center gap-3 border-b border-slate-100 px-5 pb-5 md:grid-cols-2 xl:grid-cols-[170px_170px_190px_190px_auto_auto]">
+            <select className={`${patientInputClass} h-11`} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">All Statuses</option><option value="new">New</option><option value="verified">Verified</option><option value="inactive">Inactive</option>
             </select>
-            <select className={patientInputClass} value={genderFilter} onChange={(event) => setGenderFilter(event.target.value)}>
+            <select className={`${patientInputClass} h-11`} value={genderFilter} onChange={(event) => setGenderFilter(event.target.value)}>
               <option value="all">All Genders</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option>
             </select>
-            <button type="button" onClick={loadData} className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950" aria-label="Refresh patients"><FaRedo className="h-4 w-4" aria-hidden="true" /></button>
-            <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setGenderFilter('all') }} className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950" aria-label="Clear patient filters"><FaFilter className="h-4 w-4" aria-hidden="true" /></button>
+            <select className={`${patientInputClass} h-11`} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)}>
+              <option value="all">All Dentists</option>
+              {dentists.map((dentist) => (
+                <option key={dentist._id} value={dentist._id}>{[dentist.firstName, dentist.lastName].filter(Boolean).join(' ')}</option>
+              ))}
+            </select>
+            <input className={`${patientInputClass} h-11`} type="date" value={registrationDateFilter} onChange={(event) => setRegistrationDateFilter(event.target.value)} aria-label="Registration date" />
+            <button type="button" onClick={loadData} className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-sky-950" aria-label="Refresh patients"><FaRedo className="h-4 w-4" aria-hidden="true" /></button>
+            <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setGenderFilter('all'); setDentistFilter('all'); setRegistrationDateFilter('') }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-sky-950">
+              <FaTimes className="h-4 w-4" aria-hidden="true" />
+              Clear
+            </button>
           </div>
 
           {isLoading ? <p className="p-6 text-sm text-slate-500">Loading patients...</p> : filteredPatients.length ? (
             <>
             <div className="overflow-x-auto">
-              <table className="min-w-[980px] w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-4">Patient ID</th><th className="px-5 py-4">Full Name</th><th className="px-5 py-4">Email</th><th className="px-5 py-4">Mobile Number</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Last Appointment</th><th className="px-5 py-4">Date Registered</th><th className="px-5 py-4 text-right">Actions</th></tr></thead>
+              <table className="min-w-[1100px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-4">Patient ID</th><th className="px-5 py-4">Patient Name</th><th className="px-5 py-4">Contact Number</th><th className="px-5 py-4">Email</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Registration Date</th><th className="px-5 py-4">Assigned Dentist</th><th className="px-5 py-4 text-right">Actions</th></tr></thead>
                 <tbody>
                   {visiblePatients.map((patient, index) => {
-                    const lastAppointment = getPatientLastAppointment(patient)
                     return (
                     <tr key={patient._id} className="border-t border-slate-100">
                       <td className="px-5 py-5"><div className="flex items-center gap-3"><PatientAvatar patient={patient} index={index} /><span className="text-xs font-medium text-slate-500">{patient.patientId || 'No Patient ID'}</span></div></td>
                       <td className="px-5 py-5 font-semibold text-sky-950">{fullName(patient)}</td>
-                      <td className="px-5 py-5 text-slate-700">{patient.email || 'Not provided'}</td>
                       <td className="px-5 py-5 text-slate-700">{patient.contactNumber || 'Not provided'}</td>
+                      <td className="px-5 py-5 text-slate-700">{patient.email || 'Not provided'}</td>
                       <td className="px-5 py-5"><PatientStatusBadge status={patient.status} registrationStatus={patient.registrationStatus} /></td>
-                      <td className="px-5 py-5 text-slate-600">{lastAppointment ? formatDateTime(lastAppointment.appointmentDate) : '—'}</td>
                       <td className="px-5 py-5 text-slate-600">{formatDateTime(patient.createdAt)}</td>
+                      <td className="px-5 py-5 text-slate-600">{patient.assignedDentistName || 'Unassigned'}</td>
                       <td className="px-5 py-5"><div className="flex justify-end gap-2"><button type="button" onClick={() => handleViewPrompt(patient)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200" aria-label={`View ${fullName(patient)}`}><FaEye /></button><button type="button" onClick={() => handleEditPrompt(patient)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-950 transition hover:bg-sky-100" aria-label={`Edit ${fullName(patient)}`}><FaEdit /></button><button type="button" onClick={() => handleToggleStatus(patient)} className={`inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${(patient.status || 'active') === 'active' ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`} aria-label={`Change status for ${fullName(patient)}`}><FaPowerOff /></button></div></td>
                     </tr>
                     )
@@ -520,7 +490,6 @@ function AdminPatientsPage() {
               No patient records match your filters.
             </div>
           )}
-        </article>
       </section>
 
       {selectedPatient ? (
@@ -528,11 +497,181 @@ function AdminPatientsPage() {
           <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-[1.75rem] bg-white p-6 shadow-2xl">
             <div className="flex justify-between gap-4"><div><h2 className="text-2xl font-semibold text-sky-950">{fullName(selectedPatient)}</h2><p className="text-sm text-slate-500">{selectedPatient.email || 'No email'}</p></div><button onClick={() => setSelectedPatient(null)} className="h-10 rounded-xl border px-4 text-sm font-semibold">Close</button></div>
             <div className="mt-6 grid gap-5 lg:grid-cols-2">
-              <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Medical / Dental History</h3><p className="mt-3 text-sm text-slate-600">{selectedPatient.allergies?.length ? `Allergies: ${selectedPatient.allergies.join(', ')}` : 'No allergies recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.medicalHistory || 'No medical history recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.dentalHistory || 'No dental history recorded.'}</p></section>
+              <section className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-semibold text-sky-950">Personal Information</h3>
+                <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                  <p>Patient ID: {selectedPatient.patientId || '—'}</p>
+                  <p>Date of Birth: {selectedPatient.dateOfBirth ? new Date(selectedPatient.dateOfBirth).toLocaleDateString() : '—'}</p>
+                  <p>Gender: {(selectedPatient.gender || 'prefer_not_to_say').replaceAll('_', ' ')}</p>
+                  <p>Contact: {selectedPatient.contactNumber || '—'}</p>
+                  <p>Address: {selectedPatient.address || '—'}</p>
+                </div>
+              </section>
+              <section className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-semibold text-sky-950">Account Information</h3>
+                <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                  <p>Status: {patientDisplayStatus(selectedPatient)}</p>
+                  <p>Verification: {selectedPatient.registrationStatus === 'verified' ? 'Verified' : 'New'}</p>
+                  <p>Verified At: {selectedPatient.verifiedAt ? formatDateTime(selectedPatient.verifiedAt) : '—'}</p>
+                  <p>Assigned Dentist: {selectedPatient.assignedDentistName || 'Unassigned'}</p>
+                  <p>Registered: {formatDateTime(selectedPatient.createdAt)}</p>
+                </div>
+              </section>
+              <section className="rounded-2xl bg-slate-50 p-4 lg:col-span-2"><h3 className="font-semibold text-sky-950">Medical / Dental History</h3><p className="mt-3 text-sm text-slate-600">{selectedPatient.allergies?.length ? `Allergies: ${selectedPatient.allergies.join(', ')}` : 'No allergies recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.medicalConditions ? `Medical Conditions: ${selectedPatient.medicalConditions}` : 'No medical conditions recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.emergencyContact || selectedPatient.emergencyContactName || selectedPatient.emergencyContactNumber ? `Emergency Contact: ${[selectedPatient.emergencyContact, selectedPatient.emergencyContactName, selectedPatient.emergencyContactNumber].filter(Boolean).join(' • ')}` : 'No emergency contact recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.medicalHistory || 'No medical history recorded.'}</p><p className="mt-2 text-sm text-slate-600">{selectedPatient.dentalHistory || 'No dental history recorded.'}</p></section>
               <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Appointment History</h3>{selectedAppointments.length ? selectedAppointments.map((item) => <p key={item.id} className="mt-2 text-sm text-slate-600">{new Date(item.appointmentDate).toLocaleDateString()} • {item.service} • {item.status}</p>) : <p className="mt-3 text-sm text-slate-500">No appointments found.</p>}</section>
-              <section className="rounded-2xl bg-slate-50 p-4 lg:col-span-2"><h3 className="font-semibold text-sky-950">Treatment Records</h3>{selectedRecords.length ? selectedRecords.map((item) => <p key={item._id} className="mt-2 text-sm text-slate-600">{new Date(item.visitDate).toLocaleDateString()} • {item.procedure || item.treatment || 'Treatment'} • {item.dentistName || 'No dentist listed'}</p>) : <p className="mt-3 text-sm text-slate-500">No dental records found.</p>}</section>
+              <section className="rounded-2xl bg-slate-50 p-4"><h3 className="font-semibold text-sky-950">Clinical Notes</h3>{selectedRecords.filter((item) => item.recordType === 'clinical_note' || item.clinicalNotes).length ? selectedRecords.filter((item) => item.recordType === 'clinical_note' || item.clinicalNotes).map((item) => <p key={item._id} className="mt-2 text-sm text-slate-600">{new Date(item.visitDate || item.createdAt).toLocaleDateString()} • {item.noteType || 'Clinical Note'} • {item.createdByName || item.dentistName || 'Provider'}</p>) : <p className="mt-3 text-sm text-slate-500">No clinical notes found.</p>}</section>
+              <section className="rounded-2xl bg-slate-50 p-4 lg:col-span-2"><h3 className="font-semibold text-sky-950">Treatment Records</h3>{selectedRecords.length ? selectedRecords.filter((item) => item.recordType !== 'clinical_note').map((item) => <p key={item._id} className="mt-2 text-sm text-slate-600">{new Date(item.visitDate).toLocaleDateString()} • {item.procedure || item.treatment || 'Treatment'} • {item.dentistName || 'No dentist listed'}</p>) : <p className="mt-3 text-sm text-slate-500">No dental records found.</p>}</section>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {isDrawerOpen ? (
+        <div className="fixed inset-0 z-50">
+          <button type="button" className="absolute inset-0 bg-slate-950/40" onClick={closeDrawer} aria-label="Close patient drawer" />
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-xl min-w-0 flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Patients</p>
+                <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">{editingId ? 'Edit Patient' : 'Add Patient'}</h2>
+                <p className="mt-1 text-sm text-slate-500">Patient account changes require admin password verification.</p>
+              </div>
+              <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
+                <FaTimes className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+              <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-5 py-6 sm:grid-cols-2 sm:px-6">
+                <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800 sm:col-span-2">
+                  <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <p>Sensitive patient changes require admin password verification before saving.</p>
+                </div>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  First Name
+                  <IconField icon={FaUser}>
+                    <input className={patientIconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
+                  </IconField>
+                  {fieldErrors.firstName ? <span className="text-xs font-medium text-red-600">{fieldErrors.firstName}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Last Name
+                  <IconField icon={FaUser}>
+                    <input className={patientIconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
+                  </IconField>
+                  {fieldErrors.lastName ? <span className="text-xs font-medium text-red-600">{fieldErrors.lastName}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Birth Date
+                  <IconField icon={FaCalendarAlt}>
+                    <input className={patientIconInputClass} name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Gender
+                  <IconField icon={FaVenusMars}>
+                    <select className={patientIconInputClass} name="gender" value={form.gender} onChange={handleChange}>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                      <option value="female">Female</option>
+                      <option value="male">Male</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Email
+                  <IconField icon={FaEnvelope}>
+                    <input className={patientIconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" />
+                  </IconField>
+                  {fieldErrors.email ? <span className="text-xs font-medium text-red-600">{fieldErrors.email}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Mobile Number
+                  <IconField icon={FaPhone}>
+                    <input className={patientIconInputClass} name="contactNumber" inputMode="numeric" maxLength={11} value={form.contactNumber} onChange={handleChange} placeholder="09XXXXXXXXX" />
+                  </IconField>
+                  {fieldErrors.contactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
+                  Address
+                  <IconField icon={FaMapMarkerAlt}>
+                    <textarea className={`${patientTextareaClass} min-h-24 pl-12`} name="address" value={form.address || ''} onChange={handleChange} placeholder="Enter full address" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
+                  Assigned Dentist
+                  <IconField icon={FaUserMd}>
+                    <select className={patientIconInputClass} name="assignedDentist" value={form.assignedDentist || ''} onChange={handleChange}>
+                      <option value="">No assigned dentist</option>
+                      {dentists.map((dentist) => (
+                        <option key={dentist._id} value={dentist._id}>{[dentist.firstName, dentist.lastName].filter(Boolean).join(' ')}</option>
+                      ))}
+                    </select>
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Allergies
+                  <IconField icon={FaNotesMedical}>
+                    <textarea className={`${patientTextareaClass} min-h-24 pl-12`} name="allergies" value={form.allergies || ''} onChange={handleChange} placeholder="Enter allergies (optional)" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Medical Conditions
+                  <IconField icon={FaNotesMedical}>
+                    <textarea className={`${patientTextareaClass} min-h-24 pl-12`} name="medicalConditions" value={form.medicalConditions || ''} onChange={handleChange} placeholder="Enter medical conditions (optional)" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Medical History
+                  <IconField icon={FaNotesMedical}>
+                    <textarea className={`${patientTextareaClass} min-h-24 pl-12`} name="medicalHistory" value={form.medicalHistory || ''} onChange={handleChange} placeholder="Enter medical history (optional)" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Dental History
+                  <IconField icon={FaNotesMedical}>
+                    <textarea className={`${patientTextareaClass} min-h-24 pl-12`} name="dentalHistory" value={form.dentalHistory || ''} onChange={handleChange} placeholder="Enter dental history (optional)" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Emergency Contact
+                  <IconField icon={FaPhone}>
+                    <input className={patientIconInputClass} name="emergencyContact" value={form.emergencyContact || ''} onChange={handleChange} placeholder="Name and relationship" />
+                  </IconField>
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Emergency Contact Number
+                  <IconField icon={FaPhone}>
+                    <input className={patientIconInputClass} name="emergencyContactNumber" inputMode="numeric" maxLength={11} value={form.emergencyContactNumber || ''} onChange={handleChange} placeholder="09XXXXXXXXX" />
+                  </IconField>
+                  {fieldErrors.emergencyContactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.emergencyContactNumber}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Username
+                  <IconField icon={FaUser}>
+                    <input className={patientIconInputClass} name="username" value={form.username || ''} onChange={handleChange} placeholder="Optional account username" />
+                  </IconField>
+                  {fieldErrors.username ? <span className="text-xs font-medium text-red-600">{fieldErrors.username}</span> : null}
+                </label>
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Temporary Password
+                  <IconField icon={FaShieldAlt}>
+                    <input className={patientIconInputClass} name="temporaryPassword" type="password" value={form.temporaryPassword || ''} onChange={handleChange} placeholder="Optional temporary password" />
+                  </IconField>
+                  {fieldErrors.temporaryPassword ? <span className="text-xs font-medium text-red-600">{fieldErrors.temporaryPassword}</span> : null}
+                </label>
+              </div>
+
+              <div className="grid gap-3 border-t border-slate-100 bg-white px-5 py-5 sm:flex sm:flex-row sm:justify-end sm:px-6">
+                <button type="button" onClick={closeDrawer} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-lg shadow-sky-950/20 transition hover:bg-sky-900">
+                  {editingId ? 'Save Patient' : 'Create Patient'}
+                </button>
+              </div>
+            </form>
+          </aside>
         </div>
       ) : null}
 

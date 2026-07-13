@@ -98,6 +98,38 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    timeline: [
+      {
+        status: {
+          type: String,
+          trim: true,
+        },
+        action: {
+          type: String,
+          trim: true,
+        },
+        performedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        performedByName: {
+          type: String,
+          trim: true,
+        },
+        performedByEmail: {
+          type: String,
+          trim: true,
+        },
+        note: {
+          type: String,
+          trim: true,
+        },
+        recordedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     declineReason: {
       type: String,
       trim: true,

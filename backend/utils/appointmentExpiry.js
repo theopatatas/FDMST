@@ -185,6 +185,24 @@ const declineOverduePendingAppointments = async (now) => {
   }
 };
 
+const normalizeLegacyAutoDeclinedAppointments = async () => {
+  await Appointment.updateMany(
+    {
+      status: "declined",
+      $or: [
+        { autoDeclinedAt: { $exists: true } },
+        { declineReason: AUTO_DECLINE_REASON },
+      ],
+    },
+    {
+      $set: {
+        status: "cancelled",
+        declineReason: AUTO_DECLINE_REASON,
+      },
+    },
+  );
+};
+
 const runAppointmentExpiryCheck = async () => {
   if (isRunning) return;
 
@@ -192,6 +210,7 @@ const runAppointmentExpiryCheck = async () => {
 
   try {
     const now = new Date();
+    await normalizeLegacyAutoDeclinedAppointments();
     await warnExpiringPendingAppointments(now);
     await declineOverduePendingAppointments(now);
   } catch (error) {

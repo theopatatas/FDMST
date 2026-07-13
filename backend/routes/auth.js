@@ -41,6 +41,8 @@ const sanitizePatient = (patient) => ({
   medicalHistory: patient.medicalHistory,
   dentalHistory: patient.dentalHistory,
   registrationStatus: patient.registrationStatus,
+  preferredDentist: patient.preferredDentist,
+  preferredDentistName: patient.preferredDentistName,
   status: patient.status,
   createdAt: patient.createdAt,
 });
@@ -55,6 +57,53 @@ const createAuthToken = (user) =>
     getJwtSecret(),
     { expiresIn: getJwtExpiresIn() },
   );
+
+const getRequestIp = (req) =>
+  String(req.headers["x-forwarded-for"] || req.ip || req.socket?.remoteAddress || "")
+    .split(",")[0]
+    .trim() || "Unknown";
+
+const getBrowser = (userAgent = "") => {
+  if (/edg/i.test(userAgent)) return "Microsoft Edge";
+  if (/chrome|crios/i.test(userAgent)) return "Chrome";
+  if (/safari/i.test(userAgent) && !/chrome|crios/i.test(userAgent)) return "Safari";
+  if (/firefox/i.test(userAgent)) return "Firefox";
+  return "Unknown Browser";
+};
+
+const getDevice = (userAgent = "") => {
+  if (/iphone|ipad|android|mobile/i.test(userAgent)) return "Mobile Device";
+  if (/mac/i.test(userAgent)) return "macOS";
+  if (/windows/i.test(userAgent)) return "Windows";
+  if (/linux/i.test(userAgent)) return "Linux";
+  return "Unknown Device";
+};
+
+const recordLoginHistory = async (user, req, status) => {
+  if (!user) return;
+
+  const userAgent = String(req.headers["user-agent"] || "");
+  user.loginHistory = [
+    {
+      ipAddress: getRequestIp(req),
+      device: getDevice(userAgent),
+      browser: getBrowser(userAgent),
+      status,
+      recordedAt: new Date(),
+    },
+    ...(user.loginHistory || []),
+  ].slice(0, 25);
+
+  if (status === "Successful") {
+    user.lastLoginAt = new Date();
+    user.totalLogins = Number(user.totalLogins || 0) + 1;
+    user.failedLoginAttempts = 0;
+  } else {
+    user.failedLoginAttempts = Number(user.failedLoginAttempts || 0) + 1;
+  }
+
+  await user.save();
+};
 
 router.post(
   "/register",
@@ -196,6 +245,7 @@ router.post(
     const isValidPassword = await verifyPassword(password, user.passwordHash);
 
     if (!isValidPassword) {
+      await recordLoginHistory(user, req, "Failed").catch(() => {});
       return res.status(401).json({
         message: "Invalid email or password.",
       });
@@ -206,6 +256,8 @@ router.post(
         message: "This account is deactivated. Please contact the clinic.",
       });
     }
+
+    await recordLoginHistory(user, req, "Successful").catch(() => {});
 
     const token = createAuthToken(user);
 

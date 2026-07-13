@@ -177,6 +177,20 @@ function PatientRecordsPage() {
     () => [...appointments].sort((a, b) => new Date(b.appointmentDate || 0) - new Date(a.appointmentDate || 0)),
     [appointments],
   )
+  const lastCompletedAppointment = useMemo(
+    () => appointmentHistory.find((appointment) => appointment.status === 'completed') || appointmentHistory[0],
+    [appointmentHistory],
+  )
+  const upcomingFollowUp = useMemo(() => {
+    const now = new Date()
+    return appointments
+      .filter((appointment) => {
+        const text = `${appointment.service || ''} ${appointment.reason || ''}`.toLowerCase()
+        const appointmentDate = new Date(appointment.appointmentDate || 0)
+        return text.includes('follow') && appointmentDate >= now && !['cancelled', 'declined', 'no_show', 'completed'].includes(appointment.status)
+      })
+      .sort((a, b) => new Date(a.appointmentDate || 0) - new Date(b.appointmentDate || 0))[0]
+  }, [appointments])
 
   const allergies = patient?.allergies?.length ? patient.allergies.join(', ') : 'None recorded'
   const medications = records.flatMap((record) => record.medications || []).filter(Boolean)
@@ -197,6 +211,13 @@ function PatientRecordsPage() {
               <FaFileMedical className="h-7 w-7" aria-hidden="true" />
             </span>
           </div>
+        </section>
+
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <InfoCard icon={FaClipboardList} label="Total Treatments" value={records.length} tone="amber" />
+          <InfoCard icon={FaCalendarCheck} label="Last Visit" value={lastCompletedAppointment?.appointmentDate ? formatDate(lastCompletedAppointment.appointmentDate) : 'No completed visits'} />
+          <InfoCard icon={FaUserMd} label="Assigned Dentist" value={patient?.assignedDentistName || lastCompletedAppointment?.dentistName || 'Not assigned'} tone="emerald" />
+          <InfoCard icon={FaNotesMedical} label="Upcoming Follow-Up" value={upcomingFollowUp?.appointmentDate ? formatDate(upcomingFollowUp.appointmentDate) : 'None scheduled'} tone="rose" />
         </section>
 
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">

@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+@layer base {
+  :where(
+    a[href],
+    button:not(:disabled),
+    [role="button"],
+    summary,
+    select:not(:disabled),
+    input[type="button"]:not(:disabled),
+    input[type="submit"]:not(:disabled),
+    input[type="reset"]:not(:disabled),
+    input[type="checkbox"]:not(:disabled),
+    input[type="radio"]:not(:disabled)
+  ) {
+    cursor: pointer;
+  }
+
+  :where(button:disabled, select:disabled, input:disabled, textarea:disabled) {
+    cursor: not-allowed;
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

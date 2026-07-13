@@ -2,13 +2,13 @@ import { formatDate, formatStatus } from '../utils/auth.js'
 
 const statusStyles = {
   pending: 'bg-amber-50 text-amber-700',
-  confirmed: 'bg-emerald-50 text-emerald-700',
-  checked_in: 'bg-blue-50 text-blue-700',
+  confirmed: 'bg-blue-50 text-blue-700',
+  checked_in: 'bg-emerald-50 text-emerald-700',
   in_consultation: 'bg-violet-50 text-violet-700',
-  completed: 'bg-sky-50 text-sky-700',
+  completed: 'bg-emerald-50 text-emerald-700',
   cancelled: 'bg-red-50 text-red-700',
   declined: 'bg-red-50 text-red-700',
-  no_show: 'bg-red-50 text-red-700',
+  no_show: 'bg-slate-100 text-slate-700',
   rescheduled: 'bg-slate-100 text-slate-700',
 }
 
@@ -82,6 +82,7 @@ function AppointmentsTable({
       <table className="min-w-full text-left text-sm">
         <thead className="sticky top-0 z-10 border-b border-gray-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
           <tr>
+            <th className="px-4 py-3 font-semibold">Appointment ID</th>
             <th className="px-4 py-3 font-semibold">Patient</th>
             <th className="px-4 py-3 font-semibold">Date</th>
             <th className="px-4 py-3 font-semibold">Time</th>
@@ -98,6 +99,7 @@ function AppointmentsTable({
               onClick={() => onRowClick?.(appointment)}
               className={`border-b border-gray-100 last:border-b-0 ${onRowClick ? 'cursor-pointer transition hover:bg-slate-50' : ''}`}
             >
+              <td className="px-4 py-3 font-medium text-slate-500">{appointment.appointmentId || `APT-${String(appointment.id).slice(-6).toUpperCase()}`}</td>
               <td className="px-4 py-3 font-medium text-sky-950">{appointment.patientName}</td>
               <td className="px-4 py-3">{formatDate(appointment.appointmentDate)}</td>
               <td className="px-4 py-3">{appointment.appointmentTime}</td>
@@ -105,7 +107,7 @@ function AppointmentsTable({
               <td className="px-4 py-3">{appointment.dentistName || '—'}</td>
               <td className="px-4 py-3">
                 <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
                     statusStyles[appointment.status] || 'bg-slate-100 text-slate-600'
                   }`}
                 >

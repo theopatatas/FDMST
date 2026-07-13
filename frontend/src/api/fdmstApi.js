@@ -118,6 +118,17 @@ export const fdmstApi = {
   },
   getStaffDashboard: () => request('/dashboard/staff'),
   getProfile: () => request('/users/me'),
+  getUserSettings: () => request('/users/me/settings'),
+  updateUserSettings: (payload) =>
+    request('/users/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  logReportAction: (payload) =>
+    request('/users/me/report-action', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getNotifications: () => request('/users/me/notifications'),
   markNotificationsRead: () =>
     request('/users/me/notifications/read', {
@@ -162,6 +173,15 @@ export const fdmstApi = {
     }),
   getMyAppointments: () => request('/appointments/my'),
   getMyDentalRecords: () => request('/dentalrecords/my'),
+  getMyCarePatients: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/patients/my-care${query ? `?${query}` : ''}`)
+  },
+  getMyCarePatient: (id) => request(`/patients/my-care/${id}`),
   getStaff: () => request('/users/staff'),
   verifyAdminPassword: (adminPassword) =>
     request('/users/admin/verify-password', {
@@ -191,10 +211,98 @@ export const fdmstApi = {
     const query = params.toString()
     return request(`/appointments${query ? `?${query}` : ''}`)
   },
+  getProviderReportAppointments: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/appointments/provider/reports${query ? `?${query}` : ''}`)
+  },
+  getProviderTreatmentRecords: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dentalrecords/provider/reports${query ? `?${query}` : ''}`)
+  },
+  getClinicalNotes: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dentalrecords/clinical-notes${query ? `?${query}` : ''}`)
+  },
+  createClinicalNote: (payload) =>
+    request('/dentalrecords/clinical-notes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateClinicalNote: (id, payload) =>
+    request(`/dentalrecords/clinical-notes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  viewClinicalNote: (id, filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dentalrecords/clinical-notes/${id}${query ? `?${query}` : ''}`)
+  },
+  exportClinicalNotes: (payload) =>
+    request('/dentalrecords/clinical-notes/export', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getTreatmentRecords: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dentalrecords/treatment-records${query ? `?${query}` : ''}`)
+  },
+  createTreatmentRecord: (payload) =>
+    request('/dentalrecords/treatment-records', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateTreatmentRecord: (id, payload) =>
+    request(`/dentalrecords/treatment-records/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  viewTreatmentRecord: (id, filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/dentalrecords/treatment-records/${id}${query ? `?${query}` : ''}`)
+  },
+  exportTreatmentRecords: (payload) =>
+    request('/dentalrecords/treatment-records/export', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateAppointmentStatus: (id, payload) =>
     request(`/appointments/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify(typeof payload === 'string' ? { status: payload } : payload),
+    }),
+  updateAppointmentNotes: (id, payload) =>
+    request(`/appointments/${id}/notes`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  updateAppointmentSchedule: (id, payload) =>
+    request(`/appointments/${id}/schedule`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     }),
   recordInventoryUsage: (id, payload) =>
     request(`/inventory/${id}/usage`, {

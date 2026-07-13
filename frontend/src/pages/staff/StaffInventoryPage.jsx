@@ -147,7 +147,7 @@ function StaffInventoryPage() {
   return (
     <main className="px-6 py-8">
       <section className="overflow-hidden rounded-[1.75rem] border border-gray-200 bg-white shadow-sm">
-        <div className="bg-gradient-to-br from-sky-950 via-sky-900 to-indigo-900 px-6 py-7 text-white">
+        <div className="bg-sky-950 px-6 py-7 text-white">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
               <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-amber-300 ring-1 ring-white/20">
@@ -199,7 +199,7 @@ function StaffInventoryPage() {
             <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {filteredItems.map((item) => (
                 <article key={item._id} className="group flex min-h-72 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl hover:shadow-sky-950/10">
-                  <div className="relative flex h-28 items-center justify-center bg-gradient-to-br from-slate-50 to-sky-50">
+                  <div className="relative flex h-28 items-center justify-center bg-slate-50">
                     <span className={`absolute left-4 top-4 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${categoryClass(item.category)}`}>
                       {item.category || 'Uncategorized'}
                     </span>

@@ -33,6 +33,37 @@ const patientSchema = new mongoose.Schema(
       enum: ["unverified", "verified"],
       default: "unverified",
     },
+    verifiedAt: Date,
+    verificationHistory: [
+      {
+        status: {
+          type: String,
+          enum: ["new", "verified", "inactive"],
+          required: true,
+        },
+        appointment: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Appointment",
+        },
+        changedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        changedByEmail: {
+          type: String,
+          trim: true,
+          lowercase: true,
+        },
+        note: {
+          type: String,
+          trim: true,
+        },
+        changedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     gender: {
       type: String,
       enum: ["male", "female", "other", "prefer_not_to_say"],
@@ -58,7 +89,31 @@ const patientSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    emergencyContactRelationship: {
+      type: String,
+      trim: true,
+    },
+    alternateContactNumber: {
+      type: String,
+      trim: true,
+    },
+    emergencyContact: {
+      type: String,
+      trim: true,
+    },
     allergies: [String],
+    medicalConditions: {
+      type: String,
+      trim: true,
+    },
+    currentMedications: {
+      type: String,
+      trim: true,
+    },
+    additionalMedicalNotes: {
+      type: String,
+      trim: true,
+    },
     medicalHistory: {
       type: String,
       trim: true,
@@ -75,6 +130,28 @@ const patientSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "inactive"],
       default: "active",
+    },
+    assignedDentist: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    assignedDentistName: {
+      type: String,
+      trim: true,
+    },
+    preferredDentist: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    preferredDentistName: {
+      type: String,
+      trim: true,
+    },
+    username: {
+      type: String,
+      trim: true,
     },
   },
   {

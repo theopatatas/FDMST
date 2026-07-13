@@ -434,6 +434,7 @@ function CompactTable({ columns, rows, emptyMessage }) {
 }
 
 function FilterToolbar({ filters, options, onChange, onExport }) {
+  const [exportOpen, setExportOpen] = useState(false)
   const update = (key, value) => onChange((current) => ({ ...current, [key]: value }))
   const formatDate = (value) => value
     ? new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -481,10 +482,32 @@ function FilterToolbar({ filters, options, onChange, onExport }) {
           <FaTimes aria-hidden="true" />
           Clear
         </button>
-        <button className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-sky-950" onClick={onExport} type="button">
-          <FaDownload aria-hidden="true" />
-          Export
-        </button>
+        <div className="relative">
+          <button
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-900 xl:w-auto"
+            onClick={() => setExportOpen((value) => !value)}
+            type="button"
+          >
+            <FaDownload aria-hidden="true" />
+            Export
+            <FaChevronDown className="h-3 w-3" aria-hidden="true" />
+          </button>
+          {exportOpen ? (
+            <div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  setExportOpen(false)
+                  onExport()
+                }}
+              >
+                <FaDownload className="h-4 w-4 text-sky-700" aria-hidden="true" />
+                Export CSV
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   )

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { FaGift, FaTag } from 'react-icons/fa'
+import { FaCopy, FaGift, FaTag } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { formatDate } from '../../utils/auth.js'
@@ -28,6 +28,15 @@ function PatientPromotionsPage() {
     if (promotion.promoCode) params.set('promoCode', promotion.promoCode)
     const query = params.toString()
     return `${actionPath}${query ? `?${query}` : ''}`
+  }
+  const handleCopyPromoCode = async (promoCode) => {
+    if (!promoCode) return
+    try {
+      await navigator.clipboard.writeText(promoCode)
+      toast.success('Promo code copied.')
+    } catch {
+      toast.error('Unable to copy promo code.')
+    }
   }
 
   const loadPromotions = useCallback(() => {
@@ -129,18 +138,44 @@ function PatientPromotionsPage() {
                       isSelected ? 'border-amber-300 ring-4 ring-amber-100' : 'border-slate-200'
                     }`}
                   >
-                    <div className="flex h-32 items-center justify-between bg-sky-950 px-6 text-white">
+                    <div className="flex h-36 items-center justify-between bg-sky-950 px-6 text-white">
                       <div>
                         <p className="text-sm font-semibold text-amber-300">{promotion.discountLabel || promotion.promoCode || 'Patient Offer'}</p>
                         <p className="mt-2 max-w-44 text-lg font-semibold leading-6">{promotion.serviceType || 'Dental Care'}</p>
                       </div>
-                      <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-amber-300 ring-1 ring-white/10">
-                        <FaTag className="h-7 w-7" aria-hidden="true" />
-                      </span>
+                      {promotion.imageUrl ? (
+                        <img src={promotion.imageUrl} alt="" className="h-20 w-24 rounded-2xl object-cover ring-1 ring-white/15" />
+                      ) : (
+                        <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-amber-300 ring-1 ring-white/10">
+                          <FaTag className="h-7 w-7" aria-hidden="true" />
+                        </span>
+                      )}
                     </div>
                     <div className="p-5">
                       <h2 className="text-lg font-semibold text-sky-950">{promotion.title}</h2>
                       <p className="mt-2 text-sm leading-6 text-slate-500">{promotion.description || 'Ask the clinic team about this current offer.'}</p>
+                      <div className="mt-4 grid gap-2 text-sm">
+                        <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                          <span className="font-medium text-slate-500">Promo Code</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPromoCode(promotion.promoCode)}
+                            className="inline-flex items-center gap-2 font-semibold text-sky-950 hover:text-amber-600"
+                          >
+                            {promotion.promoCode || 'N/A'} <FaCopy className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="font-medium text-slate-500">Applicable Services</p>
+                          <p className="mt-1 font-semibold text-sky-950">
+                            {promotion.applicableServices?.length ? promotion.applicableServices.join(', ') : promotion.serviceType || 'All Services'}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="font-medium text-slate-500">Terms and Conditions</p>
+                          <p className="mt-1 text-slate-600">Valid for active eligible services until the expiration date. One redemption per patient account.</p>
+                        </div>
+                      </div>
                       <p className="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
                         Expires {promotion.endDate ? formatDate(promotion.endDate) : 'soon'}
                       </p>

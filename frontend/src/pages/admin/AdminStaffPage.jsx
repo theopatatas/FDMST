@@ -10,7 +10,6 @@ import {
   FaSearch,
   FaShieldAlt,
   FaTrashAlt,
-  FaUndo,
   FaUser,
   FaUserPlus,
   FaUsers,
@@ -132,6 +131,7 @@ function AdminStaffPage() {
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
 
   const isEditing = Boolean(editingStaffId)
 
@@ -230,6 +230,16 @@ function AdminStaffPage() {
     setFieldErrors({})
   }
 
+  const openCreate = () => {
+    resetForm()
+    setIsDrawerOpen(true)
+  }
+
+  const closeDrawer = () => {
+    resetForm()
+    setIsDrawerOpen(false)
+  }
+
   const handleChange = (event) => {
     const { name, value } = event.target
     const nextValue = name === 'contactNumber' ? digitsOnly(value) : value
@@ -305,7 +315,7 @@ function AdminStaffPage() {
       contactNumber: member.contactNumber || '',
     })
     setFieldErrors({})
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setIsDrawerOpen(true)
   }
 
   const handleStatusPrompt = (member) => {
@@ -362,7 +372,7 @@ function AdminStaffPage() {
             member.id === response.user.id ? response.user : member,
           ),
         )
-        resetForm()
+        closeDrawer()
       } else {
         response = await fdmstApi.createStaff({
           firstName: form.firstName.trim(),
@@ -375,7 +385,7 @@ function AdminStaffPage() {
         })
 
         setStaff((currentStaff) => [response.user, ...currentStaff])
-        resetForm()
+        closeDrawer()
       }
 
       toast.success(response.message || 'Staff account updated successfully.')
@@ -396,107 +406,8 @@ function AdminStaffPage() {
         </div>
       ) : null}
 
-      <section className={`grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)] ${isAccessVerified ? '' : 'pointer-events-none mt-6 opacity-35 blur-[1px]'}`}>
-        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-200">
-                <FaUserPlus className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <h2 className="text-xl font-semibold text-sky-950">
-                {isEditing ? 'Edit Staff Account' : 'Add Staff Account'}
-              </h2>
-            </div>
-            {isEditing ? (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-xl border border-gray-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-sky-950"
-                aria-label="Cancel editing"
-              >
-                <FaUndo className="h-4 w-4" aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-          <div className="mt-5 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800">
-            <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
-            <p>Sensitive staff changes require admin password verification.</p>
-          </div>
-
-          <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              First Name
-              <IconField icon={FaUser}>
-                <input className={iconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
-              </IconField>
-              {fieldErrors.firstName ? <span className="text-xs font-medium text-red-600">{fieldErrors.firstName}</span> : null}
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Last Name
-              <IconField icon={FaUser}>
-                <input className={iconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
-              </IconField>
-              {fieldErrors.lastName ? <span className="text-xs font-medium text-red-600">{fieldErrors.lastName}</span> : null}
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Email
-              <IconField icon={FaEnvelope}>
-                <input className={iconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" required />
-              </IconField>
-              {fieldErrors.email ? <span className="text-xs font-medium text-red-600">{fieldErrors.email}</span> : null}
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Mobile Number
-              <IconField icon={FaPhone}>
-                <input className={iconInputClass} type="tel" name="contactNumber" inputMode="numeric" maxLength={11} placeholder="09XXXXXXXXX" value={form.contactNumber} onChange={handleChange} />
-              </IconField>
-              {fieldErrors.contactNumber ? (
-                <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span>
-              ) : null}
-            </label>
-
-            <label className="grid gap-2 text-sm font-semibold text-sky-950">
-              Role
-              <IconField icon={FaBriefcase}>
-                <select className={iconInputClass} name="role" value={form.role} onChange={handleChange}>
-                  <option value="staff">Staff</option>
-                  <option value="dentist">Dentist</option>
-                </select>
-              </IconField>
-            </label>
-
-            {!isEditing ? (
-              <>
-                <PasswordField
-                  inputClassName={`${iconInputClass} pl-12`}
-                  label="Temporary Password"
-                  leftIcon={FaLock}
-                  name="password"
-                  minLength={8}
-                  value={form.password}
-                  onChange={handleChange}
-                  autoComplete="new-password"
-                  required
-                />
-                {fieldErrors.password ? <span className="-mt-2 text-xs font-medium text-red-600">{fieldErrors.password}</span> : null}
-              </>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="mt-1 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <FaBriefcase className="h-4 w-4" aria-hidden="true" />
-              {isEditing ? 'Save Staff Changes' : 'Create Staff Account'}
-            </button>
-          </form>
-        </article>
-
-        <article className="rounded-[1.35rem] border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70">
+      <section className={`flex min-h-[52rem] flex-col rounded-[1.35rem] border border-slate-200 bg-white shadow-sm shadow-slate-200/70 ${isAccessVerified ? '' : 'pointer-events-none mt-6 opacity-35 blur-[1px]'}`}>
+        <article className="flex min-h-0 flex-1 flex-col p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm shadow-emerald-200">
@@ -509,10 +420,7 @@ function AdminStaffPage() {
             </div>
             <button
               type="button"
-              onClick={() => {
-                resetForm()
-                window.scrollTo({ top: 0, behavior: 'smooth' })
-              }}
+              onClick={openCreate}
               className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900"
             >
               <FaPlus className="h-4 w-4" aria-hidden="true" />
@@ -630,6 +538,107 @@ function AdminStaffPage() {
           )}
         </article>
       </section>
+
+      {isDrawerOpen ? (
+        <div className="fixed inset-0 z-50">
+          <button type="button" className="absolute inset-0 bg-slate-950/40" onClick={closeDrawer} aria-label="Close staff drawer" />
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-xl min-w-0 flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Staff Management</p>
+                <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">
+                  {isEditing ? 'Edit Staff Account' : 'Add Staff Account'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">Create and update staff or dentist portal access.</p>
+              </div>
+              <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
+                <FaTimes className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+              <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-5 py-6 sm:grid-cols-2 sm:px-6">
+                <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-semibold leading-6 text-blue-800 sm:col-span-2">
+                  <FaShieldAlt className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <p>Sensitive staff changes require admin password verification before saving.</p>
+                </div>
+
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  First Name
+                  <IconField icon={FaUser}>
+                    <input className={iconInputClass} name="firstName" value={form.firstName} onChange={handleChange} placeholder="Enter first name" required />
+                  </IconField>
+                  {fieldErrors.firstName ? <span className="text-xs font-medium text-red-600">{fieldErrors.firstName}</span> : null}
+                </label>
+
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Last Name
+                  <IconField icon={FaUser}>
+                    <input className={iconInputClass} name="lastName" value={form.lastName} onChange={handleChange} placeholder="Enter last name" required />
+                  </IconField>
+                  {fieldErrors.lastName ? <span className="text-xs font-medium text-red-600">{fieldErrors.lastName}</span> : null}
+                </label>
+
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
+                  Email
+                  <IconField icon={FaEnvelope}>
+                    <input className={iconInputClass} type="email" name="email" value={form.email} onChange={handleChange} placeholder="Enter email address" required />
+                  </IconField>
+                  {fieldErrors.email ? <span className="text-xs font-medium text-red-600">{fieldErrors.email}</span> : null}
+                </label>
+
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Mobile Number
+                  <IconField icon={FaPhone}>
+                    <input className={iconInputClass} type="tel" name="contactNumber" inputMode="numeric" maxLength={11} placeholder="09XXXXXXXXX" value={form.contactNumber} onChange={handleChange} />
+                  </IconField>
+                  {fieldErrors.contactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span> : null}
+                </label>
+
+                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+                  Role
+                  <IconField icon={FaBriefcase}>
+                    <select className={iconInputClass} name="role" value={form.role} onChange={handleChange}>
+                      <option value="staff">Staff</option>
+                      <option value="dentist">Dentist</option>
+                    </select>
+                  </IconField>
+                </label>
+
+                {!isEditing ? (
+                  <div className="sm:col-span-2">
+                    <PasswordField
+                      inputClassName={`${iconInputClass} pl-12`}
+                      label="Temporary Password"
+                      leftIcon={FaLock}
+                      name="password"
+                      minLength={8}
+                      value={form.password}
+                      onChange={handleChange}
+                      autoComplete="new-password"
+                      required
+                    />
+                    {fieldErrors.password ? <span className="mt-2 block text-xs font-medium text-red-600">{fieldErrors.password}</span> : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-3 border-t border-slate-100 bg-white px-5 py-5 sm:flex sm:flex-row sm:justify-end sm:px-6">
+                <button type="button" onClick={closeDrawer} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-lg shadow-sky-950/20 transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSubmitting ? 'Saving...' : isEditing ? 'Save Staff' : 'Create Staff'}
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      ) : null}
 
       {!isAccessVerified ? (
         <div

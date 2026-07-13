@@ -76,6 +76,8 @@ const roleLabels = {
 const adminPageMeta = [
   { path: '/admin/analytics', title: 'Analytics Dashboard', subtitle: 'Monitor clinic performance and key insights.' },
   { path: '/admin/appointments', title: 'Appointments', subtitle: 'View, filter, and manage clinic appointments.' },
+  { path: '/admin/treatment-records', title: 'Treatment Records', subtitle: 'Create, review, and export official patient treatment history.' },
+  { path: '/admin/clinical-notes', title: 'Clinical Notes', subtitle: 'Create, review, and export private provider documentation.' },
   { path: '/admin/inventory', title: 'Inventory Management', subtitle: 'Manage clinic supplies, stock levels, and reorder alerts.' },
   { path: '/admin/notifications', title: 'Notifications', subtitle: 'Review appointment updates, clinic alerts, and system messages.' },
   { path: '/admin/patients', title: 'Patients', subtitle: 'Manage patient records and information.' },
@@ -93,6 +95,37 @@ function getDisplayName(user) {
 
 function getAdminPageMeta(pathname) {
   return adminPageMeta.find((item) => (item.path === '/admin' ? pathname === item.path : pathname.startsWith(item.path))) || adminPageMeta[adminPageMeta.length - 1]
+}
+
+function getSidebarPageMeta(pathname, navItems, role) {
+  const matchingItem = [...navItems]
+    .filter((item) => item.to)
+    .sort((left, right) => right.to.length - left.to.length)
+    .find((item) => (item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`)))
+
+  if (matchingItem) {
+    const subtitles = {
+      Dashboard: `${roleLabels[role] || 'User'} workspace for daily clinic operations.`,
+      Appointments: 'Review schedules, patient requests, and appointment workflow.',
+      Patients: 'Access patient records related to your clinical work.',
+      'Treatment Records': 'Create and review official patient treatment history.',
+      'Clinical Notes': 'Manage private provider documentation and care notes.',
+      Reports: 'Review your appointments, treatments, and patient activity.',
+      Inventory: 'View inventory and process item releases.',
+      Promotions: 'View active clinic promotions and offers.',
+      Settings: 'Manage your schedule, notifications, and preferences.',
+    }
+
+    return {
+      title: matchingItem.label,
+      subtitle: subtitles[matchingItem.label] || `${roleLabels[role] || 'User'} workspace for daily clinic operations.`,
+    }
+  }
+
+  if (pathname.endsWith('/profile')) return { title: 'Profile', subtitle: 'View and update your account information.' }
+  if (pathname.endsWith('/notifications')) return { title: 'Notifications', subtitle: 'Review appointment updates and clinic alerts.' }
+
+  return { title: 'Dashboard', subtitle: `${roleLabels[role] || 'User'} workspace for daily clinic operations.` }
 }
 
 function getProfilePath(role) {
@@ -220,6 +253,13 @@ function DashboardLayout({ portalLabel, navItems }) {
   }, [])
 
   useEffect(() => {
+    const theme = user?.workPreferences?.appearance?.theme
+    if (theme) {
+      document.documentElement.dataset.theme = theme
+    }
+  }, [user?.workPreferences?.appearance?.theme])
+
+  useEffect(() => {
     let isMounted = true
 
     const loadProfile = async () => {
@@ -342,8 +382,8 @@ function DashboardLayout({ portalLabel, navItems }) {
   const headerMeta = useMemo(() => {
     if (isAdminPortal) return getAdminPageMeta(location.pathname)
     if (isPatientPortal) return { title: 'Patient Portal', subtitle: 'Access appointments, records, promotions, and profile details.' }
-    return { title: portalLabel, subtitle: `${roleLabels[user?.role] || 'User'} workspace for daily clinic operations.` }
-  }, [isAdminPortal, isPatientPortal, location.pathname, portalLabel, user?.role])
+    return getSidebarPageMeta(location.pathname, navItems, user?.role)
+  }, [isAdminPortal, isPatientPortal, location.pathname, navItems, user?.role])
   const clinicName = clinicSettings?.clinicName || 'Flores-Dizon Dental Clinic'
   const [brandLead, ...brandRestParts] = clinicName.split(' ')
   const brandRest = brandRestParts.join(' ')

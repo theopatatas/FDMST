@@ -44,6 +44,8 @@ function PatientNotificationsPage() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [readFilter, setReadFilter] = useState('all')
 
   const loadNotifications = useCallback(() => {
     let isActive = true
@@ -79,7 +81,19 @@ function PatientNotificationsPage() {
     return () => cleanup?.()
   }, [loadNotifications])
 
-  const groupedNotifications = useMemo(() => notifications, [notifications])
+  const groupedNotifications = useMemo(() => {
+    return notifications.filter((notification) => {
+      const text = `${notification.title || ''} ${notification.message || ''} ${notification.type || ''}`.toLowerCase()
+      const category = notification.type === 'promotion' || text.includes('promo')
+        ? 'promotions'
+        : text.includes('appointment') || text.includes('schedule') || text.includes('booking')
+          ? 'appointments'
+          : 'account'
+      const matchesCategory = categoryFilter === 'all' || categoryFilter === category
+      const matchesRead = readFilter === 'all' || (readFilter === 'unread' ? !notification.isRead : notification.isRead)
+      return matchesCategory && matchesRead
+    })
+  }, [categoryFilter, notifications, readFilter])
 
   const handleMarkAllRead = async () => {
     try {
@@ -145,6 +159,50 @@ function PatientNotificationsPage() {
             >
               <FaCheckCircle className="h-4 w-4" aria-hidden="true" />
               Mark All as Read
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['all', 'All'],
+                ['appointments', 'Appointments'],
+                ['promotions', 'Promotions'],
+                ['account', 'Account'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setCategoryFilter(value)}
+                  className={`h-10 rounded-xl px-4 text-sm font-semibold transition ${
+                    categoryFilter === value
+                      ? 'bg-sky-950 text-white'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <select
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 outline-none focus:border-sky-950 focus:ring-4 focus:ring-sky-100"
+              value={readFilter}
+              onChange={(event) => setReadFilter(event.target.value)}
+              aria-label="Filter notifications by read status"
+            >
+              <option value="all">All</option>
+              <option value="unread">Unread</option>
+              <option value="read">Read</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                setCategoryFilter('all')
+                setReadFilter('all')
+              }}
+              className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              Clear Filters
             </button>
           </div>
 

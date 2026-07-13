@@ -596,6 +596,25 @@ const endOfDay = (date) => {
   return value;
 };
 
+const toMinutes = (value) => {
+  const normalized = String(value || "").trim();
+  const meridiemMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+
+  if (meridiemMatch) {
+    let hours = Number(meridiemMatch[1]);
+    const minutes = Number(meridiemMatch[2]);
+    const period = meridiemMatch[3].toUpperCase();
+
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+
+    return hours * 60 + minutes;
+  }
+
+  const [hours = 0, minutes = 0] = normalized.split(":").map(Number);
+  return (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+};
+
 const getKpiComparisonRange = (query = {}) => {
   const now = new Date();
 
@@ -627,6 +646,7 @@ const getKpiComparisonRange = (query = {}) => {
 
 const sanitizeAppointment = (appointment) => ({
   id: appointment._id,
+  appointmentId: `APT-${String(appointment._id).slice(-6).toUpperCase()}`,
   patientName: appointment.patientName,
   contactNumber: appointment.contactNumber,
   email: appointment.email,
@@ -638,6 +658,7 @@ const sanitizeAppointment = (appointment) => ({
   notes: appointment.notes,
   status: appointment.status,
   createdAt: appointment.createdAt,
+  timeline: appointment.timeline || [],
 });
 
 const sanitizePatient = (patient) => ({
@@ -646,6 +667,8 @@ const sanitizePatient = (patient) => ({
   patientName: `${patient.firstName} ${patient.lastName}`.trim(),
   email: patient.email,
   contactNumber: patient.contactNumber,
+  registrationStatus: patient.registrationStatus,
+  status: patient.status,
   createdAt: patient.createdAt,
 });
 
@@ -660,6 +683,7 @@ router.get(
 
     const [
       totalPatients,
+      totalDentists,
       totalAppointments,
       completedAppointments,
       pendingAppointments,
@@ -668,9 +692,16 @@ router.get(
       todaysAppointments,
       upcomingAppointments,
       todaysSchedule,
+      upcomingList,
+      recentPatients,
       staffActivity,
+      recentActivity,
+      inactivePatients,
+      pendingStaffRequests,
+      mySchedule,
     ] = await Promise.all([
       Patient.countDocuments({}),
+      User.countDocuments({ role: "dentist", status: "active" }),
       Appointment.countDocuments({}),
       Appointment.countDocuments({ status: "completed" }),
       Appointment.countDocuments({ status: "pending" }),
@@ -691,15 +722,49 @@ router.get(
       }),
       Appointment.find({})
         .where("appointmentDate").gte(todayStart).lte(todayEnd)
-        .where("status").nin(["cancelled", "declined"])
+        .where("status").ne("declined")
         .sort({ appointmentTime: 1, appointmentDate: 1 })
-        .limit(12)
+        .limit(100)
+        .lean(),
+      Appointment.find({
+        appointmentDate: { $gt: todayEnd },
+        status: { $in: ["pending", "confirmed", "checked_in", "in_consultation"] },
+      })
+        .sort({ appointmentDate: 1, appointmentTime: 1 })
+        .limit(5)
+        .lean(),
+      Patient.find({})
+        .sort({ createdAt: -1 })
+        .limit(5)
         .lean(),
       AuditLog.find({ action: { $regex: /^staff_/ } })
         .sort({ createdAt: -1 })
         .limit(8)
         .lean(),
+      AuditLog.find({
+        action: {
+          $regex: /Appointment|Clinical Note|Treatment Record|Patient|Staff|Login/i,
+        },
+      })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean(),
+      Patient.countDocuments({ status: "inactive" }),
+      User.countDocuments({ role: { $in: ["staff", "dentist"] }, status: "inactive" }),
+      Appointment.find({
+        appointmentDate: { $gte: todayStart, $lte: todayEnd },
+        dentistName: fullName(req.user),
+        status: { $ne: "declined" },
+      })
+        .sort({ appointmentTime: 1 })
+        .limit(8)
+        .lean(),
     ]);
+    const statusCounts = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "no_show"].reduce((counts, status) => ({
+      ...counts,
+      [status]: todaysSchedule.filter((appointment) => appointment.status === status).length,
+    }), {});
+    const activeDentistsToday = new Set(todaysSchedule.map((appointment) => String(appointment.dentistName || "").trim()).filter(Boolean)).size;
 
     res.json({
       stats: {
@@ -711,9 +776,21 @@ router.get(
         cancelledAppointments,
         noShowAppointments,
         totalPatients,
+        totalDentists,
+        activeDentistsToday,
+        statusCounts,
       },
       todaysSchedule: todaysSchedule.map(sanitizeAppointment),
+      upcomingAppointments: upcomingList.map(sanitizeAppointment),
+      recentPatients: recentPatients.map(sanitizePatient),
       staffActivity,
+      recentActivity,
+      pendingActions: {
+        pendingAppointments,
+        pendingStaffRequests,
+        inactivePatients,
+      },
+      mySchedule: mySchedule.map(sanitizeAppointment),
     });
   }),
 );
@@ -876,44 +953,73 @@ router.get(
     const todayStart = startOfDay(new Date());
     const todayEnd = endOfDay(new Date());
     const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const providerName = fullName(req.user);
+    const appointmentScope = req.user.role === "dentist" && providerName ? { dentistName: providerName } : {};
 
     const [todaysAppointments, upcomingAppointments, recentPatients, recentActivity] = await Promise.all([
       Appointment.find({
+        ...appointmentScope,
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $nin: ["cancelled", "declined"] },
+        status: { $ne: "declined" },
       })
         .sort({ appointmentTime: 1 })
-        .limit(10),
+        .limit(100),
       Appointment.find({
+        ...appointmentScope,
         appointmentDate: { $gt: todayEnd },
         status: { $in: ["pending", "confirmed"] },
       })
         .sort({ appointmentDate: 1, appointmentTime: 1 })
-        .limit(10),
+        .limit(5),
       Patient.find({ createdAt: { $lte: now } })
         .sort({ createdAt: -1 })
         .limit(8),
       AuditLog.find({
-        action: { $regex: /Appointment checked_in|Appointment in_consultation|Appointment completed|Appointment rescheduled/i },
+        action: { $regex: /Appointment confirmed|Appointment checked_in|Appointment in_consultation|Appointment completed|Appointment rescheduled|Appointment cancelled|Clinical Note|Treatment Record/i },
+        ...(req.user.role === "dentist" ? { $or: [{ performedByEmail: req.user.email }, { "metadata.dentistName": providerName }] } : {}),
       })
         .sort({ createdAt: -1 })
         .limit(8)
         .lean(),
     ]);
 
+    const statusCounts = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "no_show"].reduce((counts, status) => ({
+      ...counts,
+      [status]: todaysAppointments.filter((appointment) => appointment.status === status).length,
+    }), {});
+    const activeQueueStatuses = new Set(["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "no_show"]);
+    const todaysQueue = todaysAppointments.filter((appointment) => activeQueueStatuses.has(appointment.status));
+    const nextAppointment = todaysAppointments
+      .filter((appointment) => ["pending", "confirmed", "checked_in", "in_consultation"].includes(appointment.status))
+      .filter((appointment) => toMinutes(appointment.appointmentTime) >= currentMinutes || ["checked_in", "in_consultation"].includes(appointment.status))
+      .sort((left, right) => toMinutes(left.appointmentTime) - toMinutes(right.appointmentTime))[0] || null;
+    const waitingAppointments = todaysAppointments.filter((appointment) => appointment.status === "checked_in");
+    const waitingMinutes = waitingAppointments.map((appointment) => {
+      const timeline = appointment.timeline || [];
+      const checkInEvent = [...timeline].reverse().find((item) => item.status === "checked_in");
+      const checkInAt = new Date(checkInEvent?.recordedAt || appointment.statusUpdatedAt || appointment.updatedAt || now);
+      return Number.isNaN(checkInAt.getTime()) ? 0 : Math.max(Math.round((now - checkInAt) / 60000), 0);
+    });
+    const averageWaitingTime = waitingMinutes.length ? Math.round(waitingMinutes.reduce((total, minutes) => total + minutes, 0) / waitingMinutes.length) : 0;
+
     const stats = {
       todaysAppointments: todaysAppointments.length,
-      checkedInPatients: todaysAppointments.filter((appointment) => appointment.status === "checked_in").length,
-      patientsInConsultation: todaysAppointments.filter((appointment) => appointment.status === "in_consultation").length,
-      completedToday: todaysAppointments.filter((appointment) => appointment.status === "completed").length,
-      cancelledToday: todaysAppointments.filter((appointment) => appointment.status === "cancelled").length,
+      checkedInPatients: statusCounts.checked_in,
+      patientsInConsultation: statusCounts.in_consultation,
+      completedToday: statusCounts.completed,
+      cancelledToday: statusCounts.cancelled,
+      statusCounts,
+      waitingPatients: waitingAppointments.length,
+      averageWaitingTime,
     };
 
     res.json({
       stats,
-      todaysQueue: todaysAppointments.map(sanitizeAppointment),
+      todaysQueue: todaysQueue.map(sanitizeAppointment),
       todaysAppointments: todaysAppointments.map(sanitizeAppointment),
       upcomingAppointments: upcomingAppointments.map(sanitizeAppointment),
+      nextAppointment: nextAppointment ? sanitizeAppointment(nextAppointment) : null,
       recentPatients: recentPatients.map(sanitizePatient),
       recentActivity,
     });

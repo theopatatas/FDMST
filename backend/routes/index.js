@@ -18,7 +18,7 @@ const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
 const { preparePatientCreateBody, preparePatientUpdateBody } = require("../utils/patientRecords");
-const { verifyPassword } = require("../utils/password");
+const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
 const { expirePromotions } = require("../utils/promotionExpiry");
 
 const router = express.Router();
@@ -628,6 +628,432 @@ const sanitizePatientDentalRecord = (record) => {
   return value;
 };
 
+const escapeRegex = (value) => String(value || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const providerName = (user) => [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+
+const parseReportDate = (value, endOfDay = false) => {
+  if (!value) return null;
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(String(value))
+    ? new Date(...String(value).split("-").map((part, index) => index === 1 ? Number(part) - 1 : Number(part)))
+    : new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+  return parsed;
+};
+
+const patientFullName = (patient) => [patient?.firstName, patient?.lastName].filter(Boolean).join(" ").trim();
+
+const getPatientDisplayStatus = (patient) => {
+  if ((patient.status || "active") === "inactive") return "Inactive";
+  return patient.registrationStatus === "verified" ? "Verified" : "New";
+};
+
+const formatScheduleLabel = (appointment) => {
+  if (!appointment) return "";
+  const date = appointment.appointmentDate ? new Date(appointment.appointmentDate).toLocaleDateString() : "";
+  return [date, appointment.appointmentTime].filter(Boolean).join(" ");
+};
+
+const patientMatchesSearch = (patient, search) => {
+  const normalized = String(search || "").trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    patientFullName(patient),
+    patient.patientId,
+    patient.contactNumber,
+    patient.email,
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(normalized));
+};
+
+const buildCarePatientResponse = (patient, appointments = [], records = []) => {
+  const patientName = patientFullName(patient);
+  const patientEmail = String(patient.email || "").toLowerCase();
+  const patientAppointments = appointments
+    .filter((appointment) => {
+      const appointmentPatient = String(appointment.patient || appointment.patient?._id || "");
+      return (
+        appointmentPatient === String(patient._id) ||
+        (patientEmail && String(appointment.email || "").toLowerCase() === patientEmail) ||
+        String(appointment.patientName || "").trim().toLowerCase() === patientName.toLowerCase()
+      );
+    })
+    .sort((left, right) => new Date(right.appointmentDate || 0) - new Date(left.appointmentDate || 0));
+  const patientRecords = records
+    .filter((record) => {
+      const recordPatient = String(record.patient || record.patient?._id || "");
+      return recordPatient === String(patient._id) || String(record.patientName || "").trim().toLowerCase() === patientName.toLowerCase();
+    })
+    .sort((left, right) => new Date(right.visitDate || right.createdAt || 0) - new Date(left.visitDate || left.createdAt || 0));
+  const now = new Date();
+  const pastAppointments = patientAppointments
+    .filter((appointment) => new Date(appointment.appointmentDate || 0) <= now)
+    .sort((left, right) => new Date(right.appointmentDate || 0) - new Date(left.appointmentDate || 0));
+  const futureAppointments = patientAppointments
+    .filter((appointment) => new Date(appointment.appointmentDate || 0) >= now)
+    .sort((left, right) => new Date(left.appointmentDate || 0) - new Date(right.appointmentDate || 0));
+
+  return {
+    ...patient.toObject(),
+    fullName: patientName,
+    displayStatus: getPatientDisplayStatus(patient),
+    lastVisit: formatScheduleLabel(pastAppointments[0]),
+    nextAppointment: formatScheduleLabel(futureAppointments[0]),
+    appointmentHistory: patientAppointments,
+    treatmentRecords: patientRecords.filter((record) => record.recordType !== "clinical_note"),
+    clinicalNotes: patientRecords.filter((record) => record.recordType === "clinical_note" || clinicalNoteHasContent(record)),
+  };
+};
+
+const getProviderCareData = async (req) => {
+  const name = providerName(req.user);
+  const email = String(req.user.email || "").toLowerCase();
+  const userId = String(req.user.id);
+
+  if (req.user.role === "staff") {
+    const [appointments, records, patients] = await Promise.all([
+      Appointment.find({}).sort({ appointmentDate: -1 }).lean(),
+      DentalRecord.find({}).sort({ visitDate: -1, createdAt: -1 }).lean(),
+      Patient.find({}).sort({ updatedAt: -1 }),
+    ]);
+
+    return { appointments, records, patients };
+  }
+
+  const appointmentFilters = [
+    { statusUpdatedBy: req.user.id },
+    { completedBy: req.user.id },
+    { noShowBy: req.user.id },
+    { statusUpdatedByEmail: email },
+    { completedByEmail: email },
+    { noShowByEmail: email },
+  ];
+  const recordFilters = [
+    { createdBy: req.user.id },
+    { createdByEmail: email },
+  ];
+
+  if (req.user.role === "dentist" && name) {
+    appointmentFilters.push({ dentistName: name });
+    recordFilters.push({ dentistName: name });
+  }
+
+  const appointmentQuery = { $or: appointmentFilters };
+  const recordQuery = { $or: recordFilters };
+
+  const [appointments, records, assignedPatients] = await Promise.all([
+    Appointment.find(appointmentQuery).sort({ appointmentDate: -1 }).lean(),
+    DentalRecord.find(recordQuery).sort({ visitDate: -1, createdAt: -1 }).lean(),
+    Patient.find({ assignedDentist: req.user.id }).sort({ updatedAt: -1 }),
+  ]);
+  const patientIds = new Set(assignedPatients.map((patient) => String(patient._id)));
+  const patientEmails = new Set(assignedPatients.map((patient) => String(patient.email || "").toLowerCase()).filter(Boolean));
+  const patientNames = new Set(assignedPatients.map((patient) => patientFullName(patient).toLowerCase()).filter(Boolean));
+
+  appointments.forEach((appointment) => {
+    if (appointment.patient) patientIds.add(String(appointment.patient));
+    if (appointment.email) patientEmails.add(String(appointment.email).toLowerCase());
+    if (appointment.patientName) patientNames.add(String(appointment.patientName).toLowerCase());
+  });
+
+  records.forEach((record) => {
+    if (record.patient) patientIds.add(String(record.patient));
+    if (record.patientName) patientNames.add(String(record.patientName).toLowerCase());
+  });
+
+  const patientQuery = [];
+  if (patientIds.size) patientQuery.push({ _id: { $in: [...patientIds] } });
+  if (patientEmails.size) patientQuery.push({ email: { $in: [...patientEmails] } });
+
+  const patients = patientQuery.length
+    ? await Patient.find({ $or: patientQuery }).sort({ updatedAt: -1 })
+    : [];
+  const missingNamePatients = patientNames.size
+    ? (await Patient.find({}).sort({ updatedAt: -1 })).filter((patient) => patientNames.has(patientFullName(patient).toLowerCase()))
+    : [];
+  const merged = new Map();
+  [...assignedPatients, ...patients, ...missingNamePatients].forEach((patient) => merged.set(String(patient._id), patient));
+
+  return {
+    appointments,
+    records,
+    patients: [...merged.values()].filter((patient) => {
+      if (req.user.role === "dentist" && patient.assignedDentist && String(patient.assignedDentist) === userId) return true;
+      return true;
+    }),
+  };
+};
+
+const clinicalNoteHasContent = (record) => {
+  const notes = record.clinicalNotes || {};
+  return [notes.observation, notes.assessment, notes.recommendations, notes.additionalNotes]
+    .some((value) => String(value || "").trim());
+};
+
+const sanitizeClinicalNote = (record) => {
+  const value = record.toObject ? record.toObject() : { ...record };
+  return {
+    id: value._id,
+    patient: value.patient,
+    appointment: value.appointment,
+    patientName: value.patientName,
+    noteType: value.noteType || "Clinical Note",
+    visitDate: value.visitDate,
+    clinicalNotes: value.clinicalNotes || {},
+    createdBy: value.createdBy,
+    createdByName: value.createdByName,
+    createdByEmail: value.createdByEmail,
+    dentistName: value.dentistName,
+    servicePerformed: value.servicePerformed,
+    procedure: value.procedure,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  };
+};
+
+const clinicalNoteScope = (req, ownOnly = false) => {
+  const name = providerName(req.user);
+  const ownFilters = [
+    { createdBy: req.user.id },
+    { createdByEmail: req.user.email },
+  ];
+
+  if (req.user.role === "dentist" && name) {
+    ownFilters.push({ dentistName: name });
+  }
+
+  if (req.user.role === "admin" && !ownOnly) return {};
+  return { $or: ownFilters };
+};
+
+const buildClinicalNoteQuery = (req) => {
+  const ownOnly = req.query.scope !== "all";
+  const query = clinicalNoteScope(req, ownOnly);
+  const startDate = req.query.startDate ? parseReportDate(req.query.startDate) : null;
+  const endDate = req.query.endDate ? parseReportDate(req.query.endDate, true) : null;
+
+  query.$and = query.$and || [];
+  query.$and.push({
+    $or: [
+      { "clinicalNotes.observation": { $nin: [null, ""] } },
+      { "clinicalNotes.assessment": { $nin: [null, ""] } },
+      { "clinicalNotes.recommendations": { $nin: [null, ""] } },
+      { "clinicalNotes.additionalNotes": { $nin: [null, ""] } },
+    ],
+  });
+
+  if (req.query.startDate && !startDate) {
+    const error = new Error("Start date filter is invalid.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (req.query.endDate && !endDate) {
+    const error = new Error("End date filter is invalid.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (startDate || endDate) {
+    query.$and.push({
+      visitDate: {
+        ...(startDate ? { $gte: startDate } : {}),
+        ...(endDate ? { $lte: endDate } : {}),
+      },
+    });
+  }
+
+  if (req.query.provider && req.user.role === "admin") {
+    const pattern = new RegExp(escapeRegex(req.query.provider), "i");
+    query.$and.push({ $or: [{ createdByName: pattern }, { createdByEmail: pattern }, { dentistName: pattern }] });
+  }
+
+  if (req.query.appointment && mongoose.Types.ObjectId.isValid(req.query.appointment)) {
+    query.$and.push({ appointment: req.query.appointment });
+  }
+
+  if (req.query.search) {
+    const pattern = new RegExp(escapeRegex(req.query.search), "i");
+    query.$and.push({
+      $or: [
+        { patientName: pattern },
+        { noteType: pattern },
+        { servicePerformed: pattern },
+        { procedure: pattern },
+        { createdByName: pattern },
+        { dentistName: pattern },
+        { "clinicalNotes.observation": pattern },
+        { "clinicalNotes.assessment": pattern },
+        { "clinicalNotes.recommendations": pattern },
+        { "clinicalNotes.additionalNotes": pattern },
+      ],
+    });
+  }
+
+  if (!query.$and.length) delete query.$and;
+  return query;
+};
+
+const auditClinicalNoteAction = (req, record, action) => AuditLog.create({
+  action,
+  entityType: "Clinical Notes",
+  entityId: record?._id,
+  performedBy: req.user.id,
+  performedByEmail: req.user.email,
+  metadata: {
+    userName: providerName(req.user),
+    patient: record?.patient,
+    patientName: record?.patientName,
+    appointment: record?.appointment,
+  },
+}).catch(() => {});
+
+const sanitizeTreatmentRecord = (record) => {
+  const value = record.toObject ? record.toObject() : { ...record };
+  return {
+    id: value._id,
+    patient: value.patient,
+    appointment: value.appointment,
+    patientName: value.patientName,
+    contactNumber: value.contactNumber,
+    dateOfBirth: value.dateOfBirth,
+    visitDate: value.visitDate,
+    procedure: value.procedure || value.servicePerformed || value.treatment,
+    servicePerformed: value.servicePerformed,
+    toothNumber: value.toothNumber,
+    diagnosis: value.diagnosis,
+    treatmentPerformed: value.treatmentPerformed || value.treatment,
+    materialsUsed: value.materialsUsed,
+    treatmentStatus: value.treatmentStatus || "completed",
+    recommendations: value.recommendations,
+    nextVisitRecommendation: value.nextVisitRecommendation,
+    notes: value.notes,
+    dentistName: value.dentistName,
+    createdBy: value.createdBy,
+    createdByName: value.createdByName,
+    createdByEmail: value.createdByEmail,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  };
+};
+
+const treatmentRecordHasContent = (record) => [
+  record?.procedure,
+  record?.servicePerformed,
+  record?.treatment,
+  record?.treatmentPerformed,
+  record?.diagnosis,
+  record?.materialsUsed,
+  record?.recommendations,
+  record?.nextVisitRecommendation,
+  record?.notes,
+].some((value) => String(value || "").trim());
+
+const treatmentRecordScope = (req, ownOnly = false) => {
+  const name = providerName(req.user);
+  const ownFilters = [
+    { createdBy: req.user.id },
+    { createdByEmail: req.user.email },
+  ];
+
+  if ((req.user.role === "dentist" || req.user.role === "admin") && name) {
+    ownFilters.push({ dentistName: name });
+  }
+
+  if (req.user.role === "admin" && !ownOnly) return {};
+  return { $or: ownFilters };
+};
+
+const buildTreatmentRecordQuery = (req) => {
+  const ownOnly = req.query.scope !== "all";
+  const query = treatmentRecordScope(req, ownOnly);
+  const startDate = req.query.startDate ? parseReportDate(req.query.startDate) : null;
+  const endDate = req.query.endDate ? parseReportDate(req.query.endDate, true) : null;
+
+  query.$and = query.$and || [];
+  query.$and.push({
+    $or: [
+      { procedure: { $nin: [null, ""] } },
+      { servicePerformed: { $nin: [null, ""] } },
+      { treatment: { $nin: [null, ""] } },
+      { treatmentPerformed: { $nin: [null, ""] } },
+      { diagnosis: { $nin: [null, ""] } },
+    ],
+  });
+
+  if (req.query.startDate && !startDate) {
+    const error = new Error("Start date filter is invalid.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (req.query.endDate && !endDate) {
+    const error = new Error("End date filter is invalid.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (startDate || endDate) {
+    query.$and.push({
+      visitDate: {
+        ...(startDate ? { $gte: startDate } : {}),
+        ...(endDate ? { $lte: endDate } : {}),
+      },
+    });
+  }
+
+  if (req.query.provider && req.user.role === "admin") {
+    const pattern = new RegExp(escapeRegex(req.query.provider), "i");
+    query.$and.push({ $or: [{ createdByName: pattern }, { createdByEmail: pattern }, { dentistName: pattern }] });
+  }
+
+  if (req.query.status && req.query.status !== "all") {
+    query.$and.push({ treatmentStatus: req.query.status });
+  }
+
+  if (req.query.procedure && req.query.procedure !== "all") {
+    const pattern = new RegExp(escapeRegex(req.query.procedure), "i");
+    query.$and.push({ $or: [{ procedure: pattern }, { servicePerformed: pattern }, { treatment: pattern }] });
+  }
+
+  if (req.query.search) {
+    const pattern = new RegExp(escapeRegex(req.query.search), "i");
+    query.$and.push({
+      $or: [
+        { patientName: pattern },
+        { procedure: pattern },
+        { servicePerformed: pattern },
+        { treatment: pattern },
+        { diagnosis: pattern },
+        { treatmentPerformed: pattern },
+        { dentistName: pattern },
+        { createdByName: pattern },
+      ],
+    });
+  }
+
+  if (!query.$and.length) delete query.$and;
+  return query;
+};
+
+const auditTreatmentRecordAction = (req, record, action) => AuditLog.create({
+  action,
+  entityType: "Treatment Records",
+  entityId: record?._id,
+  performedBy: req.user.id,
+  performedByEmail: req.user.email,
+  metadata: {
+    userName: providerName(req.user),
+    patient: record?.patient,
+    patientName: record?.patientName,
+    appointment: record?.appointment,
+    treatmentRecordId: record?._id,
+  },
+}).catch(() => {});
+
 const sanitizePublicSettings = (settings) => ({
   clinicName: settings?.clinicName || "Flores-Dizon Dental Clinic",
   address: settings?.address || "",
@@ -689,27 +1115,515 @@ router.use("/users", userRoutes);
 router.use("/appointments", appointmentRoutes);
 router.use(authenticate);
 router.use("/users", authorize("admin"), createCrudRouter(User, { hiddenFields: "-passwordHash" }));
+router.get("/patients/my-care", authorize("staff", "dentist"), async (req, res, next) => {
+  try {
+    const { appointments, records, patients } = await getProviderCareData(req);
+    const filteredPatients = patients
+      .map((patient) => buildCarePatientResponse(patient, appointments, records))
+      .filter((patient) => patientMatchesSearch(patient, req.query.search));
+
+    res.json({
+      data: filteredPatients,
+      total: filteredPatients.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+router.get("/patients/my-care/:id", authorize("staff", "dentist"), async (req, res, next) => {
+  try {
+    const { appointments, records, patients } = await getProviderCareData(req);
+    const patient = patients.find((item) => String(item._id) === String(req.params.id));
+
+    if (!patient) {
+      return res.status(404).json({ message: "Patient record is not available for your account." });
+    }
+
+    res.json(buildCarePatientResponse(patient, appointments, records));
+  } catch (error) {
+    next(error);
+  }
+});
 router.use(
   "/patients",
-  authorize("admin", "staff", "dentist"),
+  authorize("admin"),
   createCrudRouter(Patient, {
     beforeCreate: async (body, req) => {
       await verifyAdminPasswordForPatientAction(req);
+      const temporaryPassword = String(body.temporaryPassword || "").trim();
+      if (temporaryPassword && temporaryPassword.length < 8) {
+        const error = new Error("Temporary password must be at least 8 characters.");
+        error.status = 400;
+        error.errors = { temporaryPassword: "Temporary password must be at least 8 characters." };
+        throw error;
+      }
+      if (body.username && await User.findOne({ username: String(body.username).trim() }).select("_id").lean()) {
+        const error = new Error("This username is already registered.");
+        error.status = 409;
+        error.errors = { username: "This username is already registered." };
+        throw error;
+      }
       return preparePatientCreateBody(withoutAdminPassword(body));
+    },
+    afterCreate: async (patient, req) => {
+      const temporaryPassword = String(req.body.temporaryPassword || "").trim();
+      const username = String(req.body.username || "").trim();
+
+      if (temporaryPassword && patient.email && !patient.userId) {
+        const passwordHash = await hashPasswordScrypt(temporaryPassword);
+        const user = await User.create({
+          firstName: patient.firstName,
+          lastName: patient.lastName,
+          email: patient.email,
+          username: username || undefined,
+          contactNumber: patient.contactNumber,
+          passwordHash,
+          role: "patient",
+          accountStatus: patient.registrationStatus === "verified" ? "verified_patient" : "unverified_user",
+          status: patient.status || "active",
+        });
+        patient.userId = user._id;
+        if (username) patient.username = username;
+        await patient.save();
+      }
+
+      await AuditLog.create({
+        action: "Patient Created",
+        entityType: "Patient",
+        entityId: patient._id,
+        performedBy: req.user.id,
+        performedByEmail: req.user.email,
+        metadata: { patientId: patient.patientId, status: getPatientDisplayStatus(patient) },
+      });
     },
     beforeUpdate: async (body, req) => {
       await verifyAdminPasswordForPatientAction(req);
       const existingPatient = await Patient.findById(req.params.id).lean();
+      if (!existingPatient) {
+        const error = new Error("Patient record not found.");
+        error.status = 404;
+        throw error;
+      }
+      const nextBody = withoutAdminPassword(body);
+      const nextStatus = nextBody.status || existingPatient.status;
+      const nextRegistrationStatus = nextBody.registrationStatus || existingPatient.registrationStatus;
+      const statusChanged = nextStatus !== existingPatient.status || nextRegistrationStatus !== existingPatient.registrationStatus;
+      if (statusChanged) {
+        nextBody.verificationHistory = [
+          ...(existingPatient.verificationHistory || []),
+          {
+            status: nextStatus === "inactive" ? "inactive" : nextRegistrationStatus === "verified" ? "verified" : "new",
+            changedBy: req.user.id,
+            changedByEmail: req.user.email,
+            note: "Patient status updated by admin.",
+            changedAt: new Date(),
+          },
+        ];
+        if (nextRegistrationStatus === "verified" && !existingPatient.verifiedAt) {
+          nextBody.verifiedAt = new Date();
+        }
+      }
+      if (existingPatient.userId && statusChanged) {
+        await User.findByIdAndUpdate(existingPatient.userId, {
+          status: nextStatus,
+          accountStatus: nextStatus === "inactive"
+            ? "inactive"
+            : nextRegistrationStatus === "verified"
+              ? "verified_patient"
+              : "unverified_user",
+        });
+      }
+      await AuditLog.create({
+        action: statusChanged ? "Patient Status Changed" : "Patient Updated",
+        entityType: "Patient",
+        entityId: existingPatient._id,
+        performedBy: req.user.id,
+        performedByEmail: req.user.email,
+        metadata: {
+          patientId: existingPatient.patientId,
+          previousStatus: existingPatient.status === "inactive" ? "Inactive" : existingPatient.registrationStatus === "verified" ? "Verified" : "New",
+          nextStatus: nextStatus === "inactive" ? "Inactive" : nextRegistrationStatus === "verified" ? "Verified" : "New",
+        },
+      });
       return preparePatientUpdateBody(
-        { ...existingPatient, ...withoutAdminPassword(body) },
+        { ...existingPatient, ...nextBody },
         { excludePatientId: req.params.id, excludeUserId: existingPatient?.userId },
       );
     },
     beforeDelete: async (id, req) => {
       await verifyAdminPasswordForPatientAction(req);
+      await AuditLog.create({
+        action: "Patient Deleted",
+        entityType: "Patient",
+        entityId: id,
+        performedBy: req.user.id,
+        performedByEmail: req.user.email,
+      });
     },
   }),
 );
+router.get("/dentalrecords/provider/reports", authorize("staff", "dentist"), async (req, res, next) => {
+  try {
+    const name = providerName(req.user);
+    const query = {
+      $or: [
+        { createdBy: req.user.id },
+        { createdByEmail: req.user.email },
+        ...(req.user.role === "dentist" && name ? [{ dentistName: name }] : []),
+      ],
+    };
+    const startDate = req.query.startDate ? parseReportDate(req.query.startDate) : null;
+    const endDate = req.query.endDate ? parseReportDate(req.query.endDate, true) : null;
+
+    if (req.query.startDate && !startDate) {
+      return res.status(400).json({ message: "Start date filter is invalid." });
+    }
+
+    if (req.query.endDate && !endDate) {
+      return res.status(400).json({ message: "End date filter is invalid." });
+    }
+
+    if (startDate || endDate) {
+      query.$and = query.$and || [];
+      query.$and.push({
+        visitDate: {
+          ...(startDate ? { $gte: startDate } : {}),
+          ...(endDate ? { $lte: endDate } : {}),
+        },
+      });
+    }
+
+    if (req.query.search) {
+      const pattern = new RegExp(escapeRegex(req.query.search), "i");
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { patientName: pattern },
+          { servicePerformed: pattern },
+          { treatment: pattern },
+          { treatmentPerformed: pattern },
+          { procedure: pattern },
+          { diagnosis: pattern },
+        ],
+      });
+    }
+
+    const records = await DentalRecord.find(query)
+      .sort({ visitDate: -1, createdAt: -1 })
+      .limit(500)
+      .lean();
+
+    res.json({ data: records });
+  } catch (error) {
+    next(error);
+  }
+});
+router.get("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const query = buildClinicalNoteQuery(req);
+    const [records, total] = await Promise.all([
+      DentalRecord.find(query)
+        .sort({ visitDate: -1, updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      DentalRecord.countDocuments(query),
+    ]);
+
+    res.json({
+      data: records.map(sanitizeClinicalNote),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.max(Math.ceil(total / limit), 1),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    const patientName = String(req.body.patientName || "").trim();
+    const notes = req.body.clinicalNotes || {};
+    const appointmentId = String(req.body.appointment || "").trim();
+
+    if (!patientName) {
+      return res.status(400).json({ message: "Patient name is required.", errors: { patientName: "Patient name is required." } });
+    }
+
+    const clinicalNotes = {
+      observation: String(notes.observation || "").trim(),
+      assessment: String(notes.assessment || "").trim(),
+      recommendations: String(notes.recommendations || "").trim(),
+      additionalNotes: String(notes.additionalNotes || "").trim(),
+    };
+
+    if (!Object.values(clinicalNotes).some(Boolean)) {
+      return res.status(400).json({ message: "Enter at least one clinical note field.", errors: { clinicalNotes: "Enter at least one clinical note field." } });
+    }
+
+    let appointment = null;
+    if (appointmentId) {
+      if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+        return res.status(400).json({ message: "Appointment reference is invalid.", errors: { appointment: "Appointment reference is invalid." } });
+      }
+      appointment = await Appointment.findById(appointmentId).lean();
+      if (!appointment) {
+        return res.status(404).json({ message: "Appointment reference was not found." });
+      }
+    }
+
+    const patient = appointment?.patient
+      ? await Patient.findById(appointment.patient).select("_id").lean()
+      : await Patient.findOne({ patientName }).select("_id").lean();
+    const provider = providerName(req.user);
+    const record = await DentalRecord.create({
+      patient: patient?._id || appointment?.patient,
+      appointment: appointment?._id,
+      patientName,
+      visitDate: req.body.visitDate ? parseReportDate(req.body.visitDate) || new Date() : new Date(),
+      noteType: String(req.body.noteType || "Clinical Note").trim() || "Clinical Note",
+      clinicalNotes,
+      dentistName: appointment?.dentistName || (req.user.role === "dentist" || req.user.role === "admin" ? provider : ""),
+      servicePerformed: appointment?.service || "",
+      procedure: appointment?.service || "",
+      createdBy: req.user.id,
+      createdByName: provider,
+      createdByEmail: req.user.email,
+    });
+
+    await auditClinicalNoteAction(req, record, "Clinical Note Created");
+    res.status(201).json({
+      message: "Clinical note created successfully.",
+      data: sanitizeClinicalNote(record),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+router.get("/dentalrecords/clinical-notes/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid clinical note ID." });
+    }
+
+    const scope = clinicalNoteScope(req, req.user.role !== "admin" || req.query.scope !== "all");
+    const record = await DentalRecord.findOne({ _id: req.params.id, ...scope });
+
+    if (!record || !clinicalNoteHasContent(record)) {
+      return res.status(404).json({ message: "Clinical note not found." });
+    }
+
+    await auditClinicalNoteAction(req, record, "Clinical Note Viewed");
+    res.json({ data: sanitizeClinicalNote(record) });
+  } catch (error) {
+    next(error);
+  }
+});
+router.patch("/dentalrecords/clinical-notes/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid clinical note ID." });
+    }
+
+    const record = await DentalRecord.findById(req.params.id);
+    if (!record || !clinicalNoteHasContent(record)) {
+      return res.status(404).json({ message: "Clinical note not found." });
+    }
+
+    const isOwner = String(record.createdBy || "") === String(req.user.id) || String(record.createdByEmail || "").toLowerCase() === String(req.user.email || "").toLowerCase();
+    if (!isOwner) {
+      return res.status(403).json({ message: "Only the original note creator can edit this clinical note." });
+    }
+
+    const notes = req.body.clinicalNotes || {};
+    const clinicalNotes = {
+      observation: String(notes.observation || "").trim(),
+      assessment: String(notes.assessment || "").trim(),
+      recommendations: String(notes.recommendations || "").trim(),
+      additionalNotes: String(notes.additionalNotes || "").trim(),
+    };
+
+    if (!Object.values(clinicalNotes).some(Boolean)) {
+      return res.status(400).json({ message: "Enter at least one clinical note field.", errors: { clinicalNotes: "Enter at least one clinical note field." } });
+    }
+
+    record.clinicalNotes = clinicalNotes;
+    record.visitDate = req.body.visitDate ? parseReportDate(req.body.visitDate) || record.visitDate : record.visitDate;
+    record.noteType = String(req.body.noteType || record.noteType || "Clinical Note").trim();
+    await record.save();
+
+    await auditClinicalNoteAction(req, record, "Clinical Note Updated");
+    res.json({
+      message: "Clinical note updated successfully.",
+      data: sanitizeClinicalNote(record),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/dentalrecords/clinical-notes/export", authorize("admin"), async (req, res, next) => {
+  try {
+    await AuditLog.create({
+      action: "Clinical Note Exported",
+      entityType: "Clinical Notes",
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        userName: providerName(req.user),
+        filters: req.body?.filters || {},
+      },
+    });
+    res.json({ message: "Clinical notes export logged." });
+  } catch (error) {
+    next(error);
+  }
+});
+router.get("/dentalrecords/treatment-records", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const query = buildTreatmentRecordQuery(req);
+    const [records, total, allMatching] = await Promise.all([
+      DentalRecord.find(query).sort({ visitDate: -1, updatedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      DentalRecord.countDocuments(query),
+      DentalRecord.find(query).select("procedure servicePerformed treatment treatmentStatus createdByName dentistName").lean(),
+    ]);
+    const procedures = [...new Set(allMatching.map((record) => record.procedure || record.servicePerformed || record.treatment).filter(Boolean))].sort();
+    const providers = [...new Set(allMatching.map((record) => record.createdByName || record.dentistName).filter(Boolean))].sort();
+
+    res.json({
+      data: records.map(sanitizeTreatmentRecord),
+      summary: {
+        total,
+        completed: allMatching.filter((record) => (record.treatmentStatus || "completed") === "completed").length,
+        followUps: allMatching.filter((record) => record.treatmentStatus === "follow_up_required").length,
+        inProgress: allMatching.filter((record) => record.treatmentStatus === "in_progress").length,
+      },
+      filters: { procedures, providers },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.max(Math.ceil(total / limit), 1),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/dentalrecords/treatment-records", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    const patientName = String(req.body.patientName || "").trim();
+    const procedure = String(req.body.procedure || req.body.servicePerformed || "").trim();
+    const appointmentId = String(req.body.appointment || "").trim();
+
+    if (!patientName) return res.status(400).json({ message: "Patient name is required.", errors: { patientName: "Patient name is required." } });
+    if (!procedure) return res.status(400).json({ message: "Procedure or service is required.", errors: { procedure: "Procedure or service is required." } });
+
+    let appointment = null;
+    if (appointmentId) {
+      if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+        return res.status(400).json({ message: "Appointment reference is invalid.", errors: { appointment: "Appointment reference is invalid." } });
+      }
+      appointment = await Appointment.findById(appointmentId).lean();
+      if (!appointment) return res.status(404).json({ message: "Appointment reference was not found." });
+    }
+
+    const provider = providerName(req.user);
+    const record = await DentalRecord.create({
+      patient: appointment?.patient,
+      appointment: appointment?._id,
+      patientName,
+      visitDate: req.body.visitDate ? parseReportDate(req.body.visitDate) || new Date() : new Date(),
+      procedure,
+      servicePerformed: procedure,
+      toothNumber: String(req.body.toothNumber || "").trim(),
+      diagnosis: String(req.body.diagnosis || "").trim(),
+      treatment: String(req.body.treatmentPerformed || req.body.treatmentDescription || "").trim(),
+      treatmentPerformed: String(req.body.treatmentPerformed || req.body.treatmentDescription || "").trim(),
+      materialsUsed: String(req.body.materialsUsed || "").trim(),
+      treatmentStatus: ["completed", "in_progress", "cancelled", "follow_up_required"].includes(req.body.treatmentStatus) ? req.body.treatmentStatus : "completed",
+      recommendations: String(req.body.recommendations || req.body.followUpNotes || "").trim(),
+      nextVisitRecommendation: String(req.body.nextVisitRecommendation || req.body.followUpNotes || "").trim(),
+      dentistName: provider,
+      notes: String(req.body.notes || "").trim(),
+      createdBy: req.user.id,
+      createdByName: provider,
+      createdByEmail: req.user.email,
+    });
+
+    await auditTreatmentRecordAction(req, record, "Treatment Record Created");
+    res.status(201).json({ message: "Treatment record created successfully.", data: sanitizeTreatmentRecord(record) });
+  } catch (error) {
+    next(error);
+  }
+});
+router.get("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: "Invalid treatment record ID." });
+    const scope = treatmentRecordScope(req, req.user.role !== "admin" || req.query.scope !== "all");
+    const record = await DentalRecord.findOne({ _id: req.params.id, ...scope });
+
+    if (!record || !treatmentRecordHasContent(record)) return res.status(404).json({ message: "Treatment record not found." });
+
+    await auditTreatmentRecordAction(req, record, "Treatment Record Viewed");
+    res.json({ data: sanitizeTreatmentRecord(record) });
+  } catch (error) {
+    next(error);
+  }
+});
+router.patch("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: "Invalid treatment record ID." });
+    const record = await DentalRecord.findById(req.params.id);
+
+    if (!record || !treatmentRecordHasContent(record)) return res.status(404).json({ message: "Treatment record not found." });
+
+    const isOwner = String(record.createdBy || "") === String(req.user.id) || String(record.createdByEmail || "").toLowerCase() === String(req.user.email || "").toLowerCase();
+    if (!isOwner) return res.status(403).json({ message: "Only the original provider can edit this treatment record." });
+
+    record.visitDate = req.body.visitDate ? parseReportDate(req.body.visitDate) || record.visitDate : record.visitDate;
+    record.procedure = String(req.body.procedure || record.procedure || "").trim();
+    record.servicePerformed = String(req.body.procedure || req.body.servicePerformed || record.servicePerformed || "").trim();
+    record.toothNumber = String(req.body.toothNumber || "").trim();
+    record.diagnosis = String(req.body.diagnosis || "").trim();
+    record.treatment = String(req.body.treatmentPerformed || req.body.treatmentDescription || "").trim();
+    record.treatmentPerformed = String(req.body.treatmentPerformed || req.body.treatmentDescription || "").trim();
+    record.materialsUsed = String(req.body.materialsUsed || "").trim();
+    record.treatmentStatus = ["completed", "in_progress", "cancelled", "follow_up_required"].includes(req.body.treatmentStatus) ? req.body.treatmentStatus : record.treatmentStatus || "completed";
+    record.recommendations = String(req.body.recommendations || req.body.followUpNotes || "").trim();
+    record.nextVisitRecommendation = String(req.body.nextVisitRecommendation || req.body.followUpNotes || "").trim();
+    record.notes = String(req.body.notes || "").trim();
+    await record.save();
+
+    await auditTreatmentRecordAction(req, record, "Treatment Record Updated");
+    res.json({ message: "Treatment record updated successfully.", data: sanitizeTreatmentRecord(record) });
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/dentalrecords/treatment-records/export", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+  try {
+    await AuditLog.create({
+      action: "Treatment Record Exported",
+      entityType: "Treatment Records",
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        userName: providerName(req.user),
+        filters: req.body?.filters || {},
+      },
+    });
+    res.json({ message: "Treatment records export logged." });
+  } catch (error) {
+    next(error);
+  }
+});
 router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => {
   try {
     const patient = await Patient.findOne({ userId: req.user.id });

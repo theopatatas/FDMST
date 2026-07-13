@@ -24,7 +24,9 @@ import SignInPage from './pages/SignInPage.jsx'
 import StaffClinicalNotesPage from './pages/staff/StaffClinicalNotesPage.jsx'
 import StaffInventoryPage from './pages/staff/StaffInventoryPage.jsx'
 import StaffLandingPage from './pages/staff/StaffLandingPage.jsx'
+import StaffPatientsPage from './pages/staff/StaffPatientsPage.jsx'
 import StaffReportsPage from './pages/staff/StaffReportsPage.jsx'
+import StaffSettingsPage from './pages/staff/StaffSettingsPage.jsx'
 import StaffTreatmentRecordsPage from './pages/staff/StaffTreatmentRecordsPage.jsx'
 
 const adminNavItems = [
@@ -32,6 +34,8 @@ const adminNavItems = [
   { label: 'Patients', to: '/admin/patients', icon: 'patients' },
   { label: 'Staff', to: '/admin/staff', icon: 'staff', preserveFrom: true },
   { label: 'Appointments', to: '/admin/appointments', icon: 'appointments' },
+  { label: 'Treatment Records', to: '/admin/treatment-records', icon: 'treatmentRecords' },
+  { label: 'Clinical Notes', to: '/admin/clinical-notes', icon: 'clinicalNotes' },
   { label: 'Analytics', to: '/admin/analytics', icon: 'analytics' },
   { label: 'Reports', to: '/admin/reports', icon: 'reports' },
   { label: 'Inventory', to: '/admin/inventory', icon: 'inventory' },
@@ -130,7 +134,9 @@ function App() {
             />
           }
         />
+        <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
         <Route path="analytics" element={<AdminAnalyticsPage />} />
+        <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="inventory" element={<AdminInventoryPage />} />
         <Route path="promotions" element={<AdminPromotionsPage />} />
@@ -158,15 +164,7 @@ function App() {
             />
           }
         />
-        <Route
-          path="patients"
-          element={
-            <PortalSectionPage
-              title="Patients"
-              description="Browse patient records and recent registrations."
-            />
-          }
-        />
+        <Route path="patients" element={<StaffPatientsPage />} />
         <Route
           path="notifications"
           element={
@@ -181,7 +179,7 @@ function App() {
         <Route path="reports" element={<StaffReportsPage />} />
         <Route path="inventory" element={<StaffInventoryPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
-        <Route path="settings" element={<ProfilePage />} />
+        <Route path="settings" element={<StaffSettingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
 
@@ -204,15 +202,7 @@ function App() {
             />
           }
         />
-        <Route
-          path="patients"
-          element={
-            <PortalSectionPage
-              title="Patients"
-              description="Browse patient records and recent registrations."
-            />
-          }
-        />
+        <Route path="patients" element={<StaffPatientsPage />} />
         <Route
           path="notifications"
           element={
@@ -227,7 +217,7 @@ function App() {
         <Route path="reports" element={<StaffReportsPage />} />
         <Route path="inventory" element={<StaffInventoryPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
-        <Route path="settings" element={<ProfilePage />} />
+        <Route path="settings" element={<StaffSettingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
     </Routes>

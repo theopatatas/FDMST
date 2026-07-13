@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FaCalendarCheck,
   FaCheckCircle,
+  FaChevronDown,
   FaExclamationTriangle,
   FaFileCsv,
   FaFileExcel,
@@ -17,6 +18,7 @@ import { formatStatus } from '../../utils/auth.js'
 
 function inRange(dateValue, start, end) {
   const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return !start && !end
   if (start && date < new Date(start)) return false
   if (end) {
     const endDate = new Date(end)
@@ -118,6 +120,7 @@ function AdminReportsPage() {
   const [inventory, setInventory] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeReportDetails, setActiveReportDetails] = useState('appointments')
+  const [exportOpen, setExportOpen] = useState(false)
 
   const loadReports = useCallback(async () => {
     try {
@@ -137,14 +140,19 @@ function AdminReportsPage() {
   useEffect(() => { Promise.resolve().then(loadReports) }, [loadReports])
 
   const filteredAppointments = useMemo(() => appointments.filter((item) => inRange(item.appointmentDate, startDate, endDate)), [appointments, startDate, endDate])
+  const hasInventoryDateFilter = Boolean(startDate || endDate)
   const filteredInventorySales = useMemo(() => inventory.flatMap((item) => (item.transactionHistory || [])
-    .filter((entry) => entry.type === 'sale' && inRange(entry.recordedAt || item.updatedAt || item.createdAt, startDate, endDate))
+    .filter((entry) => entry.type === 'sale' && inRange(entry.recordedAt, startDate, endDate))
     .map((entry) => ({ ...entry, itemId: item._id, itemName: item.itemName }))), [inventory, startDate, endDate])
   const inventoryReportRows = useMemo(() => inventory.map((item) => {
-    const sales = filteredInventorySales.filter((entry) => String(entry.itemId) === String(item._id))
+    const periodTransactions = (item.transactionHistory || []).filter((entry) => inRange(entry.recordedAt, startDate, endDate))
+
+    if (hasInventoryDateFilter && !periodTransactions.length) return null
+
+    const sales = periodTransactions.filter((entry) => entry.type === 'sale')
     const quantitySold = sales.reduce((total, entry) => total + Math.abs(Number(entry.quantityChanged) || 0), 0)
     const salesRevenue = sales.reduce((total, entry) => total + (Number(entry.totalAmount) || 0), 0)
-    const lastMovement = (item.transactionHistory || [])
+    const lastMovement = periodTransactions
       .map((entry) => entry.recordedAt)
       .filter(Boolean)
       .sort((left, right) => new Date(right) - new Date(left))[0]
@@ -157,7 +165,7 @@ function AdminReportsPage() {
       stockValue: inventoryUnitValue(item) * (Number(item.quantity) || 0),
       lastMovement,
     }
-  }), [filteredInventorySales, inventory])
+  }).filter(Boolean), [hasInventoryDateFilter, inventory, startDate, endDate])
   const completed = filteredAppointments.filter((item) => item.status === 'completed').length
   const noShow = filteredAppointments.filter((item) => item.status === 'no_show').length
   const estimatedRevenue = filteredAppointments.reduce((total, item) => total + appointmentRevenue(item), 0)
@@ -255,12 +263,54 @@ function AdminReportsPage() {
             </button>
           ))}
         </div>
-        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto_auto_auto]">
+        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
           <label className="grid gap-2 text-sm font-semibold text-slate-500">Start Date<input className={inputClass} type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setPeriod('custom') }} /></label>
           <label className="grid gap-2 text-sm font-semibold text-slate-500">End Date<input className={inputClass} type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPeriod('custom') }} /></label>
-          <button onClick={() => exportReport('csv')} className="mt-auto inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-sky-950 px-5 text-sm font-semibold text-white"><FaFileCsv /> Export CSV</button>
-          <button onClick={() => exportReport('excel')} className="mt-auto inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white"><FaFileExcel /> Export Excel</button>
-          <button onClick={() => window.print()} className="mt-auto inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-gray-200 px-5 text-sm font-semibold text-slate-600"><FaPrint /> Print/PDF</button>
+          <div className="relative mt-auto">
+            <button
+              type="button"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-900 md:w-auto"
+              onClick={() => setExportOpen((value) => !value)}
+            >
+              <FaFileCsv className="h-4 w-4" />
+              Export
+              <FaChevronDown className="h-3 w-3" />
+            </button>
+            {exportOpen ? (
+              <div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setExportOpen(false)
+                    exportReport('csv')
+                  }}
+                >
+                  <FaFileCsv className="h-4 w-4 text-sky-700" /> Export CSV
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setExportOpen(false)
+                    exportReport('excel')
+                  }}
+                >
+                  <FaFileExcel className="h-4 w-4 text-sky-700" /> Export Excel
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setExportOpen(false)
+                    window.print()
+                  }}
+                >
+                  <FaPrint className="h-4 w-4 text-sky-700" /> Print/PDF
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
       {isLoading ? (

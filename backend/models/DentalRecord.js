@@ -15,6 +15,11 @@ const dentalRecordSchema = new mongoose.Schema(
       trim: true,
       required: true,
     },
+    noteType: {
+      type: String,
+      trim: true,
+      default: "Clinical Note",
+    },
     visitDate: {
       type: Date,
       default: Date.now,
@@ -36,6 +41,15 @@ const dentalRecordSchema = new mongoose.Schema(
       trim: true,
     },
     treatmentPerformed: {
+      type: String,
+      trim: true,
+    },
+    treatmentStatus: {
+      type: String,
+      enum: ["completed", "in_progress", "cancelled", "follow_up_required"],
+      default: "completed",
+    },
+    materialsUsed: {
       type: String,
       trim: true,
     },
@@ -78,6 +92,19 @@ const dentalRecordSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    createdByName: {
+      type: String,
+      trim: true,
+    },
+    createdByEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
     notes: {
       type: String,
       trim: true,
@@ -88,5 +115,9 @@ const dentalRecordSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+dentalRecordSchema.index({ createdBy: 1, visitDate: -1 });
+dentalRecordSchema.index({ dentistName: 1, visitDate: -1 });
+dentalRecordSchema.index({ patientName: 1, visitDate: -1 });
 
 module.exports = mongoose.model("DentalRecord", dentalRecordSchema);

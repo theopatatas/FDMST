@@ -25,11 +25,20 @@ const normalizePatientPayload = (body = {}) => ({
   dateOfBirth: body.dateOfBirth || undefined,
   gender: body.gender || "prefer_not_to_say",
   address: body.address?.trim() || "",
+  emergencyContact: body.emergencyContact?.trim() || "",
+  emergencyContactName: body.emergencyContactName?.trim() || "",
+  emergencyContactNumber: normalizeMobileNumber(body.emergencyContactNumber),
   allergies: normalizeAllergies(body.allergies),
+  medicalConditions: body.medicalConditions?.trim() || "",
   medicalHistory: body.medicalHistory?.trim() || "",
   dentalHistory: body.dentalHistory?.trim() || "",
   registrationStatus: body.registrationStatus || "unverified",
+  verifiedAt: body.verifiedAt || undefined,
+  verificationHistory: Array.isArray(body.verificationHistory) ? body.verificationHistory : [],
   status: body.status || "active",
+  assignedDentist: body.assignedDentist || undefined,
+  assignedDentistName: body.assignedDentistName?.trim() || "",
+  username: body.username?.trim() || "",
 });
 
 const generatePatientId = async () => {
@@ -64,6 +73,10 @@ const validatePatientPayload = (payload, { requireEmail = false, requireMobile =
 
   if (!isValidMobileNumber(payload.contactNumber, { required: requireMobile })) {
     errors.contactNumber = MOBILE_NUMBER_MESSAGE;
+  }
+
+  if (payload.emergencyContactNumber && !isValidMobileNumber(payload.emergencyContactNumber)) {
+    errors.emergencyContactNumber = MOBILE_NUMBER_MESSAGE;
   }
 
   if (requireBirthDate && !payload.dateOfBirth) {
