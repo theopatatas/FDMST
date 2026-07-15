@@ -45,9 +45,34 @@ const defaultAppointmentSettings = {
 }
 
 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const ADVANCE_BOOKING_DAYS = 14
+
+function toDateInputValue(date) {
+  return date.toISOString().split('T')[0]
+}
+
+function addDays(date, days) {
+  const value = new Date(date)
+  value.setDate(value.getDate() + days)
+  return value
+}
 
 function toMinutes(value) {
-  const [hours = 0, minutes = 0] = String(value || '').split(':').map(Number)
+  const normalized = String(value || '').trim()
+  const meridiemMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+
+  if (meridiemMatch) {
+    let hours = Number(meridiemMatch[1])
+    const minutes = Number(meridiemMatch[2])
+    const period = meridiemMatch[3].toUpperCase()
+
+    if (period === 'PM' && hours !== 12) hours += 12
+    if (period === 'AM' && hours === 12) hours = 0
+
+    return hours * 60 + minutes
+  }
+
+  const [hours = 0, minutes = 0] = normalized.split(':').map(Number)
   return (Number(hours) || 0) * 60 + (Number(minutes) || 0)
 }
 
@@ -162,6 +187,7 @@ function BookAppointmentPage() {
   const [user] = useState(() => authStorage.getUser())
   const availabilityRequestRef = useRef(0)
   const promoRequestRef = useRef(0)
+  const preferredDentistAppliedRef = useRef(false)
   const [dentists, setDentists] = useState([])
   const [clinicSettings, setClinicSettings] = useState(null)
   const [bookingDataError, setBookingDataError] = useState('')
@@ -187,8 +213,10 @@ function BookAppointmentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingSuccess, setBookingSuccess] = useState(null)
   const [isReviewOpen, setIsReviewOpen] = useState(false)
+  const [reviewSnapshot, setReviewSnapshot] = useState(null)
 
-  const minDate = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const minDate = useMemo(() => toDateInputValue(new Date()), [])
+  const maxDate = useMemo(() => toDateInputValue(addDays(new Date(), ADVANCE_BOOKING_DAYS)), [])
   const settingsSource = clinicSettings?.appointmentSettings
   const workingDaysKey = Array.isArray(settingsSource?.workingDays)
     ? settingsSource.workingDays.join('|')
@@ -288,7 +316,13 @@ function BookAppointmentPage() {
       ])
 
       const loadedDentists = dentistsResult.status === 'fulfilled'
-        ? (dentistsResult.value.data || []).filter((dentist) => dentist.role === 'dentist')
+        ? Array.from(
+            new Map(
+              (dentistsResult.value.data || [])
+                .filter((dentist) => dentist.name)
+                .map((dentist) => [dentist.name, dentist]),
+            ).values(),
+          )
         : []
 
       if (dentistsResult.status === 'fulfilled') {
@@ -305,9 +339,10 @@ function BookAppointmentPage() {
         setBookingDataError('Unable to load current clinic services. Please try again later.')
       }
 
-      if (profileResult.status === 'fulfilled' && profileResult.value.user?.patient?.preferredDentistName) {
+      if (!preferredDentistAppliedRef.current && profileResult.status === 'fulfilled' && profileResult.value.user?.patient?.preferredDentistName) {
         const preferredDentist = profileResult.value.user.patient.preferredDentistName
         if (loadedDentists.some((dentist) => dentist.name === preferredDentist)) {
+          preferredDentistAppliedRef.current = true
           setForm((currentForm) => currentForm.dentistName
             ? currentForm
             : { ...currentForm, dentistName: preferredDentist })
@@ -319,7 +354,7 @@ function BookAppointmentPage() {
   }, [])
 
   useEffect(() => {
-    if (!dentists.length || form.dentistName) return
+    if (preferredDentistAppliedRef.current || !dentists.length || form.dentistName) return
 
     const preferredDentist = user?.patient?.preferredDentistName
     if (!preferredDentist) return
@@ -327,6 +362,7 @@ function BookAppointmentPage() {
     const isAvailable = dentists.some((dentist) => dentist.name === preferredDentist)
     if (!isAvailable) return
 
+    preferredDentistAppliedRef.current = true
     setForm((currentForm) => currentForm.dentistName
       ? currentForm
       : { ...currentForm, dentistName: preferredDentist })
@@ -355,6 +391,18 @@ function BookAppointmentPage() {
         if (availabilityRequestRef.current !== requestId) return
         setAvailableTimeSlots([])
         setAvailabilityMessage('Selected date is unavailable. Please choose a future date.')
+        setIsLoadingAvailability(false)
+        setForm((currentForm) => currentForm.appointmentTime ? { ...currentForm, appointmentTime: '' } : currentForm)
+      }, 0)
+      return () => window.clearTimeout(timeoutId)
+    }
+
+    const maxBookableDate = new Date(`${maxDate}T00:00:00`)
+    if (!Number.isNaN(selectedDate.getTime()) && selectedDate > maxBookableDate) {
+      const timeoutId = window.setTimeout(() => {
+        if (availabilityRequestRef.current !== requestId) return
+        setAvailableTimeSlots([])
+        setAvailabilityMessage('Online booking is available up to 2 weeks in advance. Please choose an earlier date.')
         setIsLoadingAvailability(false)
         setForm((currentForm) => currentForm.appointmentTime ? { ...currentForm, appointmentTime: '' } : currentForm)
       }, 0)
@@ -418,6 +466,7 @@ function BookAppointmentPage() {
     form.appointmentDate,
     form.dentistName,
     form.service,
+    maxDate,
     appointmentSettings,
     appointmentSettings.openingTime,
     appointmentSettings.closingTime,
@@ -499,6 +548,10 @@ function BookAppointmentPage() {
     const pastDateError = selectedDate && !Number.isNaN(selectedDate.getTime()) && selectedDate < today
       ? 'Selected date is unavailable. Please choose a future date.'
       : ''
+    const maxBookableDate = new Date(`${maxDate}T00:00:00`)
+    const advanceDateError = selectedDate && !Number.isNaN(selectedDate.getTime()) && selectedDate > maxBookableDate
+      ? 'Online booking is available up to 2 weeks in advance. Please choose an earlier date.'
+      : ''
     const scheduleError = form.appointmentDate && !isWorkingDate(form.appointmentDate, appointmentSettings)
       ? 'The selected date is outside the clinic schedule.'
       : ''
@@ -540,6 +593,12 @@ function BookAppointmentPage() {
     if (pastDateError) {
       setFieldErrors({ appointmentDate: pastDateError })
       toast.error(pastDateError)
+      return false
+    }
+
+    if (advanceDateError) {
+      setFieldErrors({ appointmentDate: advanceDateError })
+      toast.error(advanceDateError)
       return false
     }
 
@@ -585,10 +644,11 @@ function BookAppointmentPage() {
     setIsSubmitting(true)
 
     try {
-      const response = await fdmstApi.bookAppointment(form)
+      const response = await fdmstApi.bookAppointment(reviewSnapshot || form)
       toast.success(response.message || 'Appointment booked successfully.')
       setBookingSuccess(response.appointment || null)
       setIsReviewOpen(false)
+      setReviewSnapshot(null)
       setFieldErrors({})
       setForm((currentForm) => ({
         ...currentForm,
@@ -613,8 +673,11 @@ function BookAppointmentPage() {
   const handleSubmit = async (event) => {
     event.preventDefault()
     if (!validateBookingForm()) return
+    setReviewSnapshot({ ...form })
     setIsReviewOpen(true)
   }
+
+  const reviewData = reviewSnapshot || form
 
   return (
     <main className="px-4 py-6 text-slate-700 sm:px-6 lg:py-8">
@@ -700,6 +763,7 @@ function BookAppointmentPage() {
                     type="date"
                     name="appointmentDate"
                     min={minDate}
+                    max={maxDate}
                     value={form.appointmentDate}
                     onChange={handleChange}
                     required
@@ -869,8 +933,8 @@ function BookAppointmentPage() {
                     </span>
                   </div>
                   {availableTimeSlots.length ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {availableTimeSlots.slice(0, 12).map((slot) => (
+                    <div className="mt-4 flex max-h-56 flex-wrap gap-2 overflow-y-auto pr-1">
+                      {availableTimeSlots.map((slot) => (
                         <button
                           key={slot}
                           type="button"
@@ -884,11 +948,6 @@ function BookAppointmentPage() {
                           {slot}
                         </button>
                       ))}
-                      {availableTimeSlots.length > 12 ? (
-                        <span className="inline-flex h-9 items-center rounded-xl bg-slate-50 px-3 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
-                          +{availableTimeSlots.length - 12} more
-                        </span>
-                      ) : null}
                     </div>
                   ) : (
                     <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
@@ -932,27 +991,6 @@ function BookAppointmentPage() {
               </div>
             </div>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
-                  <FaCalendarCheck className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-sky-950">Booking Summary</h2>
-                  <p className="mt-1 text-sm text-slate-500">Review these details before submitting your request.</p>
-                </div>
-              </div>
-              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Service</dt><dd className="mt-1 font-semibold text-sky-950">{form.service || 'Not selected'}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{form.dentistName || 'Any available dentist'}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Schedule</dt><dd className="mt-1 font-semibold text-sky-950">{form.appointmentDate && form.appointmentTime ? `${formattedSelectedDate} at ${form.appointmentTime}` : 'Not selected'}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Estimated Duration</dt><dd className="mt-1 font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Original Price</dt><dd className="mt-1 font-semibold text-sky-950">{currencyFormatter.format(priceSummary.originalPrice)}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Promo Discount</dt><dd className="mt-1 font-semibold text-emerald-700">-{currencyFormatter.format(priceSummary.discountAmount)}</dd></div>
-                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-slate-400">Final Price</dt><dd className="mt-1 font-semibold text-emerald-700">{currencyFormatter.format(priceSummary.finalPrice)}</dd></div>
-              </dl>
-            </section>
-
             <div className="flex justify-stretch sm:justify-end">
               <button
                 type="submit"
@@ -967,12 +1005,12 @@ function BookAppointmentPage() {
         </section>
       </div>
       {isReviewOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Confirm Appointment Request</p>
-                <h2 className="mt-2 text-2xl font-semibold text-sky-950">Review Appointment Summary</h2>
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Booking Summary</p>
+                <h2 className="mt-2 text-2xl font-semibold text-sky-950">Review Appointment Details</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
                   Please confirm these details before sending your appointment request to the clinic.
                 </p>
@@ -986,22 +1024,28 @@ function BookAppointmentPage() {
                 x
               </button>
             </div>
-            <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Service</dt><dd className="mt-1 font-semibold text-sky-950">{form.service}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{form.dentistName || 'Any available dentist'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Date</dt><dd className="mt-1 font-semibold text-sky-950">{formattedSelectedDate}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Time</dt><dd className="mt-1 font-semibold text-sky-950">{form.appointmentTime}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Duration</dt><dd className="mt-1 font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Original Price</dt><dd className="mt-1 font-semibold text-sky-950">{currencyFormatter.format(priceSummary.originalPrice)}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Promo Discount</dt><dd className="mt-1 font-semibold text-emerald-700">-{currencyFormatter.format(priceSummary.discountAmount)}</dd></div>
-              <div className="rounded-2xl bg-emerald-50 p-4"><dt className="text-emerald-700">Final Price</dt><dd className="mt-1 text-lg font-semibold text-emerald-800">{currencyFormatter.format(priceSummary.finalPrice)}</dd></div>
+            <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Service</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.service}</dd></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.dentistName || 'Any available dentist'}</dd></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Date</dt><dd className="mt-1 font-semibold text-sky-950">{formattedSelectedDate}</dd></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Time</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.appointmentTime || 'Not selected'}</dd></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Duration</dt><dd className="mt-1 font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</dd></div>
+              {reviewData.reason.trim() ? (
+                <div className="rounded-2xl bg-slate-50 p-4 sm:col-span-2 xl:col-span-3">
+                  <dt className="font-semibold text-slate-900">Reason for Visit</dt>
+                  <dd className="mt-1 whitespace-pre-line font-semibold leading-6 text-sky-950">{reviewData.reason.trim()}</dd>
+                </div>
+              ) : null}
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Original Price</dt><dd className="mt-1 font-semibold text-sky-950">{currencyFormatter.format(priceSummary.originalPrice)}</dd></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Promo Discount</dt><dd className="mt-1 font-semibold text-emerald-700">-{currencyFormatter.format(priceSummary.discountAmount)}</dd></div>
+              <div className="rounded-2xl bg-emerald-50 p-4"><dt className="font-semibold text-slate-900">Final Price</dt><dd className="mt-1 text-lg font-semibold text-emerald-800">{currencyFormatter.format(priceSummary.finalPrice)}</dd></div>
             </dl>
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setIsReviewOpen(false)}
                 disabled={isSubmitting}
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 min-w-40 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Edit Details
               </button>
@@ -1009,55 +1053,61 @@ function BookAppointmentPage() {
                 type="button"
                 onClick={submitBookingRequest}
                 disabled={isSubmitting}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 min-w-48 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <FaCalendarCheck className="h-4 w-4" aria-hidden="true" />
-                {isSubmitting ? 'Submitting...' : 'Submit Request'}
+                {isSubmitting ? 'Confirming...' : 'Confirm Appointment'}
               </button>
             </div>
           </div>
         </div>
       ) : null}
       {bookingSuccess ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
-              <FaCalendarCheck className="h-6 w-6" aria-hidden="true" />
-            </span>
-            <h2 className="mt-5 text-2xl font-semibold text-sky-950">Appointment Request Sent</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Your request is pending clinic confirmation. Most requests are reviewed within 24 hours.
-            </p>
-            <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Appointment Number</dt><dd className="mt-1 font-semibold text-sky-950">{bookingSuccess.appointmentId}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Current Status</dt><dd className="mt-1 font-semibold text-amber-700">Pending</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Service</dt><dd className="mt-1 font-semibold text-sky-950">{bookingSuccess.service}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{bookingSuccess.dentistName || 'Any available dentist'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Date</dt><dd className="mt-1 font-semibold text-sky-950">{bookingSuccess.appointmentDate ? new Date(bookingSuccess.appointmentDate).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not provided'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="text-slate-400">Time</dt><dd className="mt-1 font-semibold text-sky-950">{bookingSuccess.appointmentTime}</dd></div>
-            </dl>
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setBookingSuccess(null)}
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-              >
-                Book Another Appointment
-              </button>
-              <Link
-                to="/patient"
-                state={{ refreshDashboard: Date.now() }}
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-              >
-                Return to Dashboard
-              </Link>
-              <Link
-                to="/patient"
-                state={{ refreshDashboard: Date.now(), openAppointments: true }}
-                className="inline-flex h-12 items-center justify-center rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white transition hover:bg-sky-900"
-              >
-                View My Appointments
-              </Link>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+            <div className="grid gap-6 lg:grid-cols-[0.85fr_1.45fr] lg:items-stretch">
+              <div className="flex h-full flex-col justify-center rounded-3xl bg-emerald-50 p-6 ring-1 ring-emerald-100">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                  <FaCalendarCheck className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <h2 className="mt-5 text-2xl font-semibold text-sky-950">Appointment Request Sent</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Your request is pending clinic confirmation. Most requests are reviewed within 24 hours.
+                </p>
+              </div>
+              <div className="flex h-full flex-col gap-6">
+                <dl className="grid auto-rows-fr gap-3 text-sm sm:grid-cols-2">
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Appointment Number</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.appointmentId}</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Current Status</dt><dd className="mt-2 font-semibold text-amber-700">Pending</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Service</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.service}</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.dentistName || 'Any available dentist'}</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Date</dt><dd className="mt-2 font-semibold text-sky-950">{bookingSuccess.appointmentDate ? new Date(bookingSuccess.appointmentDate).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not provided'}</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Time</dt><dd className="mt-2 font-semibold text-sky-950">{bookingSuccess.appointmentTime}</dd></div>
+                </dl>
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setBookingSuccess(null)}
+                    className="inline-flex h-12 min-w-48 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50"
+                  >
+                    Book Another Appointment
+                  </button>
+                  <Link
+                    to="/patient"
+                    state={{ refreshDashboard: Date.now() }}
+                    className="inline-flex h-12 min-w-44 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50"
+                  >
+                    Return to Dashboard
+                  </Link>
+                  <Link
+                    to="/patient"
+                    state={{ refreshDashboard: Date.now(), openAppointments: true }}
+                    className="inline-flex h-12 min-w-48 items-center justify-center rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900"
+                  >
+                    View My Appointments
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
         </div>

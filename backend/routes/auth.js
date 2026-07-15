@@ -1,11 +1,14 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const AuditLog = require("../models/AuditLog");
+const OtpToken = require("../models/OtpToken");
 const Patient = require("../models/Patient");
 const User = require("../models/User");
 const { getJwtExpiresIn, getJwtSecret } = require("../config/auth");
 const { authenticate } = require("../middleware/auth");
+const { sendOtpEmail } = require("../services/mailService");
 const asyncHandler = require("../utils/asyncHandler");
 const { preparePatientCreateBody } = require("../utils/patientRecords");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
@@ -105,120 +108,347 @@ const recordLoginHistory = async (user, req, status) => {
   await user.save();
 };
 
-router.post(
-  "/register",
-  asyncHandler(async (req, res) => {
-    const {
+const OTP_TTL_MINUTES = 10;
+const OTP_MAX_ATTEMPTS = 5;
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+const generateOtp = () => String(crypto.randomInt(100000, 1000000));
+
+const hashOtp = (email, purpose, otp) =>
+  crypto
+    .createHash("sha256")
+    .update(`${normalizeEmail(email)}:${purpose}:${otp}:${getJwtSecret()}`)
+    .digest("hex");
+
+const createOtpToken = async ({ email, purpose, payload = {} }) => {
+  const normalizedEmail = normalizeEmail(email);
+  const otp = generateOtp();
+
+  await OtpToken.updateMany(
+    { email: normalizedEmail, purpose, consumedAt: { $exists: false } },
+    { consumedAt: new Date() },
+  );
+
+  await OtpToken.create({
+    email: normalizedEmail,
+    purpose,
+    otpHash: hashOtp(normalizedEmail, purpose, otp),
+    payload,
+    expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000),
+  });
+
+  await sendOtpEmail({ to: normalizedEmail, otp, purpose });
+};
+
+const verifyOtpToken = async ({ email, purpose, otp }) => {
+  const normalizedEmail = normalizeEmail(email);
+  const token = await OtpToken.findOne({
+    email: normalizedEmail,
+    purpose,
+    consumedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });
+
+  if (!token) {
+    const error = new Error("OTP is invalid or has expired. Please request a new code.");
+    error.status = 400;
+    error.errors = { otp: "OTP is invalid or has expired." };
+    throw error;
+  }
+
+  if (token.attempts >= OTP_MAX_ATTEMPTS) {
+    token.consumedAt = new Date();
+    await token.save();
+    const error = new Error("Too many incorrect OTP attempts. Please request a new code.");
+    error.status = 429;
+    error.errors = { otp: "Too many incorrect attempts." };
+    throw error;
+  }
+
+  if (token.otpHash !== hashOtp(normalizedEmail, purpose, String(otp || "").trim())) {
+    token.attempts += 1;
+    await token.save();
+    const error = new Error("Incorrect OTP. Please check your email and try again.");
+    error.status = 400;
+    error.errors = { otp: "Incorrect OTP." };
+    throw error;
+  }
+
+  token.consumedAt = new Date();
+  await token.save();
+  return token.payload || {};
+};
+
+const validateRegistrationPayload = async (body) => {
+  const {
+    firstName,
+    lastName,
+    email,
+    username,
+    contactNumber,
+    dateOfBirth,
+    gender,
+    address,
+    allergies,
+    medicalHistory,
+    dentalHistory,
+    password,
+    confirmPassword,
+  } = body;
+
+  if (!firstName || !lastName || !email || !contactNumber || !dateOfBirth || !password) {
+    const error = new Error("First name, last name, email, mobile number, birth date, and password are required.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (confirmPassword !== undefined && password !== confirmPassword) {
+    const error = new Error("Passwords do not match.");
+    error.status = 400;
+    error.errors = { confirmPassword: "Passwords do not match." };
+    throw error;
+  }
+
+  if (password.length < 8) {
+    const error = new Error("Password must be at least 8 characters long.");
+    error.status = 400;
+    error.errors = { password: "Password must be at least 8 characters long." };
+    throw error;
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedUsername = username?.trim();
+  const normalizedContactNumber = normalizeMobileNumber(contactNumber);
+  const patientPayload = await preparePatientCreateBody(
+    {
       firstName,
       lastName,
-      email,
-      username,
-      contactNumber,
+      email: normalizedEmail,
+      contactNumber: normalizedContactNumber,
       dateOfBirth,
       gender,
       address,
       allergies,
       medicalHistory,
       dentalHistory,
-      password,
-      confirmPassword,
-    } = req.body;
-
-    if (!firstName || !lastName || !email || !contactNumber || !dateOfBirth || !password) {
-      return res.status(400).json({
-        message: "First name, last name, email, mobile number, birth date, and password are required.",
-      });
-    }
-
-    if (confirmPassword !== undefined && password !== confirmPassword) {
-      return res.status(400).json({
-        message: "Passwords do not match.",
-        errors: { confirmPassword: "Passwords do not match." },
-      });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({
-        message: "Password must be at least 8 characters long.",
-        errors: { password: "Password must be at least 8 characters long." },
-      });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedUsername = username?.trim();
-    const normalizedContactNumber = normalizeMobileNumber(contactNumber);
-    const patientPayload = await preparePatientCreateBody(
-      {
-        firstName,
-        lastName,
-        email: normalizedEmail,
-        contactNumber: normalizedContactNumber,
-        dateOfBirth,
-        gender,
-        address,
-        allergies,
-        medicalHistory,
-        dentalHistory,
-        registrationStatus: "unverified",
-        status: "active",
-      },
-      { requireEmail: true, requireMobile: true, requireBirthDate: true },
-    );
-    const duplicateFilters = [{ email: normalizedEmail }, { contactNumber: normalizedContactNumber }];
-
-    if (normalizedUsername) {
-      duplicateFilters.push({ username: normalizedUsername });
-    }
-
-    const existingUser = await User.findOne({ $or: duplicateFilters });
-
-    if (existingUser) {
-      return res.status(409).json({
-        message:
-          existingUser.email === normalizedEmail
-            ? "An account with this email already exists."
-            : existingUser.contactNumber === normalizedContactNumber
-              ? "An account with this mobile number already exists."
-            : "This username is already taken.",
-        errors:
-          existingUser.email === normalizedEmail
-            ? { email: "This email is already registered." }
-            : existingUser.contactNumber === normalizedContactNumber
-              ? { contactNumber: "This mobile number is already registered." }
-              : { username: "This username is already taken." },
-      });
-    }
-
-    const passwordHash = await hashPasswordScrypt(password);
-    const user = await User.create({
-      firstName: patientPayload.firstName,
-      lastName: patientPayload.lastName,
-      email: normalizedEmail,
-      username: normalizedUsername || undefined,
-      contactNumber: normalizedContactNumber,
-      passwordHash,
-      role: "patient",
-      accountStatus: "unverified_user",
+      registrationStatus: "unverified",
       status: "active",
+    },
+    { requireEmail: true, requireMobile: true, requireBirthDate: true },
+  );
+  const duplicateFilters = [{ email: normalizedEmail }, { contactNumber: normalizedContactNumber }];
+
+  if (normalizedUsername) {
+    duplicateFilters.push({ username: normalizedUsername });
+  }
+
+  const existingUser = await User.findOne({ $or: duplicateFilters });
+
+  if (existingUser) {
+    const error = new Error(
+      existingUser.email === normalizedEmail
+        ? "An account with this email already exists."
+        : existingUser.contactNumber === normalizedContactNumber
+          ? "An account with this mobile number already exists."
+          : "This username is already taken.",
+    );
+    error.status = 409;
+    error.errors = existingUser.email === normalizedEmail
+      ? { email: "This email is already registered." }
+      : existingUser.contactNumber === normalizedContactNumber
+        ? { contactNumber: "This mobile number is already registered." }
+        : { username: "This username is already taken." };
+    throw error;
+  }
+
+  return {
+    patientPayload,
+    normalizedEmail,
+    normalizedUsername,
+    normalizedContactNumber,
+    password,
+  };
+};
+
+const createPatientAccount = async ({ patientPayload, normalizedEmail, normalizedUsername, normalizedContactNumber, password }) => {
+  const passwordHash = await hashPasswordScrypt(password);
+  const user = await User.create({
+    firstName: patientPayload.firstName,
+    lastName: patientPayload.lastName,
+    email: normalizedEmail,
+    username: normalizedUsername || undefined,
+    contactNumber: normalizedContactNumber,
+    passwordHash,
+    role: "patient",
+    accountStatus: "unverified_user",
+    status: "active",
+  });
+
+  let patient;
+
+  try {
+    patient = await Patient.create({
+      ...patientPayload,
+      userId: user._id,
+    });
+  } catch (error) {
+    await User.findByIdAndDelete(user._id).catch(() => {});
+    throw error;
+  }
+
+  return { user, patient };
+};
+
+router.post(
+  "/register",
+  asyncHandler(async (req, res) => {
+    const registration = await validateRegistrationPayload(req.body);
+
+    await createOtpToken({
+      email: registration.normalizedEmail,
+      purpose: "registration",
+      payload: {
+        patientPayload: registration.patientPayload,
+        normalizedEmail: registration.normalizedEmail,
+        normalizedUsername: registration.normalizedUsername,
+        normalizedContactNumber: registration.normalizedContactNumber,
+        password: registration.password,
+      },
     });
 
-    let patient;
+    res.status(202).json({
+      message: "Verification code sent to your email.",
+      email: registration.normalizedEmail,
+    });
+  }),
+);
 
-    try {
-      patient = await Patient.create({
-        ...patientPayload,
-        userId: user._id,
-      });
-    } catch (error) {
-      await User.findByIdAndDelete(user._id).catch(() => {});
-      throw error;
-    }
+router.post(
+  "/register/request-otp",
+  asyncHandler(async (req, res) => {
+    const registration = await validateRegistrationPayload(req.body);
+
+    await createOtpToken({
+      email: registration.normalizedEmail,
+      purpose: "registration",
+      payload: {
+        patientPayload: registration.patientPayload,
+        normalizedEmail: registration.normalizedEmail,
+        normalizedUsername: registration.normalizedUsername,
+        normalizedContactNumber: registration.normalizedContactNumber,
+        password: registration.password,
+      },
+    });
+
+    res.json({
+      message: "Verification code sent to your email.",
+      email: registration.normalizedEmail,
+    });
+  }),
+);
+
+router.post(
+  "/register/verify-otp",
+  asyncHandler(async (req, res) => {
+    const payload = await verifyOtpToken({
+      email: req.body.email,
+      purpose: "registration",
+      otp: req.body.otp,
+    });
+    await validateRegistrationPayload({
+      ...payload.patientPayload,
+      username: payload.normalizedUsername,
+      password: payload.password,
+      confirmPassword: payload.password,
+    });
+    const { user, patient } = await createPatientAccount(payload);
 
     res.status(201).json({
       message: "Registration successful.",
       user: sanitizeUser(user),
       patient: sanitizePatient(patient),
     });
+  }),
+);
+
+router.post(
+  "/forgot-password/request-otp",
+  asyncHandler(async (req, res) => {
+    const normalizedEmail = normalizeEmail(req.body.email);
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: "Email address is required.", errors: { email: "Email address is required." } });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({ message: "No account was found with this email address.", errors: { email: "No account found." } });
+    }
+
+    if (user.role !== "patient") {
+      return res.status(403).json({
+        message: "Email password reset is currently available for patient accounts only. Please contact the clinic administrator for staff account access.",
+        errors: { email: "Email password reset is currently available for patient accounts only." },
+      });
+    }
+
+    await createOtpToken({
+      email: normalizedEmail,
+      purpose: "password_reset",
+      payload: { userId: user._id },
+    });
+
+    res.json({ message: "Password reset code sent to your email." });
+  }),
+);
+
+router.post(
+  "/forgot-password/reset",
+  asyncHandler(async (req, res) => {
+    const { email, otp, newPassword, confirmPassword } = req.body;
+
+    if (!newPassword || !confirmPassword) {
+      return res.status(400).json({ message: "New password and confirmation are required." });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "New password and confirmation do not match.", errors: { confirmPassword: "Passwords do not match." } });
+    }
+
+    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters and include uppercase, lowercase, and number.",
+        errors: { newPassword: "Password must be at least 8 characters and include uppercase, lowercase, and number." },
+      });
+    }
+
+    const payload = await verifyOtpToken({
+      email,
+      purpose: "password_reset",
+      otp,
+    });
+    const user = await User.findById(payload.userId).select("+passwordHash");
+
+    if (!user) {
+      return res.status(404).json({ message: "Account not found." });
+    }
+
+    user.passwordHash = await hashPasswordScrypt(newPassword);
+    user.lastPasswordChangedAt = new Date();
+    await user.save();
+
+    AuditLog.create({
+      action: "Password Reset",
+      entityType: "Authentication",
+      entityId: user._id,
+      performedBy: user._id,
+      performedByEmail: user.email,
+      metadata: { method: "email_otp" },
+    }).catch(() => {});
+
+    res.json({ message: "Password reset successful. You can now sign in with your new password." });
   }),
 );
 

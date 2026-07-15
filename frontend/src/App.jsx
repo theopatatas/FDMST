@@ -6,7 +6,6 @@ import LandingPage from './pages/LandingPage.jsx'
 import AdminStaffPage from './pages/admin/AdminStaffPage.jsx'
 import AdminPatientsPage from './pages/admin/AdminPatientsPage.jsx'
 import AdminInventoryPage from './pages/admin/AdminInventoryPage.jsx'
-import PortalSectionPage from './pages/PortalSectionPage.jsx'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage.jsx'
 import AdminLandingPage from './pages/admin/AdminLandingPage.jsx'
 import AdminNotificationsPage from './pages/admin/AdminNotificationsPage.jsx'
@@ -14,6 +13,7 @@ import AdminPromotionsPage from './pages/admin/AdminPromotionsPage.jsx'
 import AdminReportsPage from './pages/admin/AdminReportsPage.jsx'
 import AdminSettingsPage from './pages/admin/AdminSettingsPage.jsx'
 import BookAppointmentPage from './pages/patient/BookAppointmentPage.jsx'
+import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx'
 import PatientLandingPage from './pages/patient/PatientLandingPage.jsx'
 import PatientNotificationsPage from './pages/patient/PatientNotificationsPage.jsx'
 import PatientPromotionsPage from './pages/patient/PatientPromotionsPage.jsx'
@@ -92,6 +92,7 @@ function App() {
         }
       />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
       <Route
         path="/patient"
@@ -165,15 +166,7 @@ function App() {
           }
         />
         <Route path="patients" element={<StaffPatientsPage />} />
-        <Route
-          path="notifications"
-          element={
-            <PortalSectionPage
-              title="Notifications"
-              description="View appointment updates, patient messages, and clinic alerts."
-            />
-          }
-        />
+        <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
         <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
         <Route path="reports" element={<StaffReportsPage />} />
@@ -203,15 +196,7 @@ function App() {
           }
         />
         <Route path="patients" element={<StaffPatientsPage />} />
-        <Route
-          path="notifications"
-          element={
-            <PortalSectionPage
-              title="Notifications"
-              description="View appointment updates, patient messages, and clinic alerts."
-            />
-          }
-        />
+        <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
         <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
         <Route path="reports" element={<StaffReportsPage />} />

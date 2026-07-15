@@ -48,6 +48,15 @@ const statusColors = {
 }
 
 const statusOptions = ['pending', 'confirmed', 'checked_in', 'in_consultation', 'completed', 'cancelled', 'no_show']
+const statusSortWeight = statusOptions.reduce((weights, status, index) => ({ ...weights, [status]: index }), {})
+
+function compareDashboardAppointments(left, right) {
+  const leftWeight = statusSortWeight[left.status] ?? statusOptions.length
+  const rightWeight = statusSortWeight[right.status] ?? statusOptions.length
+
+  if (leftWeight !== rightWeight) return leftWeight - rightWeight
+  return String(left.appointmentTime || '').localeCompare(String(right.appointmentTime || ''))
+}
 
 function getGreeting() {
   const hour = new Date().getHours()
@@ -159,7 +168,7 @@ function AdminLandingPage() {
   const todayStatusCounts = stats.statusCounts || {}
   const cards = useMemo(() => [
     ['all', "Today's Appointments", stats.todaysAppointments || 0, 'Scheduled today', FaCalendarDay, 'amber'],
-    ['pending', 'Pending Today', todayStatusCounts.pending || 0, 'Awaiting clinic action', FaClock, 'amber'],
+    ['pending', 'Pending Appointments', stats.pendingAppointments || 0, 'Awaiting clinic action', FaClock, 'amber'],
     ['confirmed', 'Confirmed Today', todayStatusCounts.confirmed || 0, 'Ready for visit', FaCalendarCheck, 'blue'],
     ['checked_in', 'Checked In Today', todayStatusCounts.checked_in || 0, 'Patients already arrived', FaUserClock, 'emerald'],
     ['in_consultation', 'In Consultation Today', todayStatusCounts.in_consultation || 0, 'Currently being treated', FaUserMd, 'violet'],
@@ -168,7 +177,10 @@ function AdminLandingPage() {
     ['no_show', 'No Show Today', todayStatusCounts.no_show || 0, 'Missed visits', FaUserClock, 'slate'],
     ['dentists', 'Active Dentists Today', `${stats.activeDentistsToday || 0} / ${stats.totalDentists || 0}`, 'Dentists with visits today', FaUserMd, 'emerald'],
   ], [stats, todayStatusCounts])
-  const todayAppointments = dashboard?.todaysSchedule || []
+  const todayAppointments = useMemo(
+    () => [...(dashboard?.todaysSchedule || [])].sort(compareDashboardAppointments),
+    [dashboard?.todaysSchedule],
+  )
   const filteredSchedule = useMemo(() => (
     statusFilter === 'all' ? todayAppointments : todayAppointments.filter((appointment) => appointment.status === statusFilter)
   ), [statusFilter, todayAppointments])
@@ -307,22 +319,7 @@ function AdminLandingPage() {
         </Panel>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <Panel title="Pending Actions" subtitle="Items requiring attention.">
-          <div className="grid gap-3">
-            {[
-              ['Pending Appointment Requests', dashboard?.pendingActions?.pendingAppointments || 0, '/admin/appointments'],
-              ['Pending Dentist/Staff Requests', dashboard?.pendingActions?.pendingStaffRequests || 0, '/admin/staff'],
-              ['Inactive Patient Accounts', dashboard?.pendingActions?.inactivePatients || 0, '/admin/patients'],
-            ].map(([label, value, path]) => (
-              <button key={label} type="button" onClick={() => navigate(path)} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm">
-                <span className="font-semibold text-sky-950">{label}</span>
-                <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{value}</span>
-              </button>
-            ))}
-          </div>
-        </Panel>
-
+      <section className="grid gap-6">
         <Panel title="Recent Activity" subtitle="Latest clinic workflow events.">
           <div className="grid max-h-80 gap-3 overflow-y-auto pr-1">
             {dashboard?.recentActivity?.length ? dashboard.recentActivity.map((item) => (

@@ -93,6 +93,26 @@ export const fdmstApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  requestRegistrationOtp: (payload) =>
+    request('/auth/register/request-otp', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  verifyRegistrationOtp: (payload) =>
+    request('/auth/register/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  requestPasswordResetOtp: (payload) =>
+    request('/auth/forgot-password/request-otp', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  resetPasswordWithOtp: (payload) =>
+    request('/auth/forgot-password/reset', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   login: async (payload) => {
     const data = await request('/auth/login', {
       method: 'POST',
@@ -211,6 +231,7 @@ export const fdmstApi = {
     const query = params.toString()
     return request(`/appointments${query ? `?${query}` : ''}`)
   },
+  getAppointment: (id) => request(`/appointments/${id}`),
   getProviderReportAppointments: (filters = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {

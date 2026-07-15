@@ -4,7 +4,6 @@ import {
   FaCalendarCheck,
   FaCapsules,
   FaClipboardList,
-  FaDownload,
   FaFileMedical,
   FaFilter,
   FaNotesMedical,
@@ -241,50 +240,52 @@ function PatientRecordsPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(14rem,1fr)_10rem_12rem_12rem_10rem_12rem_auto]">
-            <label className="relative min-w-0">
+          <div className="mt-5 space-y-3">
+            <label className="relative block w-full">
               <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input className={`${inputClass} pl-11`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search date, dentist, treatment, tooth, notes..." />
             </label>
-            <select className={inputClass} value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} aria-label="Filter by date">
-              <option value="all">All dates</option>
-              <option value="30_days">Last 30 days</option>
-              <option value="90_days">Last 90 days</option>
-              <option value="1_year">Last year</option>
-            </select>
-            <select className={inputClass} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)} aria-label="Filter by dentist">
-              <option value="all">All dentists</option>
-              {dentists.map((dentist) => <option key={dentist} value={dentist}>{dentist}</option>)}
-            </select>
-            <select className={inputClass} value={treatmentFilter} onChange={(event) => setTreatmentFilter(event.target.value)} aria-label="Filter by treatment">
-              <option value="all">All treatments</option>
-              {treatments.map((treatment) => <option key={treatment} value={treatment}>{treatment}</option>)}
-            </select>
-            <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
-              <option value="all">All status</option>
-              <option value="recorded">Recorded</option>
-            </select>
-            <select className={inputClass} value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort records">
-              <option value="date_desc">Newest first</option>
-              <option value="date_asc">Oldest first</option>
-              <option value="dentist_asc">Dentist A-Z</option>
-              <option value="treatment_asc">Treatment A-Z</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                setQuery('')
-                setDateFilter('all')
-                setDentistFilter('all')
-                setTreatmentFilter('all')
-                setStatusFilter('all')
-                setSortBy('date_desc')
-              }}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 md:col-span-2 xl:col-span-1"
-            >
-              <FaFilter className="h-4 w-4" aria-hidden="true" />
-              Clear
-            </button>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[9.5rem_12rem_minmax(12rem,1fr)_9.5rem_10.5rem_auto]">
+              <select className={inputClass} value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} aria-label="Filter by date">
+                <option value="all">All dates</option>
+                <option value="30_days">Last 30 days</option>
+                <option value="90_days">Last 90 days</option>
+                <option value="1_year">Last year</option>
+              </select>
+              <select className={inputClass} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)} aria-label="Filter by dentist">
+                <option value="all">All dentists</option>
+                {dentists.map((dentist) => <option key={dentist} value={dentist}>{dentist}</option>)}
+              </select>
+              <select className={inputClass} value={treatmentFilter} onChange={(event) => setTreatmentFilter(event.target.value)} aria-label="Filter by treatment">
+                <option value="all">All treatments</option>
+                {treatments.map((treatment) => <option key={treatment} value={treatment}>{treatment}</option>)}
+              </select>
+              <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
+                <option value="all">All status</option>
+                <option value="recorded">Recorded</option>
+              </select>
+              <select className={inputClass} value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort records">
+                <option value="date_desc">Newest first</option>
+                <option value="date_asc">Oldest first</option>
+                <option value="dentist_asc">Dentist A-Z</option>
+                <option value="treatment_asc">Treatment A-Z</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('')
+                  setDateFilter('all')
+                  setDentistFilter('all')
+                  setTreatmentFilter('all')
+                  setStatusFilter('all')
+                  setSortBy('date_desc')
+                }}
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              >
+                <FaFilter className="h-4 w-4" aria-hidden="true" />
+                Clear
+              </button>
+            </div>
           </div>
 
           {isLoading ? (
@@ -329,7 +330,7 @@ function PatientRecordsPage() {
           )}
         </section>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="mt-8">
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="text-xl font-semibold text-sky-950">Appointment History</h2>
             <div className="mt-5 grid gap-3">
@@ -346,23 +347,6 @@ function PatientRecordsPage() {
               )) : (
                 <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">No appointment history yet.</p>
               )}
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="text-xl font-semibold text-sky-950">Uploaded Files</h2>
-            <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
-              <FaDownload className="mx-auto h-8 w-8 text-slate-400" aria-hidden="true" />
-              <p className="mt-3 text-sm font-semibold text-sky-950">No uploaded files</p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">X-rays, consent forms, and clinical attachments will appear here when available.</p>
-            </div>
-            <div className="mt-5 rounded-2xl bg-sky-50 p-4">
-              <div className="flex gap-3">
-                <FaNotesMedical className="mt-1 h-4 w-4 shrink-0 text-sky-950" aria-hidden="true" />
-                <p className="text-sm leading-6 text-sky-950">
-                  For corrections or missing records, please contact the clinic staff during operating hours.
-                </p>
-              </div>
             </div>
           </article>
         </section>

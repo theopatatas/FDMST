@@ -615,6 +615,15 @@ const toMinutes = (value) => {
   return (Number(hours) || 0) * 60 + (Number(minutes) || 0);
 };
 
+const getScheduledDateTime = (appointment) => {
+  const value = new Date(appointment.appointmentDate);
+  if (Number.isNaN(value.getTime())) return new Date(0);
+
+  const minutes = toMinutes(appointment.appointmentTime);
+  value.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return value;
+};
+
 const getKpiComparisonRange = (query = {}) => {
   const now = new Date();
 
@@ -686,7 +695,7 @@ router.get(
       totalDentists,
       totalAppointments,
       completedAppointments,
-      pendingAppointments,
+      pendingAppointmentRecords,
       cancelledAppointments,
       noShowAppointments,
       todaysAppointments,
@@ -704,7 +713,9 @@ router.get(
       User.countDocuments({ role: "dentist", status: "active" }),
       Appointment.countDocuments({}),
       Appointment.countDocuments({ status: "completed" }),
-      Appointment.countDocuments({ status: "pending" }),
+      Appointment.find({ status: "pending" })
+        .select("appointmentDate appointmentTime status")
+        .lean(),
       Appointment.countDocuments({ status: "cancelled" }),
       Appointment.countDocuments({
         $or: [
@@ -760,6 +771,9 @@ router.get(
         .limit(8)
         .lean(),
     ]);
+    const pendingAppointments = pendingAppointmentRecords
+      .filter((appointment) => getScheduledDateTime(appointment) >= todayStart)
+      .length;
     const statusCounts = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "no_show"].reduce((counts, status) => ({
       ...counts,
       [status]: todaysSchedule.filter((appointment) => appointment.status === status).length,

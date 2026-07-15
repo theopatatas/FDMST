@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 
 const AuditLog = require("../models/AuditLog");
 const Appointment = require("../models/Appointment");
@@ -17,6 +18,8 @@ const dashboardRoutes = require("./dashboard");
 const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
+const { sendMail } = require("../services/mailService");
+const { validateAppointmentSlot } = require("../utils/appointmentAvailability");
 const { preparePatientCreateBody, preparePatientUpdateBody } = require("../utils/patientRecords");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
 const { expirePromotions } = require("../utils/promotionExpiry");
@@ -619,6 +622,25 @@ const normalizeClinicSettingsBody = (body = {}) => {
     });
   }
 
+  if (body.systemPreferences && typeof body.systemPreferences === "object") {
+    const preferences = body.systemPreferences;
+    const theme = ["light", "dark", "system"].includes(preferences.theme) ? preferences.theme : "light";
+    const language = ["English", "Filipino"].includes(preferences.language) ? preferences.language : "English";
+    const timeZone = ["Asia/Manila", "UTC"].includes(preferences.timeZone) ? preferences.timeZone : "Asia/Manila";
+    const dateFormat = ["MMM d, yyyy", "MM/dd/yyyy", "dd/MM/yyyy", "yyyy-MM-dd"].includes(preferences.dateFormat)
+      ? preferences.dateFormat
+      : "MMM d, yyyy";
+    const timeFormat = ["12", "24"].includes(String(preferences.timeFormat)) ? String(preferences.timeFormat) : "12";
+
+    normalized.systemPreferences = {
+      theme,
+      language,
+      timeZone,
+      dateFormat,
+      timeFormat,
+    };
+  }
+
   return normalized;
 };
 
@@ -644,6 +666,7 @@ const parseReportDate = (value, endOfDay = false) => {
 };
 
 const patientFullName = (patient) => [patient?.firstName, patient?.lastName].filter(Boolean).join(" ").trim();
+const patientFullNameWithMiddle = (patient) => [patient?.firstName, patient?.middleName, patient?.lastName].filter(Boolean).join(" ").trim();
 
 const getPatientDisplayStatus = (patient) => {
   if ((patient.status || "active") === "inactive") return "Inactive";
@@ -793,16 +816,90 @@ const clinicalNoteHasContent = (record) => {
     .some((value) => String(value || "").trim());
 };
 
+const hasPatientScopedRecordLookup = (req) => (
+  (req.query.appointment && mongoose.Types.ObjectId.isValid(req.query.appointment))
+  || (req.query.patient && mongoose.Types.ObjectId.isValid(req.query.patient))
+  || Boolean(String(req.query.patientName || "").trim())
+);
+
+const buildPatientNameConditions = (value) => {
+  const name = String(value || "").trim();
+  if (!name) return [];
+  const tokens = name.split(/\s+/).filter(Boolean);
+  const conditions = [{ patientName: new RegExp(escapeRegex(name), "i") }];
+
+  if (tokens.length > 1) {
+    conditions.push({
+      patientName: new RegExp(`${escapeRegex(tokens[0])}.*${escapeRegex(tokens[tokens.length - 1])}`, "i"),
+    });
+  }
+
+  return conditions;
+};
+
+const normalizePersonName = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+const enrichRecordsWithPatientInfo = async (records = []) => {
+  const values = records.map((record) => (record?.toObject ? record.toObject() : { ...record }));
+  const needsPatientLookup = values.some((record) => (
+    record?.patientName
+    && !record?.patientId
+    && !(record?.patient && typeof record.patient === "object" && record.patient.patientId)
+  ));
+
+  if (!needsPatientLookup) return values;
+
+  const patients = await Patient.find({})
+    .select("patientId firstName middleName lastName dateOfBirth gender")
+    .lean();
+
+  const findPatientByName = (recordName) => {
+    const normalizedRecordName = normalizePersonName(recordName);
+    if (!normalizedRecordName) return null;
+
+    return patients.find((patient) => {
+      const firstName = normalizePersonName(patient.firstName);
+      const lastName = normalizePersonName(patient.lastName);
+      const nameOptions = [
+        patientFullName(patient),
+        patientFullNameWithMiddle(patient),
+      ].map(normalizePersonName).filter(Boolean);
+
+      return nameOptions.includes(normalizedRecordName)
+        || (firstName && lastName && normalizedRecordName.includes(firstName) && normalizedRecordName.includes(lastName));
+    }) || null;
+  };
+
+  return values.map((record) => {
+    if (record?.patientId || (record?.patient && typeof record.patient === "object" && record.patient.patientId)) {
+      return record;
+    }
+    const patient = findPatientByName(record.patientName);
+    return patient ? { ...record, patient } : record;
+  });
+};
+
 const sanitizeClinicalNote = (record) => {
   const value = record.toObject ? record.toObject() : { ...record };
   return {
     id: value._id,
+    recordType: value.recordType || "clinical_note",
     patient: value.patient,
+    patientSnapshot: value.patient && typeof value.patient === "object"
+      ? {
+          id: value.patient._id,
+          patientId: value.patient.patientId,
+          dateOfBirth: value.patient.dateOfBirth,
+          gender: value.patient.gender,
+        }
+      : null,
+    patientId: value.patientId || (value.patient && typeof value.patient === "object" ? value.patient.patientId : undefined),
     appointment: value.appointment,
     patientName: value.patientName,
     noteType: value.noteType || "Clinical Note",
     visitDate: value.visitDate,
     clinicalNotes: value.clinicalNotes || {},
+    clinicalFollowUp: value.clinicalFollowUp || null,
     createdBy: value.createdBy,
     createdByName: value.createdByName,
     createdByEmail: value.createdByEmail,
@@ -825,6 +922,10 @@ const clinicalNoteScope = (req, ownOnly = false) => {
     ownFilters.push({ dentistName: name });
   }
 
+  if (hasPatientScopedRecordLookup(req) && ["admin", "staff"].includes(req.user.role)) {
+    return {};
+  }
+
   if (req.user.role === "admin" && !ownOnly) return {};
   return { $or: ownFilters };
 };
@@ -838,6 +939,7 @@ const buildClinicalNoteQuery = (req) => {
   query.$and = query.$and || [];
   query.$and.push({
     $or: [
+      { recordType: "clinical_note" },
       { "clinicalNotes.observation": { $nin: [null, ""] } },
       { "clinicalNotes.assessment": { $nin: [null, ""] } },
       { "clinicalNotes.recommendations": { $nin: [null, ""] } },
@@ -873,6 +975,20 @@ const buildClinicalNoteQuery = (req) => {
 
   if (req.query.appointment && mongoose.Types.ObjectId.isValid(req.query.appointment)) {
     query.$and.push({ appointment: req.query.appointment });
+  }
+
+  if (req.query.patient) {
+    if (!mongoose.Types.ObjectId.isValid(req.query.patient)) {
+      const error = new Error("Patient reference is invalid.");
+      error.status = 400;
+      throw error;
+    }
+    query.$and.push({ patient: req.query.patient });
+  }
+
+  if (req.query.patientName) {
+    const conditions = buildPatientNameConditions(req.query.patientName);
+    if (conditions.length) query.$and.push({ $or: conditions });
   }
 
   if (req.query.search) {
@@ -915,6 +1031,7 @@ const sanitizeTreatmentRecord = (record) => {
   const value = record.toObject ? record.toObject() : { ...record };
   return {
     id: value._id,
+    recordType: value.recordType || "treatment_record",
     patient: value.patient,
     appointment: value.appointment,
     patientName: value.patientName,
@@ -931,6 +1048,7 @@ const sanitizeTreatmentRecord = (record) => {
     recommendations: value.recommendations,
     nextVisitRecommendation: value.nextVisitRecommendation,
     notes: value.notes,
+    appointmentSnapshot: value.appointmentSnapshot || null,
     dentistName: value.dentistName,
     createdBy: value.createdBy,
     createdByName: value.createdByName,
@@ -963,6 +1081,10 @@ const treatmentRecordScope = (req, ownOnly = false) => {
     ownFilters.push({ dentistName: name });
   }
 
+  if (hasPatientScopedRecordLookup(req) && ["admin", "staff", "dentist"].includes(req.user.role)) {
+    return {};
+  }
+
   if (req.user.role === "admin" && !ownOnly) return {};
   return { $or: ownFilters };
 };
@@ -976,6 +1098,7 @@ const buildTreatmentRecordQuery = (req) => {
   query.$and = query.$and || [];
   query.$and.push({
     $or: [
+      { recordType: "treatment_record" },
       { procedure: { $nin: [null, ""] } },
       { servicePerformed: { $nin: [null, ""] } },
       { treatment: { $nin: [null, ""] } },
@@ -1017,6 +1140,29 @@ const buildTreatmentRecordQuery = (req) => {
   if (req.query.procedure && req.query.procedure !== "all") {
     const pattern = new RegExp(escapeRegex(req.query.procedure), "i");
     query.$and.push({ $or: [{ procedure: pattern }, { servicePerformed: pattern }, { treatment: pattern }] });
+  }
+
+  if (req.query.appointment) {
+    if (!mongoose.Types.ObjectId.isValid(req.query.appointment)) {
+      const error = new Error("Appointment reference is invalid.");
+      error.status = 400;
+      throw error;
+    }
+    query.$and.push({ appointment: req.query.appointment });
+  }
+
+  if (req.query.patient) {
+    if (!mongoose.Types.ObjectId.isValid(req.query.patient)) {
+      const error = new Error("Patient reference is invalid.");
+      error.status = 400;
+      throw error;
+    }
+    query.$and.push({ patient: req.query.patient });
+  }
+
+  if (req.query.patientName) {
+    const conditions = buildPatientNameConditions(req.query.patientName);
+    if (conditions.length) query.$and.push({ $or: conditions });
   }
 
   if (req.query.search) {
@@ -1069,8 +1215,24 @@ const sanitizePublicSettings = (settings) => ({
     price: service.price,
     status: service.status,
   })),
-  appointmentSettings: settings?.appointmentSettings || {},
-  systemPreferences: settings?.systemPreferences || {},
+  appointmentSettings: {
+    openingTime: "09:00",
+    closingTime: "18:00",
+    appointmentDuration: 30,
+    workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    maxAppointmentsPerDay: 20,
+    bufferTime: 10,
+    allowWeekendAppointments: true,
+    allowOnlineBooking: true,
+    ...(settings?.appointmentSettings || {}),
+  },
+  systemPreferences: {
+    theme: settings?.systemPreferences?.theme || "light",
+    language: settings?.systemPreferences?.language || "English",
+    timeZone: settings?.systemPreferences?.timeZone || "Asia/Manila",
+    dateFormat: settings?.systemPreferences?.dateFormat || "MMM d, yyyy",
+    timeFormat: settings?.systemPreferences?.timeFormat || "12",
+  },
   security: {
     sessionTimeout: settings?.security?.sessionTimeout || 30,
   },
@@ -1325,6 +1487,7 @@ router.get("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist
     const query = buildClinicalNoteQuery(req);
     const [records, total] = await Promise.all([
       DentalRecord.find(query)
+        .populate("patient", "patientId dateOfBirth gender")
         .sort({ visitDate: -1, updatedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -1350,6 +1513,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
     const patientName = String(req.body.patientName || "").trim();
     const notes = req.body.clinicalNotes || {};
     const appointmentId = String(req.body.appointment || "").trim();
+    const followUp = req.body.followUp || {};
 
     if (!patientName) {
       return res.status(400).json({ message: "Patient name is required.", errors: { patientName: "Patient name is required." } });
@@ -1378,10 +1542,13 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
     }
 
     const patient = appointment?.patient
-      ? await Patient.findById(appointment.patient).select("_id").lean()
-      : await Patient.findOne({ patientName }).select("_id").lean();
+      ? await Patient.findById(appointment.patient).select("_id userId firstName middleName lastName contactNumber email").lean()
+      : (await Patient.find({}).select("_id userId firstName middleName lastName contactNumber email").lean())
+        .find((candidate) => normalizePersonName(patientFullName(candidate)) === normalizePersonName(patientName)
+          || normalizePersonName(patientFullNameWithMiddle(candidate)) === normalizePersonName(patientName));
     const provider = providerName(req.user);
     const record = await DentalRecord.create({
+      recordType: "clinical_note",
       patient: patient?._id || appointment?.patient,
       appointment: appointment?._id,
       patientName,
@@ -1396,10 +1563,123 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
       createdByEmail: req.user.email,
     });
 
+    let followUpAppointment = null;
+    let followUpWarning = "";
+    const shouldCreateFollowUp = Boolean(followUp.enabled || followUp.date || followUp.time);
+    let followUpDate = null;
+    let followUpTime = "";
+    let followUpReason = "";
+    if (shouldCreateFollowUp) {
+      followUpDate = parseReportDate(followUp.date);
+      followUpTime = String(followUp.time || "").trim();
+      followUpReason = String(followUp.reason || clinicalNotes.recommendations || "Follow-up appointment recommended.").trim();
+
+      if (!followUpDate || !followUpTime) {
+        return res.status(400).json({
+          message: "Follow-up date and time are required when booking a follow-up appointment.",
+          errors: { followUp: "Follow-up date and time are required." },
+        });
+      }
+
+      try {
+        const followUpValidation = await validateAppointmentSlot({
+          appointmentDate: followUp.date,
+          appointmentTime: followUpTime,
+          serviceName: appointment?.service || "Follow-up Appointment",
+          dentistName: appointment?.dentistName || provider,
+          autoSelectAlternative: true,
+        });
+        followUpDate = followUpValidation.parsedDate;
+        const requestedFollowUpTime = followUpTime;
+        followUpTime = followUpValidation.appointmentTime;
+        const followUpAdjustmentNote = followUpValidation.autoAdjusted
+          ? ` Requested time ${requestedFollowUpTime} was unavailable, so the appointment was scheduled at ${followUpTime}.`
+          : "";
+
+        followUpAppointment = await Appointment.create({
+          patient: patient?._id || appointment?.patient,
+          patientName,
+          contactNumber: patient?.contactNumber || appointment?.contactNumber || "Not provided",
+          email: patient?.email || appointment?.email || "",
+          service: followUpValidation.selectedService.serviceName,
+          serviceRef: appointment?.serviceRef,
+          servicePriceSnapshot: Number(followUpValidation.selectedService.price) || appointment?.servicePriceSnapshot,
+          serviceDurationSnapshot: followUpValidation.serviceDuration,
+          appointmentDate: followUpValidation.parsedDate,
+          appointmentTime: followUpTime,
+          reason: followUpReason,
+          status: "follow_up",
+          dentistName: appointment?.dentistName || provider,
+          requestSubmittedAt: new Date(),
+          timeline: [{
+            status: "follow_up",
+            action: followUpValidation.autoAdjusted ? "Follow-up Scheduled at Next Available Time" : "Follow-up Scheduled",
+            performedBy: req.user.id,
+            performedByName: provider,
+            performedByEmail: req.user.email,
+            note: `Follow-up created from clinical note ${record._id}.${followUpAdjustmentNote}`.trim(),
+            recordedAt: new Date(),
+          }],
+        });
+
+        if (patient?.userId) {
+          await Notification.create({
+            user: patient.userId,
+            patient: patient._id,
+            title: "Follow-up appointment recommended",
+            message: `A follow-up appointment has been scheduled for ${followUpDate.toLocaleDateString()} at ${followUpTime}.${followUpAdjustmentNote}`,
+            type: "appointment",
+            metadata: {
+              appointmentId: followUpAppointment._id,
+              clinicalNoteId: record._id,
+              reason: followUpReason,
+            },
+          });
+        }
+
+        if (patient?.userId && (patient?.email || appointment?.email)) {
+          sendMail({
+            to: patient?.email || appointment.email,
+            subject: "Follow-up Appointment Scheduled - Flores-Dizon Dental Clinic",
+            message: `A follow-up appointment has been scheduled for ${followUpDate.toLocaleDateString()} at ${followUpTime}. Reason: ${followUpReason}${followUpAdjustmentNote}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.6;">
+                <h2 style="color:#082f49;">Follow-up Appointment Scheduled</h2>
+                <p>Your follow-up appointment has been scheduled.</p>
+                <p><strong>Date:</strong> ${followUpDate.toLocaleDateString()}</p>
+                <p><strong>Time:</strong> ${followUpTime}</p>
+                <p><strong>Reason:</strong> ${followUpReason}</p>
+                ${followUpValidation.autoAdjusted ? `<p>The requested time was unavailable, so the clinic selected the next available appointment time.</p>` : ""}
+              </div>
+            `,
+          }).catch(() => {});
+        }
+      } catch (followUpError) {
+        followUpWarning = followUpError?.code === 11000
+          ? "Clinical note was saved, but the follow-up slot is already booked."
+          : followUpError?.message || "Clinical note was saved, but the follow-up appointment could not be created.";
+      }
+
+      record.clinicalFollowUp = {
+        enabled: true,
+        date: followUpDate,
+        time: followUpTime,
+        reason: followUpReason,
+        appointment: followUpAppointment?._id,
+        appointmentId: followUpAppointment ? `APT-${String(followUpAppointment._id).slice(-6).toUpperCase()}` : "",
+        status: followUpAppointment?.status || (followUpWarning ? "not_scheduled" : "follow_up"),
+      };
+      await record.save();
+    }
+
     await auditClinicalNoteAction(req, record, "Clinical Note Created");
     res.status(201).json({
-      message: "Clinical note created successfully.",
+      message: followUpAppointment
+        ? "Clinical note created and follow-up appointment scheduled."
+        : "Clinical note created successfully.",
       data: sanitizeClinicalNote(record),
+      followUpAppointment,
+      warning: followUpWarning,
     });
   } catch (error) {
     next(error);
@@ -1489,15 +1769,21 @@ router.get("/dentalrecords/treatment-records", authorize("admin", "staff", "dent
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
     const query = buildTreatmentRecordQuery(req);
     const [records, total, allMatching] = await Promise.all([
-      DentalRecord.find(query).sort({ visitDate: -1, updatedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      DentalRecord.find(query)
+        .populate("patient", "patientId dateOfBirth gender")
+        .sort({ visitDate: -1, updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
       DentalRecord.countDocuments(query),
       DentalRecord.find(query).select("procedure servicePerformed treatment treatmentStatus createdByName dentistName").lean(),
     ]);
     const procedures = [...new Set(allMatching.map((record) => record.procedure || record.servicePerformed || record.treatment).filter(Boolean))].sort();
     const providers = [...new Set(allMatching.map((record) => record.createdByName || record.dentistName).filter(Boolean))].sort();
+    const enrichedRecords = await enrichRecordsWithPatientInfo(records);
 
     res.json({
-      data: records.map(sanitizeTreatmentRecord),
+      data: enrichedRecords.map(sanitizeTreatmentRecord),
       summary: {
         total,
         completed: allMatching.filter((record) => (record.treatmentStatus || "completed") === "completed").length,
@@ -1518,6 +1804,10 @@ router.get("/dentalrecords/treatment-records", authorize("admin", "staff", "dent
 });
 router.post("/dentalrecords/treatment-records", authorize("admin", "staff", "dentist"), async (req, res, next) => {
   try {
+    if (req.user.role === "staff") {
+      return res.status(403).json({ message: "Staff can view treatment records but cannot create official treatment records." });
+    }
+
     const patientName = String(req.body.patientName || "").trim();
     const procedure = String(req.body.procedure || req.body.servicePerformed || "").trim();
     const appointmentId = String(req.body.appointment || "").trim();
@@ -1532,10 +1822,22 @@ router.post("/dentalrecords/treatment-records", authorize("admin", "staff", "den
       }
       appointment = await Appointment.findById(appointmentId).lean();
       if (!appointment) return res.status(404).json({ message: "Appointment reference was not found." });
+
+      const existingRecord = await DentalRecord.findOne({
+        appointment: appointment._id,
+        recordType: "treatment_record",
+      }).select("_id");
+      if (existingRecord) {
+        return res.status(409).json({
+          message: "A Treatment Record already exists for this appointment.",
+          data: { id: existingRecord._id },
+        });
+      }
     }
 
     const provider = providerName(req.user);
     const record = await DentalRecord.create({
+      recordType: "treatment_record",
       patient: appointment?.patient,
       appointment: appointment?._id,
       patientName,
@@ -1567,18 +1869,25 @@ router.get("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: "Invalid treatment record ID." });
     const scope = treatmentRecordScope(req, req.user.role !== "admin" || req.query.scope !== "all");
-    const record = await DentalRecord.findOne({ _id: req.params.id, ...scope });
+    const record = await DentalRecord.findOne({ _id: req.params.id, ...scope })
+      .populate("patient", "patientId dateOfBirth gender");
 
     if (!record || !treatmentRecordHasContent(record)) return res.status(404).json({ message: "Treatment record not found." });
 
-    await auditTreatmentRecordAction(req, record, "Treatment Record Viewed");
-    res.json({ data: sanitizeTreatmentRecord(record) });
+    const [enrichedRecord] = await enrichRecordsWithPatientInfo([record]);
+
+    await auditTreatmentRecordAction(req, enrichedRecord, "Treatment Record Viewed");
+    res.json({ data: sanitizeTreatmentRecord(enrichedRecord) });
   } catch (error) {
     next(error);
   }
 });
 router.patch("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
   try {
+    if (req.user.role === "staff") {
+      return res.status(403).json({ message: "Staff can view treatment records but cannot edit official treatment records." });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: "Invalid treatment record ID." });
     const record = await DentalRecord.findById(req.params.id);
 
@@ -1638,6 +1947,7 @@ router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => 
 
     const [records, appointments] = await Promise.all([
       DentalRecord.find({
+        recordType: { $ne: "clinical_note" },
         $or: [
           { patient: patient._id },
           { patientName: [patient.firstName, patient.lastName].filter(Boolean).join(" ") },

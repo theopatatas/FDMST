@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   FaCalendarAlt,
   FaChevronDown,
+  FaClock,
   FaEdit,
   FaEye,
   FaFileExport,
@@ -20,6 +22,9 @@ const textareaClass = 'min-h-24 w-full rounded-xl border border-slate-200 bg-whi
 const emptyForm = {
   patientName: '',
   appointment: '',
+  appointmentDisplay: '',
+  service: '',
+  dentistName: '',
   visitDate: new Date().toISOString().slice(0, 10),
   noteType: 'Clinical Note',
   clinicalNotes: {
@@ -28,6 +33,13 @@ const emptyForm = {
     recommendations: '',
     additionalNotes: '',
   },
+  followUp: {
+    enabled: false,
+    date: '',
+    time: '',
+    reason: '',
+  },
+  clinicalFollowUp: null,
 }
 
 const canEditNote = (note, user) => {
@@ -36,12 +48,53 @@ const canEditNote = (note, user) => {
   return String(note?.createdBy || '') === userId || String(note?.createdByEmail || '').toLowerCase() === email
 }
 
-function NoteModal({ mode, note, form, setForm, onClose, onSubmit, isSaving, canEdit }) {
+const formatAppointmentId = (value) => {
+  if (!value) return ''
+  const raw = typeof value === 'object' ? value.appointmentId || value.id || value._id : value
+  if (!raw) return ''
+  const text = String(raw)
+  return text.startsWith('APT-') ? text : `APT-${text.slice(-6).toUpperCase()}`
+}
+
+const toDateKey = (value) => {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const addDaysKey = (days) => {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + days)
+  return toDateKey(date)
+}
+
+function NoteModal({
+  mode,
+  note,
+  form,
+  setForm,
+  onClose,
+  onSubmit,
+  isSaving,
+  canEdit,
+  followUpSlots = [],
+  isLoadingFollowUpSlots = false,
+  followUpAvailabilityMessage = '',
+}) {
   const isReadonly = mode === 'view' || !canEdit
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const updateNote = (key, value) => setForm((current) => ({
     ...current,
     clinicalNotes: { ...current.clinicalNotes, [key]: value },
+  }))
+  const updateFollowUp = (key, value) => setForm((current) => ({
+    ...current,
+    followUp: { ...(current.followUp || emptyForm.followUp), [key]: value },
   }))
 
   return (
@@ -49,7 +102,7 @@ function NoteModal({ mode, note, form, setForm, onClose, onSubmit, isSaving, can
       <section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[1.5rem] bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{mode === 'create' ? 'New Note' : mode === 'edit' ? 'Edit Note' : 'Clinical Note Details'}</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{mode === 'create' ? 'New Note Clinical Note' : mode === 'edit' ? 'Edit Note' : 'Clinical Note Details'}</p>
             <h2 className="mt-1 text-xl font-bold text-sky-950">{form.patientName || note?.patientName || 'Clinical Note'}</h2>
             <p className="mt-1 text-sm text-slate-500">Private internal documentation. Patients cannot view this note.</p>
           </div>
@@ -64,8 +117,8 @@ function NoteModal({ mode, note, form, setForm, onClose, onSubmit, isSaving, can
             <input className={inputClass} value={form.patientName} disabled={mode !== 'create'} onChange={(event) => update('patientName', event.target.value)} placeholder="Enter patient name" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
-            Appointment Reference
-            <input className={inputClass} value={form.appointment} disabled={isReadonly || mode === 'edit'} onChange={(event) => update('appointment', event.target.value)} placeholder="Optional appointment ID" />
+            Appointment ID
+            <input className={inputClass} value={form.appointmentDisplay || formatAppointmentId(form.appointment)} disabled={isReadonly || mode === 'edit'} onChange={(event) => update('appointment', event.target.value)} placeholder="Optional appointment ID" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Date
@@ -84,6 +137,98 @@ function NoteModal({ mode, note, form, setForm, onClose, onSubmit, isSaving, can
             Recommendations
             <textarea className={textareaClass} value={form.clinicalNotes.recommendations} disabled={isReadonly} onChange={(event) => updateNote('recommendations', event.target.value)} placeholder="Document recommendations or follow-up instructions..." />
           </label>
+          {mode === 'view' && form.clinicalFollowUp?.enabled ? (
+            <section className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 lg:col-span-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-emerald-950">Follow-up Booking</h3>
+                  <p className="mt-1 text-xs font-semibold text-emerald-700">Created from this clinical recommendation.</p>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-700 shadow-sm">
+                  {form.clinicalFollowUp.status === 'not_scheduled' ? 'Not Scheduled' : 'Booked'}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="rounded-xl bg-white p-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Appointment ID</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{form.clinicalFollowUp.appointmentId || formatAppointmentId(form.clinicalFollowUp.appointment) || 'Not recorded'}</p>
+                </div>
+                <div className="rounded-xl bg-white p-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Date</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{form.clinicalFollowUp.date ? formatDate(form.clinicalFollowUp.date) : 'Not recorded'}</p>
+                </div>
+                <div className="rounded-xl bg-white p-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Time</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{form.clinicalFollowUp.time || 'Not recorded'}</p>
+                </div>
+                <div className="rounded-xl bg-white p-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Reason</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{form.clinicalFollowUp.reason || 'Follow-up appointment recommended.'}</p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+          {mode !== 'view' ? (
+            <section className="rounded-2xl border border-sky-100 bg-sky-50 p-4 lg:col-span-3">
+              <label className="flex items-center gap-3 text-sm font-bold text-sky-950">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-sky-300 text-sky-700 focus:ring-sky-200"
+                  checked={Boolean(form.followUp?.enabled)}
+                  onChange={(event) => updateFollowUp('enabled', event.target.checked)}
+                />
+                Book follow-up appointment and notify patient
+              </label>
+              {form.followUp?.enabled ? (
+                <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-stretch">
+                  <div className="grid gap-3 md:w-64 md:shrink-0">
+                    <label className="grid gap-2 text-sm font-bold text-slate-600">
+                      Follow-up Date
+                      <span className="relative block">
+                        <FaCalendarAlt className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          className={`${inputClass} pl-11`}
+                          type="date"
+                          min={addDaysKey(0)}
+                          max={addDaysKey(14)}
+                          value={form.followUp?.date || ''}
+                          onChange={(event) => updateFollowUp('date', event.target.value)}
+                        />
+                      </span>
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-slate-600">
+                      Time
+                      <span className="relative block">
+                        <FaClock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <select
+                          className={`${inputClass} pl-11`}
+                          value={form.followUp?.time || ''}
+                          onChange={(event) => updateFollowUp('time', event.target.value)}
+                          disabled={!form.followUp?.date || isLoadingFollowUpSlots || !followUpSlots.length}
+                        >
+                          <option value="">
+                            {isLoadingFollowUpSlots ? 'Loading available appointments...' : 'Select a time'}
+                          </option>
+                          {followUpSlots.map((slot) => (
+                            <option key={slot} value={slot}>{slot}</option>
+                          ))}
+                        </select>
+                      </span>
+                    </label>
+                  </div>
+                  <label className="grid min-w-0 flex-1 gap-2 text-sm font-bold text-slate-600">
+                    Reason
+                    <textarea className={`${textareaClass} min-h-[7.75rem]`} value={form.followUp?.reason || ''} onChange={(event) => updateFollowUp('reason', event.target.value)} placeholder="Follow-up reason" />
+                  </label>
+                  {followUpAvailabilityMessage && form.followUp?.date ? (
+                    <div className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-500 md:basis-full">
+                      {followUpAvailabilityMessage}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <label className="grid gap-2 text-sm font-bold text-slate-600 lg:col-span-3">
             Additional Notes
             <textarea className={textareaClass} value={form.clinicalNotes.additionalNotes} disabled={isReadonly} onChange={(event) => updateNote('additionalNotes', event.target.value)} placeholder="Internal reminders or supporting context..." />
@@ -105,8 +250,12 @@ function NoteModal({ mode, note, form, setForm, onClose, onSubmit, isSaving, can
 
 function StaffClinicalNotesPage() {
   const toast = useToast()
+  const location = useLocation()
   const currentUser = authStorage.getUser()
   const isAdmin = currentUser?.role === 'admin'
+  const isStaff = currentUser?.role === 'staff'
+  const currentUserName = currentUser?.name || [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ').trim()
+  const appointmentPrefillRef = useRef('')
   const [notes, setNotes] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [isLoading, setIsLoading] = useState(true)
@@ -114,6 +263,10 @@ function StaffClinicalNotesPage() {
   const [exportOpen, setExportOpen] = useState(false)
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
+  const [providerOptions, setProviderOptions] = useState([])
+  const [followUpSlots, setFollowUpSlots] = useState([])
+  const [followUpAvailabilityMessage, setFollowUpAvailabilityMessage] = useState('')
+  const [isLoadingFollowUpSlots, setIsLoadingFollowUpSlots] = useState(false)
   const [filters, setFilters] = useState({
     scope: 'mine',
     search: '',
@@ -123,6 +276,10 @@ function StaffClinicalNotesPage() {
     endDate: '',
     page: 1,
   })
+  const appointmentPrefillId = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('appointment') || ''
+  }, [location.search])
 
   const loadNotes = useCallback(async () => {
     setIsLoading(true)
@@ -146,9 +303,122 @@ function StaffClinicalNotesPage() {
     loadNotes()
   }, [loadNotes])
 
+  useEffect(() => {
+    const followUp = form.followUp || {}
+
+    if (!followUp.enabled || !followUp.date || !form.service) {
+      setFollowUpSlots([])
+      setFollowUpAvailabilityMessage('')
+      setIsLoadingFollowUpSlots(false)
+      return
+    }
+
+    let isMounted = true
+    setIsLoadingFollowUpSlots(true)
+    setFollowUpAvailabilityMessage('Loading available appointments...')
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fdmstApi.getAppointmentAvailability({
+          date: followUp.date,
+          dentistName: form.dentistName,
+          service: form.service,
+        })
+        if (!isMounted) return
+
+        const slots = Array.isArray(response.slots) ? response.slots : []
+        setFollowUpSlots(slots)
+        setFollowUpAvailabilityMessage(slots.length ? '' : (response.message || 'No available appointments for this date. Please select another date.'))
+        setForm((current) => (
+          current.followUp?.time && !slots.includes(current.followUp.time)
+            ? { ...current, followUp: { ...current.followUp, time: '' } }
+            : current
+        ))
+      } catch (error) {
+        if (!isMounted) return
+        setFollowUpSlots([])
+        setFollowUpAvailabilityMessage(error.message || 'Unable to load available appointments. Please try again.')
+        setForm((current) => (
+          current.followUp?.time
+            ? { ...current, followUp: { ...current.followUp, time: '' } }
+            : current
+        ))
+      } finally {
+        if (isMounted) setIsLoadingFollowUpSlots(false)
+      }
+    }, 180)
+
+    return () => {
+      isMounted = false
+      window.clearTimeout(timer)
+    }
+  }, [form.dentistName, form.followUp?.date, form.followUp?.enabled, form.service])
+
+  useEffect(() => {
+    if (!isAdmin) return
+
+    let isMounted = true
+    fdmstApi.getStaff()
+      .then((response) => {
+        if (!isMounted) return
+        const options = (response.data || [])
+          .filter((user) => ['staff', 'dentist'].includes(user.role))
+          .map((user) => [user.firstName, user.lastName].filter(Boolean).join(' ').trim())
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
+        setProviderOptions([...new Set([currentUserName, ...options].filter(Boolean))])
+      })
+      .catch(() => {
+        if (isMounted) setProviderOptions([])
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [currentUserName, isAdmin])
+
+  useEffect(() => {
+    if (!appointmentPrefillId || appointmentPrefillRef.current === appointmentPrefillId) return
+
+    let isMounted = true
+    appointmentPrefillRef.current = appointmentPrefillId
+
+    const prefillClinicalNote = async () => {
+      try {
+        const response = await fdmstApi.getAppointment(appointmentPrefillId)
+        const appointment = response.appointment || response.data || response
+
+        if (!isMounted) return
+
+        setForm({
+          ...emptyForm,
+          patientName: appointment.patientName || '',
+          appointment: appointment.id || appointmentPrefillId,
+          appointmentDisplay: appointment.appointmentId || formatAppointmentId(appointment.id || appointmentPrefillId),
+          service: appointment.service || '',
+          dentistName: appointment.dentistName || '',
+          visitDate: new Date().toISOString().slice(0, 10),
+          noteType: 'Clinical Note',
+        })
+        setModal({ mode: 'create', note: null })
+      } catch (error) {
+        if (!isMounted) return
+        toast.error(error.message || 'Unable to load appointment details for this clinical note.')
+      }
+    }
+
+    prefillClinicalNote()
+
+    return () => {
+      isMounted = false
+    }
+  }, [appointmentPrefillId, toast])
+
   const providers = useMemo(() => (
-    [...new Set(notes.map((note) => note.createdByName || note.dentistName).filter(Boolean))].sort()
-  ), [notes])
+    (providerOptions.length ? providerOptions : [...new Set(notes.map((note) => note.createdByName || note.dentistName).filter(Boolean))])
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right))
+  ), [notes, providerOptions])
 
   const openCreate = () => {
     setForm(emptyForm)
@@ -165,8 +435,10 @@ function StaffClinicalNotesPage() {
       ...emptyForm,
       ...note,
       appointment: note.appointment || '',
+      appointmentDisplay: note.appointmentSnapshot?.appointmentId || formatAppointmentId(note.appointment),
       visitDate: note.visitDate ? new Date(note.visitDate).toISOString().slice(0, 10) : emptyForm.visitDate,
       clinicalNotes: { ...emptyForm.clinicalNotes, ...(note.clinicalNotes || {}) },
+      clinicalFollowUp: note.clinicalFollowUp || null,
     })
     setModal({ mode: 'view', note })
   }
@@ -176,13 +448,20 @@ function StaffClinicalNotesPage() {
       ...emptyForm,
       ...note,
       appointment: note.appointment || '',
+      appointmentDisplay: note.appointmentSnapshot?.appointmentId || formatAppointmentId(note.appointment),
       visitDate: note.visitDate ? new Date(note.visitDate).toISOString().slice(0, 10) : emptyForm.visitDate,
       clinicalNotes: { ...emptyForm.clinicalNotes, ...(note.clinicalNotes || {}) },
+      clinicalFollowUp: note.clinicalFollowUp || null,
     })
     setModal({ mode: 'edit', note })
   }
 
   const saveNote = async () => {
+    if (form.followUp?.enabled && (!form.followUp.date || !form.followUp.time)) {
+      toast.error('Follow-up date and time are required.')
+      return
+    }
+
     setIsSaving(true)
     try {
       const payload = {
@@ -191,10 +470,12 @@ function StaffClinicalNotesPage() {
         visitDate: form.visitDate,
         noteType: form.noteType,
         clinicalNotes: form.clinicalNotes,
+        followUp: form.followUp,
       }
       if (modal.mode === 'create') {
-        await fdmstApi.createClinicalNote(payload)
-        toast.success('Clinical note created.')
+        const response = await fdmstApi.createClinicalNote(payload)
+        toast.success(response.message || 'Clinical note created.')
+        if (response.warning) toast.error(response.warning)
       } else {
         await fdmstApi.updateClinicalNote(modal.note.id, payload)
         toast.success('Clinical note updated.')
@@ -366,16 +647,19 @@ function StaffClinicalNotesPage() {
       </section>
 
       {modal ? (
-        <NoteModal
-          mode={modal.mode}
-          note={modal.note}
-          form={form}
-          setForm={setForm}
+      <NoteModal
+        mode={modal.mode}
+        note={modal.note}
+        form={form}
+        setForm={setForm}
           onClose={() => setModal(null)}
-          onSubmit={saveNote}
-          isSaving={isSaving}
-          canEdit={modal.mode === 'create' || canEditNote(modal.note, currentUser)}
-        />
+        onSubmit={saveNote}
+        isSaving={isSaving}
+        canEdit={modal.mode === 'create' || canEditNote(modal.note, currentUser)}
+        followUpSlots={followUpSlots}
+        isLoadingFollowUpSlots={isLoadingFollowUpSlots}
+        followUpAvailabilityMessage={followUpAvailabilityMessage}
+      />
       ) : null}
     </main>
   )

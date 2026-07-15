@@ -10,6 +10,12 @@ const dentalRecordSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Appointment",
     },
+    recordType: {
+      type: String,
+      enum: ["treatment_record", "clinical_note"],
+      default: "treatment_record",
+      index: true,
+    },
     patientName: {
       type: String,
       trim: true,
@@ -79,6 +85,33 @@ const dentalRecordSchema = new mongoose.Schema(
         trim: true,
       },
     },
+    clinicalFollowUp: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      date: Date,
+      time: {
+        type: String,
+        trim: true,
+      },
+      reason: {
+        type: String,
+        trim: true,
+      },
+      appointment: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Appointment",
+      },
+      appointmentId: {
+        type: String,
+        trim: true,
+      },
+      status: {
+        type: String,
+        trim: true,
+      },
+    },
     procedure: {
       type: String,
       trim: true,
@@ -109,6 +142,35 @@ const dentalRecordSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    appointmentSnapshot: {
+      appointmentId: {
+        type: String,
+        trim: true,
+      },
+      appointmentDate: Date,
+      appointmentTime: {
+        type: String,
+        trim: true,
+      },
+      completedAt: Date,
+      estimatedDuration: Number,
+      originalPrice: Number,
+      discountAmount: Number,
+      finalPrice: Number,
+      promoCode: {
+        type: String,
+        trim: true,
+      },
+      promoTitle: {
+        type: String,
+        trim: true,
+      },
+      promoDiscountType: {
+        type: String,
+        trim: true,
+      },
+      promoDiscountValue: Number,
+    },
   },
   {
     collection: "dentalrecords",
@@ -119,5 +181,15 @@ const dentalRecordSchema = new mongoose.Schema(
 dentalRecordSchema.index({ createdBy: 1, visitDate: -1 });
 dentalRecordSchema.index({ dentistName: 1, visitDate: -1 });
 dentalRecordSchema.index({ patientName: 1, visitDate: -1 });
+dentalRecordSchema.index(
+  { appointment: 1, recordType: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      appointment: { $exists: true },
+      recordType: "treatment_record",
+    },
+  },
+);
 
 module.exports = mongoose.model("DentalRecord", dentalRecordSchema);

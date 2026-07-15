@@ -18,8 +18,6 @@ const defaultSettings = {
     emailNotifications: true,
   },
   appearance: {
-    theme: 'light',
-    language: 'English',
     dateFormat: 'MM/DD/YYYY',
     timeFormat: '12',
   },
@@ -42,7 +40,7 @@ const navItems = [
   {
     id: 'appearance',
     title: 'Appearance',
-    description: 'Personalize how the application looks and formats dates.',
+    description: 'Personalize date and time formatting.',
     icon: FaPalette,
   },
 ]
@@ -163,7 +161,6 @@ function StaffSettingsPage() {
       setSettings(merged)
       setSavedSettings(merged)
       if (response.user) authStorage.saveSession({ user: response.user })
-      document.documentElement.dataset.theme = merged.appearance.theme
       toast.success(response.message || 'Settings updated successfully.')
     } catch (error) {
       setErrors(error.errors || {})
@@ -248,22 +245,8 @@ function StaffSettingsPage() {
           ) : null}
 
           {activeSection === 'appearance' ? (
-            <SettingsCard icon={FaPalette} title="Appearance" description="Personalize how the application looks and formats dates.">
+            <SettingsCard icon={FaPalette} title="Appearance" description="Personalize date and time formatting.">
               <div className="grid gap-5 md:grid-cols-2">
-                <label className="grid gap-2 text-sm font-semibold text-slate-600">
-                  Theme
-                  <select className={inputClass} value={settings.appearance.theme} onChange={(event) => updateAppearance('theme', event.target.value)}>
-                    <option value="light">Light Mode</option>
-                    <option value="dark">Dark Mode</option>
-                    <option value="system">System Default</option>
-                  </select>
-                </label>
-                <label className="grid gap-2 text-sm font-semibold text-slate-600">
-                  Language
-                  <select className={inputClass} value={settings.appearance.language} onChange={(event) => updateAppearance('language', event.target.value)}>
-                    <option value="English">English</option>
-                  </select>
-                </label>
                 <label className="grid gap-2 text-sm font-semibold text-slate-600">
                   Date Format
                   <select className={inputClass} value={settings.appearance.dateFormat} onChange={(event) => updateAppearance('dateFormat', event.target.value)}>

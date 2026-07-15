@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fdmstApi } from '../api/fdmstApi.js'
+import OtpInput from '../components/OtpInput.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { digitsOnly, validateMobileNumber } from '../utils/validation.js'
 
@@ -105,6 +106,9 @@ function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [clinicSettings, setClinicSettings] = useState(null)
+  const [pendingRegistration, setPendingRegistration] = useState(null)
+  const [otp, setOtp] = useState('')
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
 
   const age = useMemo(() => calculateAge(form.dateOfBirth), [form.dateOfBirth])
 
@@ -177,7 +181,7 @@ function RegisterPage() {
     setIsSubmitting(true)
 
     try {
-      const response = await fdmstApi.register({
+      const payload = {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         email: form.email.trim(),
@@ -189,16 +193,61 @@ function RegisterPage() {
         medicalHistory: form.medicalHistory.trim(),
         password: form.password,
         confirmPassword: form.confirmPassword,
+      }
+
+      const response = await fdmstApi.requestRegistrationOtp(payload)
+      setPendingRegistration({ ...payload, email: response.email || payload.email })
+      setOtp('')
+      toast.success(response.message || 'Verification code sent to your email.')
+    } catch (registerError) {
+      setFieldErrors(registerError.errors || {})
+      toast.error(registerError.message || 'Registration failed. Please try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleVerifyOtp = async (event) => {
+    event.preventDefault()
+
+    if (!pendingRegistration) return
+
+    if (!otp.trim()) {
+      toast.error('Enter the verification code sent to your email.')
+      return
+    }
+
+    setIsVerifyingOtp(true)
+
+    try {
+      const response = await fdmstApi.verifyRegistrationOtp({
+        email: pendingRegistration.email,
+        otp: otp.trim(),
       })
 
       toast.success(
         `Registration successful. Your Patient ID is ${response.patient.patientId}. Your account is currently unverified until your first completed clinic appointment.`,
       )
+      setPendingRegistration(null)
+      setOtp('')
       setForm(initialForm)
       setFieldErrors({})
-    } catch (registerError) {
-      setFieldErrors(registerError.errors || {})
-      toast.error(registerError.message || 'Registration failed. Please try again.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to verify OTP.')
+    } finally {
+      setIsVerifyingOtp(false)
+    }
+  }
+
+  const resendOtp = async () => {
+    if (!pendingRegistration) return
+    setIsSubmitting(true)
+    try {
+      const response = await fdmstApi.requestRegistrationOtp(pendingRegistration)
+      toast.success(response.message || 'Verification code resent.')
+      setOtp('')
+    } catch (error) {
+      toast.error(error.message || 'Unable to resend verification code.')
     } finally {
       setIsSubmitting(false)
     }
@@ -507,6 +556,53 @@ function RegisterPage() {
           </form>
         </div>
       </section>
+
+      {pendingRegistration ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
+          <form onSubmit={handleVerifyOtp} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-2xl shadow-sky-950/20 ring-1 ring-white/60 transition sm:p-8">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-50 text-sky-950 ring-1 ring-sky-100">
+              <UserPlusIcon />
+            </span>
+            <p className="mt-5 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Email Verification</p>
+            <h2 className="mt-2 text-2xl font-semibold text-sky-950">Verify your patient account</h2>
+            <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
+              Enter the 6-digit OTP sent to <span className="font-semibold text-sky-950">{pendingRegistration.email}</span>.
+            </p>
+            <label className="mt-6 grid gap-3 text-left text-sm font-semibold text-slate-500">
+              Verification Code
+              <OtpInput value={otp} onChange={setOtp} disabled={isVerifyingOtp} autoFocus idPrefix="registration-otp" />
+            </label>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingRegistration(null)
+                  setOtp('')
+                }}
+                className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100"
+                disabled={isVerifyingOtp}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white shadow-lg shadow-sky-950/15 transition hover:-translate-y-0.5 hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-sky-100 disabled:opacity-60"
+                disabled={isVerifyingOtp}
+              >
+                {isVerifyingOtp ? 'Verifying...' : 'Verify & Create'}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={resendOtp}
+              className="mt-5 w-full rounded-xl px-4 py-2 text-sm font-semibold text-sky-950 transition hover:bg-amber-50 hover:text-amber-600 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:opacity-60"
+              disabled={isSubmitting || isVerifyingOtp}
+            >
+              Resend OTP
+            </button>
+          </form>
+        </div>
+      ) : null}
     </main>
   )
 }

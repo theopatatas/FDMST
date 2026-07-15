@@ -61,6 +61,13 @@ app.use((error, req, res, next) => {
     });
   }
 
+  if (error.code === 11000) {
+    return res.status(409).json({
+      message: "A record with the same details already exists.",
+      errors: error.keyPattern || {},
+    });
+  }
+
   res.status(error.status || 500).json({
     message: error.status ? error.message : "Something went wrong. Please try again.",
   });

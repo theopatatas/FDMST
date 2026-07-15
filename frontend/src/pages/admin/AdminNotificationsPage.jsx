@@ -9,7 +9,7 @@ import {
   FaExclamationCircle,
   FaTimes,
 } from 'react-icons/fa'
-import { fdmstApi } from '../../api/fdmstApi.js'
+import { authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
 
 function formatRelativeTime(value) {
@@ -39,18 +39,27 @@ function getNotificationIcon(notification) {
   return FaBullhorn
 }
 
-function getNotificationDestination(notification) {
+function getRoleBasePath(role) {
+  if (role === 'patient') return '/patient'
+  if (role === 'dentist') return '/dentist'
+  if (role === 'staff') return '/staff'
+  return '/admin'
+}
+
+function getNotificationDestination(notification, role = 'admin') {
+  const basePath = getRoleBasePath(role)
+
   if (notification.type === 'promotion' || notification.metadata?.target === 'promotion') {
     const promotionId = notification.metadata?.promotionId
-    return `/admin/promotions${promotionId ? `?promotion=${encodeURIComponent(promotionId)}` : ''}`
+    return `${basePath}/promotions${promotionId ? `?promotion=${encodeURIComponent(promotionId)}` : ''}`
   }
 
   if (notification.type === 'appointment' || /appointment/i.test(`${notification.title || ''} ${notification.message || ''}`)) {
-    return '/admin/appointments'
+    return role === 'patient' ? `${basePath}` : `${basePath}/appointments`
   }
 
   if (notification.type === 'inventory' || /inventory|stock/i.test(`${notification.title || ''} ${notification.message || ''}`)) {
-    return '/admin/inventory'
+    return `${basePath}/inventory`
   }
 
   return ''
@@ -59,6 +68,8 @@ function getNotificationDestination(notification) {
 function AdminNotificationsPage() {
   const toast = useToast()
   const navigate = useNavigate()
+  const user = authStorage.getUser()
+  const role = user?.role || 'admin'
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -128,7 +139,7 @@ function AdminNotificationsPage() {
       toast.error(error.message || 'Unable to update notification.')
     }
 
-    const destination = getNotificationDestination(notification)
+    const destination = getNotificationDestination(notification, role)
     if (destination) navigate(destination)
   }
 
@@ -138,7 +149,7 @@ function AdminNotificationsPage() {
         <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-sky-950">Latest Admin Notifications</h2>
+              <h2 className="text-xl font-semibold text-sky-950">Latest Notifications</h2>
               <p className="mt-1 text-sm text-slate-500">
                 {unreadCount} unread update{unreadCount === 1 ? '' : 's'} from appointments, alerts, and clinic activity.
               </p>
@@ -237,7 +248,7 @@ function AdminNotificationsPage() {
               </span>
               <p className="mt-5 text-lg font-semibold text-sky-950">No notifications found</p>
               <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                Admin appointment requests, alerts, and clinic updates will appear here.
+                Appointment requests, alerts, and clinic updates will appear here.
               </p>
             </div>
           )}

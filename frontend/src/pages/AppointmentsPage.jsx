@@ -1,28 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   FaCalendarAlt,
   FaCheckCircle,
-  FaClock,
-  FaClipboardList,
   FaNotesMedical,
   FaRegCalendarAlt,
   FaSearch,
   FaTimes,
   FaUserCheck,
   FaUserClock,
-  FaUserInjured,
   FaUserTimes,
 } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../api/fdmstApi.js'
 import { inputClass } from '../components/AdminUi.jsx'
 import AppointmentsTable from '../components/AppointmentsTable.jsx'
 import { useToast } from '../context/ToastContext.jsx'
-import { formatStatus } from '../utils/auth.js'
+import { formatDate, formatStatus } from '../utils/auth.js'
 
 const statusBadgeClass = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-100',
   confirmed: 'bg-blue-50 text-blue-700 ring-blue-100',
+  follow_up: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
   checked_in: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
   in_consultation: 'bg-violet-50 text-violet-700 ring-violet-100',
   completed: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
@@ -35,6 +32,7 @@ const statusBadgeClass = {
 const calendarStatusStyles = {
   pending: 'border-amber-200 bg-amber-50 text-amber-800',
   confirmed: 'border-blue-200 bg-blue-50 text-blue-800',
+  follow_up: 'border-cyan-200 bg-cyan-50 text-cyan-800',
   checked_in: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   in_consultation: 'border-violet-200 bg-violet-50 text-violet-800',
   completed: 'border-emerald-300 bg-emerald-100 text-emerald-900',
@@ -47,6 +45,7 @@ const calendarStatusStyles = {
 const calendarLegend = [
   ['pending', '🟡 Pending'],
   ['confirmed', '🔵 Confirmed'],
+  ['follow_up', '🩵 Follow Up'],
   ['checked_in', '🟢 Checked In'],
   ['in_consultation', '🟣 In Consultation'],
   ['completed', '✅ Completed'],
@@ -73,11 +72,53 @@ const officialClinicServices = [
   'Oral Check-up',
 ]
 
+const emptyClinicalNoteForm = {
+  patientName: '',
+  appointment: '',
+  appointmentDisplay: '',
+  visitDate: new Date().toISOString().slice(0, 10),
+  noteType: 'Clinical Note',
+  clinicalNotes: {
+    observation: '',
+    assessment: '',
+    recommendations: '',
+    additionalNotes: '',
+  },
+  followUp: {
+    enabled: false,
+    date: '',
+    time: '',
+    reason: '',
+  },
+}
+
 function formatAppointmentDate(value) {
   if (!value) return 'Not scheduled'
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return 'Not scheduled'
   return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function formatRecordStatus(value, fallback = 'completed') {
+  return formatStatus(String(value || fallback))
+}
+
+function formatAppointmentStatusLabel(status) {
+  return status === 'follow_up' ? 'Confirmed / Follow Up' : formatStatus(status)
+}
+
+function formatAppointmentId(appointment) {
+  const raw = appointment?.appointmentId || appointment?.id || appointment
+  if (!raw) return ''
+  const text = String(raw)
+  return text.startsWith('APT-') ? text : `APT-${text.slice(-6).toUpperCase()}`
+}
+
+function getRecordPatientId(record, appointment) {
+  return appointment?.patientSnapshot?.patientId
+    || record?.patientSnapshot?.patientId
+    || record?.patientId
+    || 'Not recorded'
 }
 
 function calculateAge(value) {
@@ -99,6 +140,13 @@ function toDateKey(value) {
   const month = String(parsed.getMonth() + 1).padStart(2, '0')
   const day = String(parsed.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function addDaysKey(days) {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + days)
+  return toDateKey(date)
 }
 
 function SummaryCard({ icon: Icon, label, value, tone = 'sky' }) {
@@ -129,11 +177,9 @@ function SummaryCard({ icon: Icon, label, value, tone = 'sky' }) {
 
 function AppointmentsPage({ allowApproval = false }) {
   const toast = useToast()
-  const navigate = useNavigate()
   const currentUser = authStorage.getUser()
   const isAdmin = currentUser?.role === 'admin'
   const isStaff = currentUser?.role === 'staff'
-  const basePath = isAdmin ? '/admin' : currentUser?.role === 'dentist' ? '/dentist' : '/staff'
   const [appointments, setAppointments] = useState([])
   const [dentists, setDentists] = useState([])
   const [serviceOptions, setServiceOptions] = useState([])
@@ -156,30 +202,17 @@ function AppointmentsPage({ allowApproval = false }) {
   const [declineTarget, setDeclineTarget] = useState(null)
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null)
-  const [notesDraft, setNotesDraft] = useState('')
-  const [scheduleDraft, setScheduleDraft] = useState({ appointmentDate: '', appointmentTime: '', dentistName: '' })
-  const [isSavingNotes, setIsSavingNotes] = useState(false)
-  const [isSavingSchedule, setIsSavingSchedule] = useState(false)
+  const [quickActionModal, setQuickActionModal] = useState(null)
   const [documentationPrompt, setDocumentationPrompt] = useState(null)
   const [declineReason, setDeclineReason] = useState('')
   const [declineError, setDeclineError] = useState('')
   const [outcomeTarget, setOutcomeTarget] = useState(null)
-  const [completionForm, setCompletionForm] = useState({
-    servicePerformed: '',
-    chiefComplaint: '',
-    diagnosis: '',
-    treatmentPerformed: '',
-    recommendations: '',
-    nextVisitRecommendation: '',
-    dentistNotes: '',
-    observation: '',
-    assessment: '',
-    clinicalRecommendations: '',
-    additionalNotes: '',
-    followUpDate: '',
-    followUpTime: '',
-    followUpReason: '',
-  })
+  const [clinicalNoteModal, setClinicalNoteModal] = useState(null)
+  const [clinicalNoteForm, setClinicalNoteForm] = useState(emptyClinicalNoteForm)
+  const [isSavingClinicalNote, setIsSavingClinicalNote] = useState(false)
+  const [followUpSlots, setFollowUpSlots] = useState([])
+  const [followUpAvailabilityMessage, setFollowUpAvailabilityMessage] = useState('')
+  const [isLoadingFollowUpSlots, setIsLoadingFollowUpSlots] = useState(false)
 
   const loadAppointments = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -216,6 +249,63 @@ function AppointmentsPage({ allowApproval = false }) {
     const selectedDate = new Date(`${filters.date}T00:00:00`)
     if (!Number.isNaN(selectedDate.getTime())) setCalendarMonth(selectedDate)
   }, [filters.date])
+
+  useEffect(() => {
+    const followUp = clinicalNoteForm.followUp || {}
+    const appointment = clinicalNoteModal?.appointment
+
+    if (!followUp.enabled || !followUp.date || !appointment?.service) {
+      setFollowUpSlots([])
+      setFollowUpAvailabilityMessage('')
+      setIsLoadingFollowUpSlots(false)
+      return
+    }
+
+    let isMounted = true
+    setIsLoadingFollowUpSlots(true)
+    setFollowUpAvailabilityMessage('Loading available appointments...')
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fdmstApi.getAppointmentAvailability({
+          date: followUp.date,
+          dentistName: appointment.dentistName,
+          service: appointment.service,
+        })
+        if (!isMounted) return
+
+        const slots = Array.isArray(response.slots) ? response.slots : []
+        setFollowUpSlots(slots)
+        setFollowUpAvailabilityMessage(slots.length ? '' : (response.message || 'No available appointments for this date. Please select another date.'))
+        setClinicalNoteForm((current) => (
+          current.followUp?.time && !slots.includes(current.followUp.time)
+            ? { ...current, followUp: { ...current.followUp, time: '' } }
+            : current
+        ))
+      } catch (error) {
+        if (!isMounted) return
+        setFollowUpSlots([])
+        setFollowUpAvailabilityMessage(error.message || 'Unable to load available appointments. Please try again.')
+        setClinicalNoteForm((current) => (
+          current.followUp?.time
+            ? { ...current, followUp: { ...current.followUp, time: '' } }
+            : current
+        ))
+      } finally {
+        if (isMounted) setIsLoadingFollowUpSlots(false)
+      }
+    }, 180)
+
+    return () => {
+      isMounted = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    clinicalNoteForm.followUp?.date,
+    clinicalNoteForm.followUp?.enabled,
+    clinicalNoteModal?.appointment?.dentistName,
+    clinicalNoteModal?.appointment?.service,
+  ])
 
   const calendarData = useMemo(() => {
     const anchor = filters.date
@@ -300,57 +390,151 @@ function AppointmentsPage({ allowApproval = false }) {
   const openAppointmentDetails = (appointment) => {
     setSelectedCalendarDay(null)
     setSelectedAppointment(appointment)
-    setNotesDraft(appointment.notes || '')
-    setScheduleDraft({
-      appointmentDate: appointment.appointmentDate?.slice(0, 10) || '',
-      appointmentTime: appointment.appointmentTime || '',
-      dentistName: appointment.dentistName || '',
-    })
   }
 
   const closeAppointmentDetails = () => {
-    if (isSavingNotes) return
     setSelectedAppointment(null)
-    setNotesDraft('')
-    setScheduleDraft({ appointmentDate: '', appointmentTime: '', dentistName: '' })
+    setQuickActionModal(null)
   }
 
-  const saveAppointmentNotes = async () => {
+  const openQuickActionModal = async (type) => {
     if (!selectedAppointment) return
-    setIsSavingNotes(true)
+
+    const titles = {
+      profile: 'Patient Profile',
+      treatments: 'Treatment Records',
+      clinical: 'Clinical Notes',
+    }
+
+    if (type === 'profile') {
+      setQuickActionModal({ type, title: titles[type], appointment: selectedAppointment, isLoading: false, data: selectedAppointment, error: '' })
+      return
+    }
+
+    setQuickActionModal({ type, title: titles[type], appointment: selectedAppointment, isLoading: true, data: [], error: '' })
+
+    const patientReference = selectedAppointment.patientSnapshot?.id
+      || (typeof selectedAppointment.patient === 'string' ? selectedAppointment.patient : selectedAppointment.patient?._id)
+    const patientName = selectedAppointment.patientName?.trim()
+
+    const fetchRecords = (filters) => (
+      type === 'treatments'
+        ? fdmstApi.getTreatmentRecords(filters)
+        : fdmstApi.getClinicalNotes(filters)
+    )
+
     try {
-      const response = await fdmstApi.updateAppointmentNotes(selectedAppointment.id, { notes: notesDraft })
-      const saved = response.appointment
-      setAppointments((current) => current.map((appointment) => appointment.id === saved.id ? { ...appointment, ...saved } : appointment))
-      setSelectedAppointment((current) => current ? { ...current, ...saved } : current)
-      toast.success(response.message || 'Appointment notes saved.')
+      const scope = isAdmin ? 'all' : 'mine'
+      let data = []
+
+      if (!data.length && patientReference) {
+        const patientResponse = await fetchRecords({
+          patient: patientReference,
+          scope,
+          limit: 20,
+        })
+        data = Array.isArray(patientResponse.data) ? patientResponse.data : []
+      }
+
+      if (!data.length && patientName) {
+        const patientResponse = await fetchRecords({
+          patientName,
+          scope,
+          limit: 20,
+        })
+        data = Array.isArray(patientResponse.data) ? patientResponse.data : []
+      }
+
+      if (!data.length) {
+        const directResponse = await fetchRecords({
+          appointment: selectedAppointment.id,
+          scope,
+          limit: 20,
+        })
+        data = Array.isArray(directResponse.data) ? directResponse.data : []
+      }
+
+      setQuickActionModal({ type, title: titles[type], appointment: selectedAppointment, isLoading: false, data, error: '' })
     } catch (error) {
-      toast.error(error.message || 'Unable to save appointment notes.')
-    } finally {
-      setIsSavingNotes(false)
+      const message = error.message || `Unable to load ${titles[type].toLowerCase()}.`
+      setQuickActionModal({
+        type,
+        title: titles[type],
+        appointment: selectedAppointment,
+        isLoading: false,
+        data: [],
+        error: message === 'Something went wrong. Please try again.' ? '' : message,
+      })
     }
   }
 
-  const saveAppointmentSchedule = async () => {
-    if (!selectedAppointment) return
-    setIsSavingSchedule(true)
-    try {
-      const response = await fdmstApi.updateAppointmentSchedule(selectedAppointment.id, scheduleDraft)
-      const saved = response.appointment
-      setAppointments((current) => current.map((appointment) => appointment.id === saved.id ? { ...appointment, ...saved } : appointment))
-      setSelectedAppointment((current) => current ? { ...current, ...saved } : current)
-      toast.success(response.message || 'Appointment schedule updated.')
-    } catch (error) {
-      toast.error(error.message || 'Unable to update appointment schedule.')
-    } finally {
-      setIsSavingSchedule(false)
-    }
-  }
-
-  const openDocumentationModule = (type, appointment) => {
-    const path = type === 'treatment' ? `${basePath}/treatment-records` : `${basePath}/clinical-notes`
-    navigate(`${path}?appointment=${appointment.id}`)
+  const openClinicalNoteModal = (appointment) => {
+    setClinicalNoteForm({
+      ...emptyClinicalNoteForm,
+      patientName: appointment?.patientName || '',
+      appointment: appointment?.id || '',
+      appointmentDisplay: formatAppointmentId(appointment),
+      visitDate: new Date().toISOString().slice(0, 10),
+    })
+    setClinicalNoteModal({ appointment })
     setDocumentationPrompt(null)
+  }
+
+  const updateClinicalNoteField = (key, value) => {
+    setClinicalNoteForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const updateClinicalNoteContent = (key, value) => {
+    setClinicalNoteForm((current) => ({
+      ...current,
+      clinicalNotes: { ...current.clinicalNotes, [key]: value },
+    }))
+  }
+
+  const updateClinicalNoteFollowUp = (key, value) => {
+    setClinicalNoteForm((current) => ({
+      ...current,
+      followUp: { ...(current.followUp || emptyClinicalNoteForm.followUp), [key]: value },
+    }))
+  }
+
+  const closeClinicalNoteModal = () => {
+    if (isSavingClinicalNote) return
+    setClinicalNoteModal(null)
+    setClinicalNoteForm(emptyClinicalNoteForm)
+    setFollowUpSlots([])
+    setFollowUpAvailabilityMessage('')
+  }
+
+  const saveClinicalNote = async () => {
+    if (!clinicalNoteForm.patientName.trim()) {
+      toast.error('Patient name is required.')
+      return
+    }
+    if (clinicalNoteForm.followUp?.enabled && (!clinicalNoteForm.followUp.date || !clinicalNoteForm.followUp.time)) {
+      toast.error('Follow-up date and time are required.')
+      return
+    }
+
+    setIsSavingClinicalNote(true)
+    try {
+      const response = await fdmstApi.createClinicalNote({
+        patientName: clinicalNoteForm.patientName,
+        appointment: clinicalNoteForm.appointment,
+        visitDate: clinicalNoteForm.visitDate,
+        noteType: clinicalNoteForm.noteType,
+        clinicalNotes: clinicalNoteForm.clinicalNotes,
+        followUp: clinicalNoteForm.followUp,
+      })
+      toast.success(response.message || 'Clinical note created.')
+      if (response.warning) toast.error(response.warning)
+      setClinicalNoteModal(null)
+      setClinicalNoteForm(emptyClinicalNoteForm)
+    } catch (error) {
+      toast.error(error.message || 'Unable to save clinical note.')
+    } finally {
+      setIsSavingClinicalNote(false)
+    }
   }
 
   const handleUpdateStatus = async (appointmentId, status) => {
@@ -365,10 +549,6 @@ function AppointmentsPage({ allowApproval = false }) {
     if (status === 'completed' || status === 'no_show') {
       const appointment = appointments.find((item) => item.id === appointmentId)
       setOutcomeTarget({ appointment: appointment || { id: appointmentId }, status })
-      setCompletionForm((current) => ({
-        ...current,
-        servicePerformed: appointment?.service || '',
-      }))
       return
     }
 
@@ -377,6 +557,9 @@ function AppointmentsPage({ allowApproval = false }) {
       const response = await fdmstApi.updateAppointmentStatus(appointmentId, { status })
       toast.success(response.message || 'Appointment status updated.')
       setAppointments((current) => current.map((appointment) => appointment.id === appointmentId ? { ...appointment, ...response.appointment } : appointment))
+      setSelectedAppointment((current) => (
+        current?.id === appointmentId ? { ...current, ...response.appointment } : current
+      ))
     } catch (updateError) {
       toast.error(updateError.message || 'Unable to update appointment.')
     } finally {
@@ -389,11 +572,6 @@ function AppointmentsPage({ allowApproval = false }) {
     setOutcomeTarget(null)
   }
 
-  const handleCompletionChange = (event) => {
-    const { name, value } = event.target
-    setCompletionForm((current) => ({ ...current, [name]: value }))
-  }
-
   const confirmOutcome = async () => {
     if (!outcomeTarget) return
 
@@ -402,32 +580,11 @@ function AppointmentsPage({ allowApproval = false }) {
 
     try {
       const payload = { status }
-      if (status === 'completed') {
-        payload.treatmentRecord = {
-          servicePerformed: completionForm.servicePerformed,
-          chiefComplaint: completionForm.chiefComplaint,
-          diagnosis: completionForm.diagnosis,
-          treatmentPerformed: completionForm.treatmentPerformed,
-          recommendations: completionForm.recommendations,
-          nextVisitRecommendation: completionForm.nextVisitRecommendation,
-          dentistNotes: completionForm.dentistNotes,
-        }
-        payload.clinicalNotes = {
-          observation: completionForm.observation,
-          assessment: completionForm.assessment,
-          recommendations: completionForm.clinicalRecommendations,
-          additionalNotes: completionForm.additionalNotes,
-        }
-        if (completionForm.followUpDate && completionForm.followUpTime) {
-          payload.followUp = {
-            date: completionForm.followUpDate,
-            time: completionForm.followUpTime,
-            reason: completionForm.followUpReason,
-          }
-        }
-      }
       const response = await fdmstApi.updateAppointmentStatus(appointment.id, payload)
       toast.success(response.message || 'Appointment status updated.', { duration: 5000 })
+      if (status === 'completed' && response.treatmentRecordMessage) {
+        toast.success(response.treatmentRecordMessage, { duration: 5000 })
+      }
       setAppointments((current) => current.map((item) => (
         item.id === appointment.id ? { ...item, ...response.appointment } : item
       )))
@@ -435,22 +592,6 @@ function AppointmentsPage({ allowApproval = false }) {
       if (status === 'completed') {
         setDocumentationPrompt(response.appointment)
       }
-      setCompletionForm({
-        servicePerformed: '',
-        chiefComplaint: '',
-        diagnosis: '',
-        treatmentPerformed: '',
-        recommendations: '',
-        nextVisitRecommendation: '',
-        dentistNotes: '',
-        observation: '',
-        assessment: '',
-        clinicalRecommendations: '',
-        additionalNotes: '',
-        followUpDate: '',
-        followUpTime: '',
-        followUpReason: '',
-      })
       loadAppointments({ silent: true })
     } catch (updateError) {
       toast.error(updateError.message || 'Unable to update appointment.', { duration: 5000 })
@@ -486,6 +627,9 @@ function AppointmentsPage({ allowApproval = false }) {
           ? { ...appointment, status: response.appointment.status, declineReason: response.appointment.declineReason }
           : appointment
       )))
+      setSelectedAppointment((current) => (
+        current?.id === declineTarget.id ? { ...current, ...response.appointment } : current
+      ))
       closeDeclineModal()
     } catch (updateError) {
       setDeclineError(updateError.message || 'Unable to decline appointment.')
@@ -535,7 +679,7 @@ function AppointmentsPage({ allowApproval = false }) {
           </select>
           {isAdmin ? <select className={`${inputClass} min-w-[11rem] flex-1 xl:flex-none`} value={filters.dentist} onChange={(event) => updateFilter('dentist', event.target.value)}><option value="all">All dentists</option>{dentists.map((dentist) => <option key={dentist.id} value={dentist.name}>{dentist.name}</option>)}</select> : null}
           <select className={`${inputClass} min-w-[14rem] flex-1 xl:flex-none`} value={filters.service} onChange={(event) => updateFilter('service', event.target.value)}><option value="all">All services</option>{serviceOptions.map((service) => <option key={service} value={service}>{service}</option>)}</select>
-          <select className={`${inputClass} min-w-[11rem] flex-1 xl:flex-none`} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="checked_in">Checked In</option><option value="in_consultation">In Consultation</option><option value="completed">Completed</option><option value="no_show">No Show</option><option value="cancelled">Cancelled</option><option value="declined">Declined</option><option value="rescheduled">Rescheduled</option></select>
+          <select className={`${inputClass} min-w-[11rem] flex-1 xl:flex-none`} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="follow_up">Follow Up</option><option value="checked_in">Checked In</option><option value="in_consultation">In Consultation</option><option value="completed">Completed</option><option value="no_show">No Show</option><option value="cancelled">Cancelled</option><option value="declined">Declined</option><option value="rescheduled">Rescheduled</option></select>
           <input className={`${inputClass} min-w-[10.5rem] flex-1 xl:flex-none`} type="date" value={filters.date} onChange={(event) => updateFilter('date', event.target.value)} title="Exact appointment date" />
           <button type="button" onClick={() => { setFilters({ date: '', dentist: 'all', status: 'all', patient: '', search: '', service: 'all', period: 'default', startDate: '', endDate: '' }); setPagination((current) => ({ ...current, page: 1 })) }} className="inline-flex h-12 min-w-[8rem] flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 sm:flex-none">
             <FaTimes className="h-4 w-4" />
@@ -607,7 +751,7 @@ function AppointmentsPage({ allowApproval = false }) {
                         ) : null}
                       </div>
                       <div className="mt-2 grid gap-1.5">
-                        {day.appointments.slice(0, 4).map((appointment) => (
+                        {day.appointments.slice(0, 2).map((appointment) => (
                           <button
                             type="button"
                             onClick={() => openAppointmentDetails(appointment)}
@@ -619,9 +763,9 @@ function AppointmentsPage({ allowApproval = false }) {
                             <span className="block truncate text-[0.65rem] opacity-80">{appointment.service}</span>
                           </button>
                         ))}
-                        {day.appointments.length > 4 ? (
+                        {day.appointments.length > 2 ? (
                           <button type="button" className="rounded-lg bg-slate-100 px-2 py-1 text-left text-xs font-bold text-slate-600 transition hover:bg-slate-200" onClick={() => setSelectedCalendarDay(day)}>
-                            +{day.appointments.length - 4} more
+                            +{day.appointments.length - 2} more
                           </button>
                         ) : null}
                       </div>
@@ -651,8 +795,8 @@ function AppointmentsPage({ allowApproval = false }) {
                 <FaTimes className="h-5 w-5" />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-y-auto p-5">
-              <div className="grid gap-3">
+            <div className="p-5">
+              <div className="grid max-h-[28rem] gap-3 overflow-y-auto pr-1">
                 {selectedCalendarDay.appointments.map((appointment) => (
                   <button
                     type="button"
@@ -667,6 +811,11 @@ function AppointmentsPage({ allowApproval = false }) {
                     <span className={`inline-flex w-fit whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ring-1 ${statusBadgeClass[appointment.status] || statusBadgeClass.pending}`}>
                       {formatStatus(appointment.status)}
                     </span>
+                    {appointment.status === 'follow_up' ? (
+                      <span className="inline-flex w-fit whitespace-nowrap rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700 ring-1 ring-cyan-100">
+                        Follow-up appointment
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -728,6 +877,11 @@ function AppointmentsPage({ allowApproval = false }) {
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{selectedAppointment.appointmentId || `APT-${String(selectedAppointment.id).slice(-6).toUpperCase()}`}</p>
                 <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">{selectedAppointment.patientName}</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedAppointment.service} • {formatAppointmentDate(selectedAppointment.appointmentDate)} at {selectedAppointment.appointmentTime}</p>
+                {selectedAppointment.status === 'follow_up' ? (
+                  <span className="mt-3 inline-flex rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-700 ring-1 ring-cyan-100">
+                    Follow-up appointment
+                  </span>
+                ) : null}
               </div>
               <button type="button" onClick={closeAppointmentDetails} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
                 <FaTimes className="h-5 w-5" />
@@ -736,7 +890,7 @@ function AppointmentsPage({ allowApproval = false }) {
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:order-1">
                   <h3 className="font-semibold text-sky-950">Patient Information</h3>
                   <div className="mt-3 grid gap-2 text-sm text-slate-600">
                     <p>Name: {selectedAppointment.patientName}</p>
@@ -745,48 +899,48 @@ function AppointmentsPage({ allowApproval = false }) {
                     <p>Contact: {selectedAppointment.contactNumber || 'Not provided'}</p>
                   </div>
                 </section>
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:order-3 md:col-span-2">
+                  <h3 className="font-semibold text-sky-950">Medical Information</h3>
+                  <div className="mt-3 grid gap-3 text-sm text-slate-600">
+                    <p className="rounded-xl bg-white p-3">Allergies<br /><span className="font-semibold text-sky-950">{selectedAppointment.patientSnapshot?.allergies?.length ? selectedAppointment.patientSnapshot.allergies.join(', ') : 'No allergies recorded'}</span></p>
+                    <p className="rounded-xl bg-white p-3">Medical Conditions<br /><span className="font-semibold text-sky-950">{selectedAppointment.patientSnapshot?.medicalConditions || 'No medical conditions recorded'}</span></p>
+                  </div>
+                </section>
+                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:order-2">
                   <h3 className="font-semibold text-sky-950">Appointment Information</h3>
                   <div className="mt-3 grid gap-2 text-sm text-slate-600">
                     <p>ID: {selectedAppointment.appointmentId || `APT-${String(selectedAppointment.id).slice(-6).toUpperCase()}`}</p>
                     <p>Dentist: {selectedAppointment.dentistName || 'Any available dentist'}</p>
-                    <p>Status: <span className={`ml-1 inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ring-1 ${statusBadgeClass[selectedAppointment.status] || statusBadgeClass.pending}`}>{formatStatus(selectedAppointment.status)}</span></p>
-                    <p>Reason: {selectedAppointment.reason || 'Not recorded'}</p>
+                    <p>Status: <span className={`ml-1 inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold ring-1 ${statusBadgeClass[selectedAppointment.status] || statusBadgeClass.pending}`}>{formatAppointmentStatusLabel(selectedAppointment.status)}</span></p>
+                    {selectedAppointment.status === 'follow_up' ? (
+                      <p>Type: <span className="ml-1 font-semibold text-cyan-700">Follow-up appointment</span></p>
+                    ) : null}
                   </div>
                 </section>
-                {isAdmin ? (
-                  <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:col-span-2">
-                    <h3 className="font-semibold text-sky-950">Admin Schedule Controls</h3>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <input className={inputClass} type="date" value={scheduleDraft.appointmentDate} onChange={(event) => setScheduleDraft((current) => ({ ...current, appointmentDate: event.target.value }))} />
-                      <input className={inputClass} type="time" value={scheduleDraft.appointmentTime} onChange={(event) => setScheduleDraft((current) => ({ ...current, appointmentTime: event.target.value }))} />
-                      <select className={inputClass} value={scheduleDraft.dentistName} onChange={(event) => setScheduleDraft((current) => ({ ...current, dentistName: event.target.value }))}>
-                        <option value="">Any available dentist</option>
-                        {dentists.map((dentist) => <option key={dentist.id} value={dentist.name}>{dentist.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="mt-3 flex justify-end">
-                      <button type="button" onClick={saveAppointmentSchedule} disabled={isSavingSchedule} className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60">{isSavingSchedule ? 'Saving...' : 'Save Schedule'}</button>
-                    </div>
+                <section className="rounded-2xl border border-sky-100 bg-sky-50 p-4 md:order-4 md:col-span-2">
+                  <h3 className="font-semibold text-sky-950">Booked Appointment Time</h3>
+                  <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                    <p className="rounded-xl bg-white p-3 ring-1 ring-sky-100">Date<br /><span className="font-semibold text-sky-950">{formatAppointmentDate(selectedAppointment.appointmentDate)}</span></p>
+                    <p className="rounded-xl bg-white p-3 ring-1 ring-sky-100">Time<br /><span className="font-semibold text-sky-950">{selectedAppointment.appointmentTime || 'Not scheduled'}</span></p>
+                    <p className="rounded-xl bg-white p-3 ring-1 ring-sky-100">Service<br /><span className="font-semibold text-sky-950">{selectedAppointment.service || 'Not recorded'}</span></p>
+                    <p className="rounded-xl bg-white p-3 ring-1 ring-sky-100">Selected Dentist<br /><span className="font-semibold text-sky-950">{selectedAppointment.dentistName || 'Any available dentist'}</span></p>
+                  </div>
+                </section>
+                {selectedAppointment.reason ? (
+                  <section className="rounded-2xl border border-amber-100 bg-amber-50 p-4 md:order-5 md:col-span-2">
+                    <h3 className="font-semibold text-sky-950">Reason for Visit by Patient</h3>
+                    <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">{selectedAppointment.reason}</p>
                   </section>
                 ) : null}
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:col-span-2">
-                  <h3 className="font-semibold text-sky-950">Patient Snapshot</h3>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl bg-white p-3 text-sm text-slate-600"><FaUserInjured className="mb-2 text-sky-700" /> Medical Alerts<br /><span className="font-semibold text-sky-950">{selectedAppointment.patientSnapshot?.allergies?.length ? `Allergies: ${selectedAppointment.patientSnapshot.allergies.join(', ')}` : selectedAppointment.patientSnapshot?.medicalConditions || 'No alerts recorded'}</span></div>
-                    <div className="rounded-xl bg-white p-3 text-sm text-slate-600"><FaClock className="mb-2 text-sky-700" /> Last Visit<br /><span className="font-semibold text-sky-950">View patient profile</span></div>
-                    <div className="rounded-xl bg-white p-3 text-sm text-slate-600"><FaClipboardList className="mb-2 text-sky-700" /> Last Treatment<br /><span className="font-semibold text-sky-950">View records</span></div>
-                  </div>
-                </section>
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:col-span-2">
+                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:order-6 md:col-span-2">
                   <h3 className="font-semibold text-sky-950">Quick Actions</h3>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <button type="button" onClick={() => navigate(`${basePath}/patients`)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Patient Profile</button>
-                    <button type="button" onClick={() => navigate(`${basePath}/treatment-records?appointment=${selectedAppointment.id}`)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Treatment Records</button>
-                    <button type="button" onClick={() => navigate(`${basePath}/clinical-notes?appointment=${selectedAppointment.id}`)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Clinical Notes</button>
+                    <button type="button" onClick={() => openQuickActionModal('profile')} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Patient Profile</button>
+                    <button type="button" onClick={() => openQuickActionModal('treatments')} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Treatment Records</button>
+                    <button type="button" onClick={() => openQuickActionModal('clinical')} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-sky-950 hover:bg-sky-50">View Clinical Notes</button>
                   </div>
                 </section>
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:col-span-2">
+                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:order-7 md:col-span-2">
                   <h3 className="font-semibold text-sky-950">Appointment Timeline</h3>
                   <div className="mt-4 grid gap-3">
                     {[
@@ -797,24 +951,151 @@ function AppointmentsPage({ allowApproval = false }) {
                         <span className="mt-1 flex h-3 w-3 shrink-0 rounded-full bg-sky-700" />
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-sky-950">{item.action || `Appointment ${formatStatus(item.status)}`}</p>
-                          <p className="text-xs text-slate-500">{item.recordedAt ? new Date(item.recordedAt).toLocaleString() : 'Timestamp unavailable'}{item.performedByEmail ? ` • ${item.performedByEmail}` : ''}</p>
+                          <p className="text-xs text-slate-500">{item.recordedAt ? new Date(item.recordedAt).toLocaleString() : 'Timestamp unavailable'}{item.performedByEmail && item.action !== 'Appointment Notes Added' ? ` • ${item.performedByEmail}` : ''}</p>
                           {item.note ? <p className="mt-1 text-sm text-slate-600">{item.note}</p> : null}
                         </div>
                       </div>
                     ))}
                   </div>
                 </section>
-                <section className="rounded-2xl border border-slate-100 bg-slate-50 p-4 md:col-span-2">
-                  <h3 className="font-semibold text-sky-950">Internal Appointment Notes</h3>
-                  <p className="mt-1 text-sm text-slate-500">Administrative reminders only. These notes are not shown to patients.</p>
-                  <textarea className={`${inputClass} mt-3 min-h-28 resize-none py-3`} value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Patient requested earlier schedule, special assistance, reminders..." />
-                  <div className="mt-3 flex justify-end">
-                    <button type="button" onClick={saveAppointmentNotes} disabled={isSavingNotes} className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60">{isSavingNotes ? 'Saving...' : 'Save Notes'}</button>
-                  </div>
-                </section>
+                {allowApproval && selectedAppointment.status === 'pending' ? (
+                  <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm md:order-9 md:col-span-2">
+                    <h3 className="font-semibold text-sky-950">Appointment Review</h3>
+                    <p className="mt-1 text-sm text-slate-500">Review the patient details and reason for visit before approving or declining this request.</p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateStatus(selectedAppointment.id, 'declined')}
+                        disabled={updatingId === selectedAppointment.id}
+                        className="inline-flex h-11 items-center justify-center rounded-xl bg-red-50 px-5 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateStatus(selectedAppointment.id, 'confirmed')}
+                        disabled={updatingId === selectedAppointment.id}
+                        className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {updatingId === selectedAppointment.id ? 'Saving...' : 'Approve'}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
               </div>
             </div>
           </aside>
+        </div>
+      ) : null}
+
+      {quickActionModal ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl shadow-sky-950/20">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Appointment Data</p>
+                <h2 className="mt-1 text-xl font-semibold text-sky-950">{quickActionModal.title}</h2>
+              </div>
+              <button type="button" onClick={() => setQuickActionModal(null)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close quick action modal">
+                <FaTimes className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="max-h-[72vh] overflow-y-auto p-5">
+              {quickActionModal.isLoading ? (
+                <p className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">Loading data...</p>
+              ) : quickActionModal.error ? (
+                <p className="rounded-2xl bg-red-50 px-4 py-4 text-sm font-semibold text-red-700">{quickActionModal.error}</p>
+              ) : quickActionModal.type === 'profile' ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <h3 className="font-semibold text-sky-950">Personal Information</h3>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                      <p>Name: <span className="font-semibold text-sky-950">{quickActionModal.appointment?.patientName || 'Not recorded'}</span> <span className="text-slate-400">•</span> Patient ID: <span className="font-semibold text-sky-950">{getRecordPatientId(null, quickActionModal.appointment)}</span></p>
+                      <p>Age: <span className="font-semibold text-sky-950">{calculateAge(quickActionModal.appointment?.patientSnapshot?.dateOfBirth)}</span></p>
+                      <p>Gender: <span className="font-semibold text-sky-950">{(quickActionModal.appointment?.patientSnapshot?.gender || 'Not recorded').replaceAll('_', ' ')}</span></p>
+                      <p>Contact: <span className="font-semibold text-sky-950">{quickActionModal.appointment?.contactNumber || 'Not provided'}</span></p>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <h3 className="font-semibold text-sky-950">Medical Information</h3>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                      <p>Allergies: <span className="font-semibold text-sky-950">{quickActionModal.appointment?.patientSnapshot?.allergies?.length ? quickActionModal.appointment.patientSnapshot.allergies.join(', ') : 'No allergies recorded'}</span></p>
+                      <p>Conditions: <span className="font-semibold text-sky-950">{quickActionModal.appointment?.patientSnapshot?.medicalConditions || 'No medical conditions recorded'}</span></p>
+                    </div>
+                  </div>
+                </div>
+              ) : quickActionModal.type === 'treatments' ? (
+                <div className="grid gap-3">
+                  {Array.isArray(quickActionModal.data) && quickActionModal.data.length ? quickActionModal.data.map((record, index) => (
+                    <article key={record.id || index} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="font-semibold text-sky-950">{record.procedure || record.servicePerformed || 'Dental Treatment'}</h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {record.patientName || quickActionModal.appointment?.patientName || 'Patient not recorded'} • {getRecordPatientId(record, quickActionModal.appointment)}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">{formatDate(record.visitDate || record.createdAt)} • {record.createdByName || record.dentistName || 'Provider not recorded'}</p>
+                        </div>
+                        <span className="w-fit rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">{formatRecordStatus(record.treatmentStatus)}</span>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <h4 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Appointment Data</h4>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <p>Date: <span className="font-semibold text-sky-950">{formatAppointmentDate(record.appointmentSnapshot?.appointmentDate || record.visitDate)}</span></p>
+                            <p>Time: <span className="font-semibold text-sky-950">{record.appointmentSnapshot?.appointmentTime || 'Not recorded'}</span></p>
+                            <p>Duration: <span className="font-semibold text-sky-950">{record.appointmentSnapshot?.estimatedDuration ? `${record.appointmentSnapshot.estimatedDuration} minutes` : 'Not recorded'}</span></p>
+                            <p>Final Price: <span className="font-semibold text-sky-950">{Number.isFinite(Number(record.appointmentSnapshot?.finalPrice)) ? `₱${Number(record.appointmentSnapshot.finalPrice).toLocaleString()}` : 'Not recorded'}</span></p>
+                            <p>Promo Code: <span className="font-semibold text-sky-950">{record.appointmentSnapshot?.promoCode || 'None'}</span></p>
+                          </div>
+                        </div>
+                        <p>Diagnosis: <span className="font-semibold text-sky-950">{record.diagnosis || 'Not recorded'}</span></p>
+                        <p>Treatment: <span className="font-semibold text-sky-950">{record.treatmentPerformed || 'Not recorded'}</span></p>
+                        <p>Notes: <span className="font-semibold text-sky-950">{record.notes || record.recommendations || 'No notes recorded'}</span></p>
+                      </div>
+                    </article>
+                  )) : (
+                    <p className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">No treatment records found for this patient.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {Array.isArray(quickActionModal.data) && quickActionModal.data.length ? quickActionModal.data.map((note, index) => (
+                    <article key={note.id || index} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="font-semibold text-sky-950">{note.noteType || 'Clinical Note'}</h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {note.patientName || quickActionModal.appointment?.patientName || 'Patient not recorded'} • {getRecordPatientId(note, quickActionModal.appointment)}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">{formatDate(note.visitDate || note.createdAt)} • {note.createdByName || note.dentistName || 'Provider not recorded'}</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                        <p>Observation: <span className="font-semibold text-sky-950">{note.clinicalNotes?.observation || 'Not recorded'}</span></p>
+                        <p>Assessment: <span className="font-semibold text-sky-950">{note.clinicalNotes?.assessment || 'Not recorded'}</span></p>
+                        <p>Recommendations: <span className="font-semibold text-sky-950">{note.clinicalNotes?.recommendations || 'Not recorded'}</span></p>
+                        {note.clinicalFollowUp?.enabled ? (
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                            <h4 className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Follow-up Booking</h4>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <p>Appointment ID: <span className="font-semibold text-sky-950">{note.clinicalFollowUp.appointmentId || formatAppointmentId(note.clinicalFollowUp.appointment) || 'Not recorded'}</span></p>
+                              <p>Date: <span className="font-semibold text-sky-950">{note.clinicalFollowUp.date ? formatDate(note.clinicalFollowUp.date) : 'Not recorded'}</span></p>
+                              <p>Time: <span className="font-semibold text-sky-950">{note.clinicalFollowUp.time || 'Not recorded'}</span></p>
+                              <p>Reason: <span className="font-semibold text-sky-950">{note.clinicalFollowUp.reason || 'Follow-up appointment recommended.'}</span></p>
+                            </div>
+                          </div>
+                        ) : null}
+                        <p>Additional Notes: <span className="font-semibold text-sky-950">{note.clinicalNotes?.additionalNotes || 'Not recorded'}</span></p>
+                      </div>
+                    </article>
+                  )) : (
+                    <p className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">No clinical notes found for this patient.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -878,36 +1159,14 @@ function AppointmentsPage({ allowApproval = false }) {
                     You are about to mark {outcomeTarget.appointment.patientName ? `${outcomeTarget.appointment.patientName}'s` : "this patient's"} appointment as Completed.
                   </p>
                   <p className="mt-3">
-                    This action confirms that the scheduled dental service has been successfully performed. The appointment will be recorded as completed, the patient will be notified, and the service amount will be included in the clinic's Estimated Revenue. Related Analytics, Reports, and the appointment activity history will also be updated.
+                    This action confirms that the scheduled dental service has been successfully performed. The appointment will be recorded as completed, the patient will be notified, and an official Treatment Record will be created automatically from the appointment details.
+                  </p>
+                  <p className="mt-3">
+                    Related Analytics, Reports, My Records, and the appointment activity history will also be updated. Private Clinical Notes remain separate and can be added manually after completion.
                   </p>
                   <p className="mt-3">
                     This action cannot be undone without administrative intervention.
                   </p>
-                </div>
-                <div className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4">
-                  <h3 className="text-sm font-semibold text-sky-950">Treatment Record</h3>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <input className={inputClass} name="servicePerformed" value={completionForm.servicePerformed} onChange={handleCompletionChange} placeholder="Service performed" />
-                    <input className={inputClass} name="chiefComplaint" value={completionForm.chiefComplaint} onChange={handleCompletionChange} placeholder="Chief complaint" />
-                    <input className={inputClass} name="diagnosis" value={completionForm.diagnosis} onChange={handleCompletionChange} placeholder="Diagnosis" />
-                    <input className={inputClass} name="treatmentPerformed" value={completionForm.treatmentPerformed} onChange={handleCompletionChange} placeholder="Treatment performed" />
-                    <input className={inputClass} name="recommendations" value={completionForm.recommendations} onChange={handleCompletionChange} placeholder="Recommendations" />
-                    <input className={inputClass} name="nextVisitRecommendation" value={completionForm.nextVisitRecommendation} onChange={handleCompletionChange} placeholder="Next visit recommendation" />
-                  </div>
-                  <textarea className={`${inputClass} mt-3 min-h-24 py-3`} name="dentistNotes" value={completionForm.dentistNotes} onChange={handleCompletionChange} placeholder="Dentist notes" />
-                  <h3 className="mt-4 text-sm font-semibold text-sky-950">Private Clinical Notes</h3>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <input className={inputClass} name="observation" value={completionForm.observation} onChange={handleCompletionChange} placeholder="Observation" />
-                    <input className={inputClass} name="assessment" value={completionForm.assessment} onChange={handleCompletionChange} placeholder="Assessment" />
-                    <input className={inputClass} name="clinicalRecommendations" value={completionForm.clinicalRecommendations} onChange={handleCompletionChange} placeholder="Clinical recommendations" />
-                    <input className={inputClass} name="additionalNotes" value={completionForm.additionalNotes} onChange={handleCompletionChange} placeholder="Additional notes" />
-                  </div>
-                  <h3 className="mt-4 text-sm font-semibold text-sky-950">Follow-up Appointment</h3>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    <input className={inputClass} type="date" name="followUpDate" value={completionForm.followUpDate} onChange={handleCompletionChange} />
-                    <input className={inputClass} type="time" name="followUpTime" value={completionForm.followUpTime} onChange={handleCompletionChange} />
-                    <input className={inputClass} name="followUpReason" value={completionForm.followUpReason} onChange={handleCompletionChange} placeholder="Reason" />
-                  </div>
                 </div>
               </>
             ) : (
@@ -961,16 +1220,128 @@ function AppointmentsPage({ allowApproval = false }) {
             </div>
             <div className="mt-6 grid gap-3">
               {!isStaff ? (
-                <>
-                  <button type="button" onClick={() => openDocumentationModule('treatment', documentationPrompt)} className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900">Add Treatment Record</button>
-                  <button type="button" onClick={() => openDocumentationModule('clinical', documentationPrompt)} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-bold text-sky-950 hover:bg-sky-50">Add Clinical Note</button>
-                </>
+                <button type="button" onClick={() => openClinicalNoteModal(documentationPrompt)} className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900">Add Clinical Note</button>
               ) : (
                 <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">Clinical documentation is restricted to Admin and Dentist accounts.</p>
               )}
               <button type="button" onClick={() => setDocumentationPrompt(null)} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50">Finish</button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {clinicalNoteModal ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={closeClinicalNoteModal}>
+          <section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[1.5rem] bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">New Note Clinical Note</p>
+                <h2 className="mt-1 text-xl font-bold text-sky-950">{clinicalNoteForm.patientName || 'Clinical Note'}</h2>
+                <p className="mt-1 text-sm text-slate-500">Private internal documentation. Patients cannot view this note.</p>
+              </div>
+              <button type="button" className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" onClick={closeClinicalNoteModal} aria-label="Close clinical note modal">
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="grid gap-5 p-6 lg:grid-cols-3">
+              <label className="grid gap-2 text-sm font-bold text-slate-600">
+                Patient Name
+                <input className={inputClass} value={clinicalNoteForm.patientName} disabled onChange={(event) => updateClinicalNoteField('patientName', event.target.value)} placeholder="Enter patient name" />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-600">
+                Appointment ID
+                <input className={inputClass} value={clinicalNoteForm.appointmentDisplay || formatAppointmentId(clinicalNoteForm.appointment)} disabled onChange={(event) => updateClinicalNoteField('appointment', event.target.value)} placeholder="Optional appointment ID" />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-600">
+                Date
+                <input className={inputClass} type="date" value={clinicalNoteForm.visitDate} onChange={(event) => updateClinicalNoteField('visitDate', event.target.value)} />
+              </label>
+
+              <label className="grid gap-2 text-sm font-bold text-slate-600 lg:col-span-3">
+                Observations
+                <textarea className={`${inputClass} min-h-24 py-3`} value={clinicalNoteForm.clinicalNotes.observation} onChange={(event) => updateClinicalNoteContent('observation', event.target.value)} placeholder="Document observations from the visit..." />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-600 lg:col-span-3">
+                Assessment
+                <textarea className={`${inputClass} min-h-24 py-3`} value={clinicalNoteForm.clinicalNotes.assessment} onChange={(event) => updateClinicalNoteContent('assessment', event.target.value)} placeholder="Document clinical assessment..." />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-600 lg:col-span-3">
+                Recommendations
+                <textarea className={`${inputClass} min-h-24 py-3`} value={clinicalNoteForm.clinicalNotes.recommendations} onChange={(event) => updateClinicalNoteContent('recommendations', event.target.value)} placeholder="Document recommendations or follow-up instructions..." />
+              </label>
+              <section className="rounded-2xl border border-sky-100 bg-sky-50 p-4 lg:col-span-3">
+                <label className="flex items-center gap-3 text-sm font-bold text-sky-950">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-sky-300 text-sky-700 focus:ring-sky-200"
+                    checked={Boolean(clinicalNoteForm.followUp?.enabled)}
+                    onChange={(event) => updateClinicalNoteFollowUp('enabled', event.target.checked)}
+                  />
+                  Book follow-up appointment and notify patient
+                </label>
+                {clinicalNoteForm.followUp?.enabled ? (
+                  <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-stretch">
+                    <div className="grid gap-3 md:w-64 md:shrink-0">
+                      <label className="grid gap-2 text-sm font-bold text-slate-600">
+                        Follow-up Date
+                        <span className="relative block">
+                          <FaRegCalendarAlt className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className={`${inputClass} pl-11`}
+                            type="date"
+                            min={addDaysKey(0)}
+                            max={addDaysKey(14)}
+                            value={clinicalNoteForm.followUp?.date || ''}
+                            onChange={(event) => updateClinicalNoteFollowUp('date', event.target.value)}
+                          />
+                        </span>
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-slate-600">
+                        Time
+                        <span className="relative block">
+                          <FaUserClock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <select
+                            className={`${inputClass} pl-11`}
+                            value={clinicalNoteForm.followUp?.time || ''}
+                            onChange={(event) => updateClinicalNoteFollowUp('time', event.target.value)}
+                            disabled={!clinicalNoteForm.followUp?.date || isLoadingFollowUpSlots || !followUpSlots.length}
+                          >
+                            <option value="">
+                              {isLoadingFollowUpSlots ? 'Loading available appointments...' : 'Select a time'}
+                            </option>
+                            {followUpSlots.map((slot) => (
+                              <option key={slot} value={slot}>{slot}</option>
+                            ))}
+                          </select>
+                        </span>
+                      </label>
+                    </div>
+                    <label className="grid min-w-0 flex-1 gap-2 text-sm font-bold text-slate-600">
+                      Reason
+                      <textarea className={`${inputClass} min-h-[7.75rem] py-3`} value={clinicalNoteForm.followUp?.reason || ''} onChange={(event) => updateClinicalNoteFollowUp('reason', event.target.value)} placeholder="Follow-up reason" />
+                    </label>
+                    {followUpAvailabilityMessage && clinicalNoteForm.followUp?.date ? (
+                      <div className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-500 md:basis-full">
+                        {followUpAvailabilityMessage}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+              <label className="grid gap-2 text-sm font-bold text-slate-600 lg:col-span-3">
+                Additional Notes
+                <textarea className={`${inputClass} min-h-24 py-3`} value={clinicalNoteForm.clinicalNotes.additionalNotes} onChange={(event) => updateClinicalNoteContent('additionalNotes', event.target.value)} placeholder="Internal reminders or supporting context..." />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:justify-end">
+              <button type="button" className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60" disabled={isSavingClinicalNote} onClick={closeClinicalNoteModal}>Cancel</button>
+              <button type="button" className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60" disabled={isSavingClinicalNote} onClick={saveClinicalNote}>
+                {isSavingClinicalNote ? 'Saving...' : 'Create Clinical Note'}
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
     </main>

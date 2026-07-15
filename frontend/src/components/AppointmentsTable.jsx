@@ -3,6 +3,7 @@ import { formatDate, formatStatus } from '../utils/auth.js'
 const statusStyles = {
   pending: 'bg-amber-50 text-amber-700',
   confirmed: 'bg-blue-50 text-blue-700',
+  follow_up: 'bg-cyan-50 text-cyan-700',
   checked_in: 'bg-emerald-50 text-emerald-700',
   in_consultation: 'bg-violet-50 text-violet-700',
   completed: 'bg-emerald-50 text-emerald-700',
@@ -19,13 +20,20 @@ const actionClass = {
   danger: 'bg-red-50 text-red-700 hover:bg-red-100',
 }
 
-function StatusActions({ appointment, onUpdateStatus, updatingId }) {
+function StatusActions({ appointment, onUpdateStatus, onRowClick, updatingId }) {
+  const scheduledDate = appointment.appointmentDate ? new Date(appointment.appointmentDate) : null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  if (scheduledDate && !Number.isNaN(scheduledDate.getTime())) scheduledDate.setHours(0, 0, 0, 0)
+  const isFutureDate = scheduledDate && scheduledDate > today
+
   const actionsByStatus = {
-    pending: [
-      ['confirmed', 'Approve', 'success'],
-      ['declined', 'Decline', 'danger'],
-    ],
     confirmed: [
+      ['checked_in', 'Check In', 'primary'],
+      ['no_show', 'No Show', 'danger'],
+      ['rescheduled', 'Skip', 'warning'],
+    ],
+    follow_up: [
       ['checked_in', 'Check In', 'primary'],
       ['no_show', 'No Show', 'danger'],
       ['rescheduled', 'Skip', 'warning'],
@@ -40,9 +48,23 @@ function StatusActions({ appointment, onUpdateStatus, updatingId }) {
       ['rescheduled', 'Skip', 'warning'],
     ],
   }
-  const actions = actionsByStatus[appointment.status] || []
+  const actions = (actionsByStatus[appointment.status] || []).filter(([nextStatus]) => {
+    if (isFutureDate && ['checked_in', 'no_show', 'rescheduled'].includes(nextStatus)) return false
+    return true
+  })
 
-  if (!actions.length) return <span className="text-xs text-slate-400">—</span>
+  if (!actions.length) {
+    return (
+      <button
+        type="button"
+        onClick={() => onRowClick?.(appointment)}
+        disabled={updatingId === appointment.id}
+        className={`min-w-20 rounded-xl px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${actionClass.primary}`}
+      >
+        View
+      </button>
+    )
+  }
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -116,7 +138,7 @@ function AppointmentsTable({
               </td>
               {showActions && (
                 <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                  <StatusActions appointment={appointment} onUpdateStatus={onUpdateStatus} updatingId={updatingId} />
+                  <StatusActions appointment={appointment} onUpdateStatus={onUpdateStatus} onRowClick={onRowClick} updatingId={updatingId} />
                 </td>
               )}
             </tr>

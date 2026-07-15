@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   FaCalendarAlt,
   FaChevronDown,
@@ -26,6 +27,7 @@ const statusOptions = [
 ]
 const emptyForm = {
   patientName: '',
+  patientId: '',
   appointment: '',
   visitDate: new Date().toISOString().slice(0, 10),
   procedure: '',
@@ -47,13 +49,21 @@ const statusClass = {
 
 const statusLabel = (status) => statusOptions.find(([value]) => value === status)?.[1] || 'Completed'
 
+const formatAppointmentId = (value) => {
+  if (!value) return ''
+  const raw = typeof value === 'object' ? value._id || value.id || value.appointmentId : value
+  if (!raw) return ''
+  const text = String(raw)
+  return text.startsWith('APT-') ? text : `APT-${text.slice(-6).toUpperCase()}`
+}
+
 const canEditRecord = (record, user) => {
   const userId = String(user?.id || '')
   const email = String(user?.email || '').toLowerCase()
   return String(record?.createdBy || '') === userId || String(record?.createdByEmail || '').toLowerCase() === email
 }
 
-function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit }) {
+function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit, onAddClinicalNote }) {
   const isReadonly = mode === 'view' || !canEdit
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
 
@@ -72,13 +82,17 @@ function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit
         </div>
 
         <div className="grid gap-5 p-6 lg:grid-cols-3">
-          <label className="grid gap-2 text-sm font-bold text-slate-600">
+          <div className="grid gap-2 text-sm font-bold text-slate-600">
             Patient Name
             <input className={inputClass} value={form.patientName} disabled={mode !== 'create'} onChange={(event) => update('patientName', event.target.value)} placeholder="Enter patient name" />
+          </div>
+          <label className="grid gap-2 text-sm font-bold text-slate-600">
+            Patient ID
+            <input className={inputClass} value={form.patientId || 'Not recorded'} disabled placeholder="Patient ID" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
-            Appointment Reference
-            <input className={inputClass} value={form.appointment} disabled={isReadonly || mode === 'edit'} onChange={(event) => update('appointment', event.target.value)} placeholder="Optional appointment ID" />
+            Appointment ID
+            <input className={inputClass} value={form.appointmentDisplay || form.appointment} disabled={isReadonly || mode === 'edit'} onChange={(event) => update('appointment', event.target.value)} placeholder="Optional appointment ID" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Treatment Date
@@ -87,10 +101,6 @@ function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Procedure / Service
             <input className={inputClass} value={form.procedure} disabled={isReadonly} onChange={(event) => update('procedure', event.target.value)} placeholder="Procedure or service" />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-600">
-            Tooth Number
-            <input className={inputClass} value={form.toothNumber} disabled={isReadonly} onChange={(event) => update('toothNumber', event.target.value)} placeholder="Optional" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Treatment Status
@@ -117,7 +127,12 @@ function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit
         </div>
 
         <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:justify-end">
-          <button type="button" className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50" onClick={onClose}>Cancel</button>
+          <button type="button" className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50" onClick={onClose}>{mode === 'view' ? 'Back' : 'Cancel'}</button>
+          {mode === 'view' && onAddClinicalNote ? (
+            <button type="button" className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900" onClick={onAddClinicalNote}>
+              Add Clinical Note
+            </button>
+          ) : null}
           {mode !== 'view' && canEdit ? (
             <button type="button" className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60" disabled={isSaving} onClick={onSubmit}>
               {isSaving ? 'Saving...' : mode === 'create' ? 'Create Treatment Record' : 'Save Changes'}
@@ -131,8 +146,12 @@ function RecordModal({ mode, form, setForm, onClose, onSubmit, isSaving, canEdit
 
 function StaffTreatmentRecordsPage() {
   const toast = useToast()
+  const location = useLocation()
+  const navigate = useNavigate()
   const currentUser = authStorage.getUser()
   const isAdmin = currentUser?.role === 'admin'
+  const isStaff = currentUser?.role === 'staff'
+  const appointmentOpenRef = useRef('')
   const [records, setRecords] = useState([])
   const [summary, setSummary] = useState({ total: 0, completed: 0, followUps: 0, inProgress: 0 })
   const [filterOptions, setFilterOptions] = useState({ procedures: [], providers: [] })
@@ -152,6 +171,10 @@ function StaffTreatmentRecordsPage() {
     endDate: '',
     page: 1,
   })
+  const appointmentRecordId = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('appointment') || ''
+  }, [location.search])
 
   const loadRecords = useCallback(async () => {
     setIsLoading(true)
@@ -199,6 +222,8 @@ function StaffTreatmentRecordsPage() {
     ...emptyForm,
     ...record,
     appointment: record.appointment || '',
+    appointmentDisplay: record.appointmentSnapshot?.appointmentId || formatAppointmentId(record.appointment),
+    patientId: record.patientId || record.patientSnapshot?.patientId || '',
     visitDate: record.visitDate ? new Date(record.visitDate).toISOString().slice(0, 10) : emptyForm.visitDate,
     procedure: record.procedure || record.servicePerformed || '',
     treatmentPerformed: record.treatmentPerformed || '',
@@ -214,6 +239,42 @@ function StaffTreatmentRecordsPage() {
     setForm(toForm(record))
     setModal({ mode: 'view', record })
   }
+
+  useEffect(() => {
+    if (!appointmentRecordId || appointmentOpenRef.current === appointmentRecordId) return
+
+    let isMounted = true
+    appointmentOpenRef.current = appointmentRecordId
+
+    const openAppointmentTreatmentRecord = async () => {
+      try {
+        const response = await fdmstApi.getTreatmentRecords({
+          appointment: appointmentRecordId,
+          scope: isAdmin ? 'all' : 'mine',
+          limit: 1,
+        })
+        const record = (response.data || [])[0]
+
+        if (!isMounted) return
+
+        if (!record) {
+          toast.info('Treatment record is still being prepared for this appointment.')
+          return
+        }
+
+        await openView(record)
+      } catch (error) {
+        if (!isMounted) return
+        toast.error(error.message || 'Unable to open the treatment record for this appointment.')
+      }
+    }
+
+    openAppointmentTreatmentRecord()
+
+    return () => {
+      isMounted = false
+    }
+  }, [appointmentRecordId, isAdmin, toast])
 
   const openEdit = (record) => {
     setForm(toForm(record))
@@ -315,9 +376,11 @@ function StaffTreatmentRecordsPage() {
           </button>
           {!isAdmin ? (
             <div className="flex flex-col gap-3 sm:flex-row xl:flex-nowrap">
-              <button type="button" className="inline-flex h-11 whitespace-nowrap items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-bold text-white hover:bg-sky-900" onClick={openCreate}>
-                <FaPlus /> Create Record
-              </button>
+              {!isStaff ? (
+                <button type="button" className="inline-flex h-11 whitespace-nowrap items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-bold text-white hover:bg-sky-900" onClick={openCreate}>
+                  <FaPlus /> Create Record
+                </button>
+              ) : null}
               <div className="relative">
                 <button type="button" className="inline-flex h-11 w-full whitespace-nowrap items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-bold text-white hover:bg-sky-900 sm:w-auto" onClick={() => setExportOpen((value) => !value)}>
                   <FaFileExport /> Export <FaChevronDown className="h-3 w-3" />
@@ -374,7 +437,7 @@ function StaffTreatmentRecordsPage() {
                   <td className="px-5 py-4">
                     <div className="flex justify-end gap-2">
                       <button type="button" className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-sky-700 hover:bg-sky-100" title="View details" onClick={() => openView(record)}><FaEye /></button>
-                      {canEditRecord(record, currentUser) ? (
+                      {!isStaff && canEditRecord(record, currentUser) ? (
                         <button type="button" className="grid h-9 w-9 place-items-center rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100" title="Edit record" onClick={() => openEdit(record)}><FaEdit /></button>
                       ) : null}
                     </div>
@@ -404,6 +467,11 @@ function StaffTreatmentRecordsPage() {
           onSubmit={saveRecord}
           isSaving={isSaving}
           canEdit={modal.mode === 'create' || canEditRecord(modal.record, currentUser)}
+          onAddClinicalNote={
+            modal.mode === 'view' && form.appointment && !isStaff
+              ? () => navigate(`${isAdmin ? '/admin' : '/dentist'}/clinical-notes?appointment=${form.appointment}`)
+              : null
+          }
         />
       ) : null}
     </main>

@@ -73,6 +73,12 @@ const roleLabels = {
   staff: 'Staff',
 }
 
+function applySystemPreferences(preferences = {}) {
+  document.documentElement.dataset.dateFormat = preferences.dateFormat || 'MMM d, yyyy'
+  document.documentElement.dataset.timeFormat = String(preferences.timeFormat || '12')
+  document.documentElement.dataset.timeZone = preferences.timeZone || 'Asia/Manila'
+}
+
 const adminPageMeta = [
   { path: '/admin/analytics', title: 'Analytics Dashboard', subtitle: 'Monitor clinic performance and key insights.' },
   { path: '/admin/appointments', title: 'Appointments', subtitle: 'View, filter, and manage clinic appointments.' },
@@ -253,11 +259,13 @@ function DashboardLayout({ portalLabel, navItems }) {
   }, [])
 
   useEffect(() => {
-    const theme = user?.workPreferences?.appearance?.theme
-    if (theme) {
-      document.documentElement.dataset.theme = theme
+    if (clinicSettings?.systemPreferences || user?.workPreferences?.appearance) {
+      applySystemPreferences({
+        ...(clinicSettings?.systemPreferences || {}),
+        ...(user?.workPreferences?.appearance || {}),
+      })
     }
-  }, [user?.workPreferences?.appearance?.theme])
+  }, [clinicSettings?.systemPreferences, user?.workPreferences?.appearance])
 
   useEffect(() => {
     let isMounted = true

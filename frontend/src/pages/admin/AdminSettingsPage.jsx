@@ -121,12 +121,65 @@ const emptyService = {
   status: 'active',
 }
 
+const supportedTimeZones = ['Asia/Manila', 'UTC']
+const supportedDateFormats = ['MMM d, yyyy', 'MM/dd/yyyy', 'dd/MM/yyyy', 'yyyy-MM-dd']
+const supportedTimeFormats = ['12', '24']
+
+function normalizeSystemPreferences(preferences = {}) {
+  return {
+    theme: defaultSettings.systemPreferences.theme,
+    language: defaultSettings.systemPreferences.language,
+    timeZone: supportedTimeZones.includes(preferences.timeZone) ? preferences.timeZone : defaultSettings.systemPreferences.timeZone,
+    dateFormat: supportedDateFormats.includes(preferences.dateFormat) ? preferences.dateFormat : defaultSettings.systemPreferences.dateFormat,
+    timeFormat: supportedTimeFormats.includes(String(preferences.timeFormat)) ? String(preferences.timeFormat) : defaultSettings.systemPreferences.timeFormat,
+  }
+}
+
+function applySystemPreferences(preferences = {}) {
+  const pref = normalizeSystemPreferences(preferences)
+  document.documentElement.dataset.dateFormat = pref.dateFormat
+  document.documentElement.dataset.timeFormat = pref.timeFormat
+  document.documentElement.dataset.timeZone = pref.timeZone
+}
+
+function formatWithPreferences(value, preferences = {}, includeTime = false) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pref = normalizeSystemPreferences(preferences)
+  const timeZone = pref.timeZone
+  const common = { timeZone }
+
+  const dateOptions = pref.dateFormat === 'MM/dd/yyyy'
+    ? { ...common, month: '2-digit', day: '2-digit', year: 'numeric' }
+    : pref.dateFormat === 'dd/MM/yyyy'
+      ? { ...common, day: '2-digit', month: '2-digit', year: 'numeric' }
+      : pref.dateFormat === 'yyyy-MM-dd'
+        ? { ...common, year: 'numeric', month: '2-digit', day: '2-digit' }
+        : { ...common, month: 'short', day: 'numeric', year: 'numeric' }
+  const locale = pref.dateFormat === 'dd/MM/yyyy' ? 'en-GB' : 'en-US'
+  const formattedDate = new Intl.DateTimeFormat(locale, dateOptions).format(date)
+
+  if (!includeTime) return pref.dateFormat === 'yyyy-MM-dd'
+    ? formattedDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$1-$2')
+    : formattedDate
+
+  const formattedTime = new Intl.DateTimeFormat('en-US', {
+    ...common,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: pref.timeFormat !== '24',
+  }).format(date)
+
+  return `${pref.dateFormat === 'yyyy-MM-dd' ? formattedDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$1-$2') : formattedDate} ${formattedTime}`
+}
+
 function mergeSettings(settings) {
   return {
     ...defaultSettings,
     ...settings,
     appointmentSettings: { ...defaultSettings.appointmentSettings, ...(settings?.appointmentSettings || {}) },
-    systemPreferences: { ...defaultSettings.systemPreferences, ...(settings?.systemPreferences || {}) },
+    systemPreferences: normalizeSystemPreferences({ ...defaultSettings.systemPreferences, ...(settings?.systemPreferences || {}) }),
     security: { ...defaultSettings.security, ...(settings?.security || {}) },
     backup: { ...defaultSettings.backup, ...(settings?.backup || {}) },
     notifications: { ...defaultSettings.notifications, ...(settings?.notifications || {}) },
@@ -173,6 +226,10 @@ function Toggle({ checked, label, onChange }) {
       </button>
     </label>
   )
+}
+
+function selectInputValue(event) {
+  event.target.select()
 }
 
 function PrimaryButton({ children, loading, ...props }) {
@@ -244,6 +301,10 @@ function AdminSettingsPage() {
     Promise.resolve().then(loadAuditLogs)
   }, [loadAuditLogs, loadSettings])
 
+  useEffect(() => {
+    applySystemPreferences(settings.systemPreferences)
+  }, [settings.systemPreferences])
+
   const recordAuditLog = async (action, entityType = 'Settings', metadata = {}) => {
     try {
       await fdmstApi.create('audit-logs', {
@@ -275,6 +336,17 @@ function AdminSettingsPage() {
     } finally {
       setSavingSection('')
     }
+  }
+
+  const saveSystemPreferences = () => {
+    const normalizedPreferences = normalizeSystemPreferences(settings.systemPreferences)
+    const nextSettings = {
+      ...settings,
+      systemPreferences: normalizedPreferences,
+    }
+    setSettings(nextSettings)
+    applySystemPreferences(normalizedPreferences)
+    saveSettings(nextSettings, 'preferences', 'System Preferences Updated')
   }
 
   const updateSettings = (path, value) => {
@@ -518,11 +590,11 @@ function AdminSettingsPage() {
       return (
         <SettingsCard title="Appointment Settings" description="Configure clinic schedule rules and online booking behavior.">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Opening Time"><input className={inputClass} type="time" value={appointment.openingTime} onChange={(event) => updateSettings(['appointmentSettings', 'openingTime'], event.target.value)} /></Field>
-            <Field label="Closing Time"><input className={inputClass} type="time" value={appointment.closingTime} onChange={(event) => updateSettings(['appointmentSettings', 'closingTime'], event.target.value)} /></Field>
-            <Field label="Appointment Duration"><input className={inputClass} type="number" min="5" value={appointment.appointmentDuration} onChange={(event) => updateSettings(['appointmentSettings', 'appointmentDuration'], Number(event.target.value))} /></Field>
-            <Field label="Maximum Appointments Per Day"><input className={inputClass} type="number" min="1" value={appointment.maxAppointmentsPerDay} onChange={(event) => updateSettings(['appointmentSettings', 'maxAppointmentsPerDay'], Number(event.target.value))} /></Field>
-            <Field label="Buffer Time Between Appointments"><input className={inputClass} type="number" min="0" value={appointment.bufferTime} onChange={(event) => updateSettings(['appointmentSettings', 'bufferTime'], Number(event.target.value))} /></Field>
+            <Field label="Opening Time"><input className={inputClass} type="time" value={appointment.openingTime} onFocus={selectInputValue} onChange={(event) => updateSettings(['appointmentSettings', 'openingTime'], event.target.value)} /></Field>
+            <Field label="Closing Time"><input className={inputClass} type="time" value={appointment.closingTime} onFocus={selectInputValue} onChange={(event) => updateSettings(['appointmentSettings', 'closingTime'], event.target.value)} /></Field>
+            <Field label="Appointment Duration"><input className={inputClass} type="number" min="5" value={appointment.appointmentDuration} onFocus={selectInputValue} onChange={(event) => updateSettings(['appointmentSettings', 'appointmentDuration'], event.target.value)} /></Field>
+            <Field label="Maximum Appointments Per Day"><input className={inputClass} type="number" min="1" value={appointment.maxAppointmentsPerDay} onFocus={selectInputValue} onChange={(event) => updateSettings(['appointmentSettings', 'maxAppointmentsPerDay'], event.target.value)} /></Field>
+            <Field label="Buffer Time Between Appointments"><input className={inputClass} type="number" min="0" value={appointment.bufferTime} onFocus={selectInputValue} onChange={(event) => updateSettings(['appointmentSettings', 'bufferTime'], event.target.value)} /></Field>
             <Field label="Working Days"><select multiple className={`${textareaClass} min-h-32`} value={appointment.workingDays} onChange={(event) => updateSettings(['appointmentSettings', 'workingDays'], [...event.target.selectedOptions].map((option) => option.value))}>{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => <option key={day} value={day}>{day}</option>)}</select></Field>
           </div>
           <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -539,16 +611,20 @@ function AdminSettingsPage() {
 
     if (activeSection === 'preferences') {
       const pref = settings.systemPreferences
+      const now = new Date()
       return (
         <SettingsCard title="System Preferences" description="Set application display, locale, and time formatting defaults.">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Theme"><select className={inputClass} value={pref.theme} onChange={(event) => updateSettings(['systemPreferences', 'theme'], event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></Field>
-            <Field label="Language"><select className={inputClass} value={pref.language} onChange={(event) => updateSettings(['systemPreferences', 'language'], event.target.value)}><option>English</option><option>Filipino</option></select></Field>
-            <Field label="Time Zone"><select className={inputClass} value={pref.timeZone} onChange={(event) => updateSettings(['systemPreferences', 'timeZone'], event.target.value)}><option>Asia/Manila</option><option>UTC</option></select></Field>
-            <Field label="Date Format"><select className={inputClass} value={pref.dateFormat} onChange={(event) => updateSettings(['systemPreferences', 'dateFormat'], event.target.value)}><option>MMM d, yyyy</option><option>MM/dd/yyyy</option><option>yyyy-MM-dd</option></select></Field>
+            <Field label="Time Zone"><select className={inputClass} value={pref.timeZone} onChange={(event) => updateSettings(['systemPreferences', 'timeZone'], event.target.value)}>{supportedTimeZones.map((timeZone) => <option key={timeZone} value={timeZone}>{timeZone}</option>)}</select></Field>
+            <Field label="Date Format"><select className={inputClass} value={pref.dateFormat} onChange={(event) => updateSettings(['systemPreferences', 'dateFormat'], event.target.value)}>{supportedDateFormats.map((format) => <option key={format} value={format}>{format}</option>)}</select></Field>
             <Field label="Time Format"><select className={inputClass} value={pref.timeFormat} onChange={(event) => updateSettings(['systemPreferences', 'timeFormat'], event.target.value)}><option value="12">12 Hour</option><option value="24">24 Hour</option></select></Field>
+            <div className="rounded-xl bg-slate-50 p-4 md:col-span-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Preview</p>
+              <p className="mt-2 text-sm font-semibold text-sky-950">{formatWithPreferences(now, pref, true)}</p>
+              <p className="mt-1 text-xs text-slate-500">Date, time, and timezone settings are saved as clinic-wide defaults.</p>
+            </div>
           </div>
-          <PrimaryButton className="mt-6" loading={savingSection === 'preferences'} onClick={() => saveSettings(settings, 'preferences')} type="button"><FaSave /> Save Preferences</PrimaryButton>
+          <PrimaryButton className="mt-6" loading={savingSection === 'preferences'} onClick={saveSystemPreferences} type="button"><FaSave /> Save Preferences</PrimaryButton>
         </SettingsCard>
       )
     }
@@ -557,7 +633,7 @@ function AdminSettingsPage() {
       return (
         <SettingsCard title="Backup & Restore" description="Create, download, or restore application backup data.">
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-500">Last Backup Date</p><p className="mt-2 text-lg font-semibold text-sky-950">{settings.backup.lastBackupDate ? new Date(settings.backup.lastBackupDate).toLocaleString() : 'No backup yet'}</p></div>
+            <div className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-500">Last Backup Date</p><p className="mt-2 text-lg font-semibold text-sky-950">{settings.backup.lastBackupDate ? formatWithPreferences(settings.backup.lastBackupDate, settings.systemPreferences, true) : 'No backup yet'}</p></div>
             <div className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-500">Backup Status</p><p className="mt-2 text-lg font-semibold text-sky-950">{settings.backup.status}</p></div>
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
@@ -576,10 +652,10 @@ function AdminSettingsPage() {
             <input className={inputClass} value={auditQuery} onChange={(event) => setAuditQuery(event.target.value)} placeholder="Search logs..." />
             <input className={inputClass} type="date" value={auditDate} onChange={(event) => setAuditDate(event.target.value)} />
             <button className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600" onClick={() => window.print()} type="button"><FaFilePdf className="mr-2 inline" />Export PDF</button>
-            <button className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white" onClick={() => exportRows('audit-logs.csv', [['Date & Time', 'User', 'Module', 'Action', 'Status'], ...filteredAuditLogs.map((log) => [new Date(log.createdAt).toLocaleString(), log.performedByEmail, log.entityType, log.action, 'Success'])])} type="button"><FaFileExcel className="mr-2 inline" />Export Excel</button>
+            <button className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white" onClick={() => exportRows('audit-logs.csv', [['Date & Time', 'User', 'Module', 'Action', 'Status'], ...filteredAuditLogs.map((log) => [formatWithPreferences(log.createdAt, settings.systemPreferences, true), log.performedByEmail, log.entityType, log.action, 'Success'])])} type="button"><FaFileExcel className="mr-2 inline" />Export Excel</button>
           </div>
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-[760px] w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Date & Time</th><th className="px-4 py-3">User</th><th className="px-4 py-3">Module</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{filteredAuditLogs.length ? filteredAuditLogs.map((log) => <tr className="border-t border-slate-100" key={log._id}><td className="px-4 py-3">{new Date(log.createdAt).toLocaleString()}</td><td className="px-4 py-3">{log.performedByEmail || 'System'}</td><td className="px-4 py-3">{log.entityType}</td><td className="px-4 py-3">{log.action}</td><td className="px-4 py-3"><StatusBadge status="success" /></td></tr>) : <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={5}>No audit logs found.</td></tr>}</tbody></table>
+          <div className="mt-5 max-h-[34rem] overflow-auto rounded-2xl border border-slate-200">
+            <table className="min-w-[760px] w-full text-left text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Date & Time</th><th className="px-4 py-3">User</th><th className="px-4 py-3">Module</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{filteredAuditLogs.length ? filteredAuditLogs.map((log) => <tr className="border-t border-slate-100" key={log._id}><td className="px-4 py-3">{formatWithPreferences(log.createdAt, settings.systemPreferences, true)}</td><td className="px-4 py-3">{log.performedByEmail || 'System'}</td><td className="px-4 py-3">{log.entityType}</td><td className="px-4 py-3">{log.action}</td><td className="px-4 py-3"><StatusBadge status="success" /></td></tr>) : <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={5}>No audit logs found.</td></tr>}</tbody></table>
           </div>
         </SettingsCard>
       )
