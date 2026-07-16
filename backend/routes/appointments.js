@@ -1229,6 +1229,202 @@ router.get(
   }),
 );
 
+router.patch(
+  "/my/:id/cancel",
+  authenticate,
+  authorize("patient"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid appointment ID." });
+    }
+
+    const patientRecord = await Patient.findOne({ userId: req.user.id }).select("_id").lean();
+    const ownerFilters = [{ _id: req.params.id, email: req.user.email }];
+
+    if (patientRecord?._id) {
+      ownerFilters.push({ _id: req.params.id, patient: patientRecord._id });
+    }
+
+    const appointment = await Appointment.findOne({ $or: ownerFilters });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    if (appointment.status !== "pending") {
+      return res.status(400).json({
+        message: "Only pending appointment requests can be cancelled by the patient.",
+      });
+    }
+
+    const now = new Date();
+    const reason = "Cancelled by patient before clinic approval.";
+
+    appointment.status = "cancelled";
+    appointment.declineReason = reason;
+    appointment.statusUpdatedAt = now;
+    appointment.statusUpdatedBy = req.user.id;
+    appointment.statusUpdatedByEmail = req.user.email;
+    appointment.timeline = [
+      ...(appointment.timeline || []),
+      {
+        status: "cancelled",
+        action: "Appointment Cancelled by Patient",
+        performedBy: req.user.id,
+        performedByName: fullName(req.user) || req.user.email,
+        performedByEmail: req.user.email,
+        note: reason,
+        recordedAt: now,
+      },
+    ];
+
+    await appointment.save();
+
+    await AuditLog.create({
+      action: "Appointment Cancelled by Patient",
+      entityType: "Appointment",
+      entityId: appointment._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        appointmentId: appointment._id,
+        patientName: appointment.patientName,
+        service: appointment.service,
+        appointmentDate: appointment.appointmentDate,
+        appointmentTime: appointment.appointmentTime,
+      },
+    }).catch(() => {});
+
+    res.json({
+      message: "Appointment request cancelled successfully.",
+      appointment: sanitizeAppointment(appointment),
+    });
+  }),
+);
+
+router.patch(
+  "/my/:id/reschedule",
+  authenticate,
+  authorize("patient"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid appointment ID." });
+    }
+
+    const { appointmentDate, appointmentTime } = req.body || {};
+    const patientRecord = await Patient.findOne({ userId: req.user.id }).select("_id").lean();
+    const ownerFilters = [{ _id: req.params.id, email: req.user.email }];
+    const patientScope = [{ email: req.user.email }];
+
+    if (patientRecord?._id) {
+      ownerFilters.push({ _id: req.params.id, patient: patientRecord._id });
+      patientScope.push({ patient: patientRecord._id });
+    }
+
+    const appointment = await Appointment.findOne({ $or: ownerFilters });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    if (appointment.status !== "pending") {
+      return res.status(400).json({
+        message: "Only pending appointment requests can be rescheduled by the patient.",
+      });
+    }
+
+    if (!appointmentDate || !appointmentTime) {
+      return res.status(400).json({
+        message: "Please select a new appointment date and time.",
+      });
+    }
+
+    let validation;
+    try {
+      validation = await validateAppointmentSlot({
+        appointmentDate,
+        appointmentTime,
+        serviceName: appointment.service,
+        dentistName: appointment.dentistName,
+        excludeAppointmentId: appointment._id,
+      });
+    } catch (error) {
+      return res.status(error.status || 400).json({
+        message: error.message || "The selected appointment schedule is unavailable.",
+        errors: error.errors || {},
+      });
+    }
+
+    const dayRange = {
+      $gte: startOfDay(validation.parsedDate),
+      $lte: endOfDay(validation.parsedDate),
+    };
+    const duplicateActiveAppointment = await Appointment.findOne({
+      _id: { $ne: appointment._id },
+      $or: patientScope,
+      appointmentDate: dayRange,
+      service: appointment.service,
+      status: { $in: DUPLICATE_ACTIVE_STATUSES },
+    }).lean();
+
+    if (duplicateActiveAppointment) {
+      return res.status(409).json({
+        message: "You already have an active appointment for this service and date.",
+      });
+    }
+
+    const now = new Date();
+    const previousSchedule = {
+      appointmentDate: appointment.appointmentDate,
+      appointmentTime: appointment.appointmentTime,
+    };
+
+    appointment.appointmentDate = validation.parsedDate;
+    appointment.appointmentTime = validation.appointmentTime || String(appointmentTime).trim();
+    appointment.statusUpdatedAt = now;
+    appointment.statusUpdatedBy = req.user.id;
+    appointment.statusUpdatedByEmail = req.user.email;
+    appointment.serviceDurationSnapshot = appointment.serviceDurationSnapshot || validation.serviceDuration;
+    appointment.timeline = [
+      ...(appointment.timeline || []),
+      {
+        status: "pending",
+        action: "Appointment Rescheduled by Patient",
+        performedBy: req.user.id,
+        performedByName: fullName(req.user) || req.user.email,
+        performedByEmail: req.user.email,
+        note: `Patient requested a new schedule: ${validation.appointmentTime || appointmentTime}.`,
+        recordedAt: now,
+      },
+    ];
+
+    await appointment.save();
+
+    await AuditLog.create({
+      action: "Appointment Rescheduled by Patient",
+      entityType: "Appointment",
+      entityId: appointment._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        appointmentId: appointment._id,
+        patientName: appointment.patientName,
+        service: appointment.service,
+        previousSchedule,
+        newSchedule: {
+          appointmentDate: appointment.appointmentDate,
+          appointmentTime: appointment.appointmentTime,
+        },
+      },
+    }).catch(() => {});
+
+    res.json({
+      message: "Appointment request rescheduled successfully. It is still waiting for clinic approval.",
+      appointment: sanitizeAppointment(appointment),
+    });
+  }),
+);
+
 router.get(
   "/provider/reports",
   authenticate,

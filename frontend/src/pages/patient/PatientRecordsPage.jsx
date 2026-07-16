@@ -243,7 +243,7 @@ function PatientRecordsPage() {
           <div className="mt-5 space-y-3">
             <label className="relative block w-full">
               <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input className={`${inputClass} pl-11`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search date, dentist, treatment, tooth, notes..." />
+              <input className={`${inputClass} pl-11`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search date, dentist, treatment, notes..." />
             </label>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[9.5rem_12rem_minmax(12rem,1fr)_9.5rem_10.5rem_auto]">
               <select className={inputClass} value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} aria-label="Filter by date">
@@ -292,13 +292,12 @@ function PatientRecordsPage() {
             <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm text-slate-500">Loading records...</div>
           ) : treatmentRows.length ? (
             <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="min-w-[58rem] w-full text-left text-sm">
+              <table className="min-w-[50rem] w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Appointment Date</th>
                     <th className="px-4 py-3">Dentist</th>
                     <th className="px-4 py-3">Service/Treatment</th>
-                    <th className="px-4 py-3">Tooth Number</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Notes</th>
                   </tr>
@@ -309,7 +308,6 @@ function PatientRecordsPage() {
                       <td className="px-4 py-4 font-medium text-sky-950">{formatDate(row.appointmentDate)}</td>
                       <td className="px-4 py-4">{row.dentistName}</td>
                       <td className="px-4 py-4">{row.service}</td>
-                      <td className="px-4 py-4">{row.toothNumber || 'N/A'}</td>
                       <td className="px-4 py-4">{statusPill(row.status)}</td>
                       <td className="px-4 py-4 text-slate-500">{row.notes}</td>
                     </tr>

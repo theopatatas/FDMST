@@ -219,6 +219,7 @@ const validateAppointmentSlot = async ({
   dentistName,
   enforceOnlineBooking = true,
   autoSelectAlternative = false,
+  excludeAppointmentId = null,
 }) => {
   const parsedDate = parseAppointmentDate(appointmentDate);
   const settings = await getCurrentSettings();
@@ -293,6 +294,7 @@ const validateAppointmentSlot = async ({
   const appointmentsForDay = await Appointment.countDocuments({
     appointmentDate: dayRange,
     status: { $in: BLOCKING_APPOINTMENT_STATUSES },
+    ...(excludeAppointmentId ? { _id: { $ne: excludeAppointmentId } } : {}),
   });
 
   if (appointmentsForDay >= Number(appointmentSettings.maxAppointmentsPerDay || 20)) {
@@ -302,6 +304,7 @@ const validateAppointmentSlot = async ({
   const existingBookings = await Appointment.find({
     appointmentDate: dayRange,
     status: { $in: BLOCKING_APPOINTMENT_STATUSES },
+    ...(excludeAppointmentId ? { _id: { $ne: excludeAppointmentId } } : {}),
   })
     .select("appointmentTime dentistName status serviceDurationSnapshot")
     .lean();

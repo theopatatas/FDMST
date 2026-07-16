@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   FaCalendarCheck,
   FaClock,
@@ -17,6 +17,7 @@ import {
 } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
+import { getRoleHomePath } from '../../utils/auth.js'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
 
 const inputClass =
@@ -184,6 +185,7 @@ function Field({ label, icon: Icon, error, children }) {
 function BookAppointmentPage() {
   const toast = useToast()
   const location = useLocation()
+  const navigate = useNavigate()
   const [user] = useState(() => authStorage.getUser())
   const availabilityRequestRef = useRef(0)
   const promoRequestRef = useRef(0)
@@ -339,6 +341,17 @@ function BookAppointmentPage() {
         setBookingDataError('Unable to load current clinic services. Please try again later.')
       }
 
+      if (profileResult.status === 'fulfilled' && profileResult.value.user) {
+        const profileUser = profileResult.value.user
+        authStorage.saveSession({ user: profileUser })
+
+        if (String(profileUser.role || '').toLowerCase() !== 'patient') {
+          toast.error('Please sign in with a patient account to book an appointment.')
+          navigate(getRoleHomePath(profileUser.role), { replace: true })
+          return
+        }
+      }
+
       if (!preferredDentistAppliedRef.current && profileResult.status === 'fulfilled' && profileResult.value.user?.patient?.preferredDentistName) {
         const preferredDentist = profileResult.value.user.patient.preferredDentistName
         if (loadedDentists.some((dentist) => dentist.name === preferredDentist)) {
@@ -351,7 +364,7 @@ function BookAppointmentPage() {
     }
 
     loadBookingData()
-  }, [])
+  }, [navigate, toast])
 
   useEffect(() => {
     if (preferredDentistAppliedRef.current || !dentists.length || form.dentistName) return

@@ -192,6 +192,15 @@ export const fdmstApi = {
       body: JSON.stringify(payload),
     }),
   getMyAppointments: () => request('/appointments/my'),
+  cancelMyAppointment: (id) =>
+    request(`/appointments/my/${id}/cancel`, {
+      method: 'PATCH',
+    }),
+  rescheduleMyAppointment: (id, payload) =>
+    request(`/appointments/my/${id}/reschedule`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   getMyDentalRecords: () => request('/dentalrecords/my'),
   getMyCarePatients: (filters = {}) => {
     const params = new URLSearchParams()

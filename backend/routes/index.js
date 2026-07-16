@@ -25,6 +25,7 @@ const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
 const { expirePromotions } = require("../utils/promotionExpiry");
 
 const router = express.Router();
+const DEFAULT_PATIENT_TEMPORARY_PASSWORD = "12345678";
 
 const validatePromotionImage = (value) => {
   const imageValue = value?.trim() || "";
@@ -271,6 +272,30 @@ const verifyAdminPasswordForPatientAction = async (req) => {
 const withoutAdminPassword = (body) => {
   const { adminPassword, ...safeBody } = body || {};
   return safeBody;
+};
+
+const sendPatientTemporaryPasswordEmail = async ({ patient, temporaryPassword }) => {
+  if (!patient?.email || !temporaryPassword) return;
+
+  const patientName = [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient";
+  const message = `Hello ${patientName}, your Flores-Dizon Dental Clinic patient account has been created. Your temporary password is ${temporaryPassword}. Please sign in and change your password as soon as possible.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.6;">
+      <h2 style="color:#082f49;">Flores-Dizon Dental Clinic Patient Account</h2>
+      <p>Hello <strong>${patientName}</strong>,</p>
+      <p>Your patient account has been created.</p>
+      <p>Your temporary password is:</p>
+      <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px; color: #0c4a6e;">${temporaryPassword}</p>
+      <p>Please sign in with your email address and change your password as soon as possible.</p>
+    </div>
+  `;
+
+  await sendMail({
+    to: patient.email,
+    subject: "Your Temporary Patient Password - Flores-Dizon Dental Clinic",
+    message,
+    html,
+  }).catch(() => {});
 };
 
 const toStockStatus = ({ quantity = 0, reorderLevel = 0 }) => {
@@ -1306,13 +1331,75 @@ router.get("/patients/my-care/:id", authorize("staff", "dentist"), async (req, r
     next(error);
   }
 });
+
+router.post("/patients", authorize("admin", "staff"), async (req, res, next) => {
+  try {
+    await verifyAdminPasswordForPatientAction(req);
+
+    const temporaryPassword = String(req.body.temporaryPassword || DEFAULT_PATIENT_TEMPORARY_PASSWORD).trim();
+    const username = String(req.body.username || "").trim();
+
+    if (temporaryPassword && temporaryPassword.length < 8) {
+      const error = new Error("Temporary password must be at least 8 characters.");
+      error.status = 400;
+      error.errors = { temporaryPassword: "Temporary password must be at least 8 characters." };
+      throw error;
+    }
+
+    if (username && await User.findOne({ username }).select("_id").lean()) {
+      const error = new Error("This username is already registered.");
+      error.status = 409;
+      error.errors = { username: "This username is already registered." };
+      throw error;
+    }
+
+    const patient = await Patient.create(await preparePatientCreateBody(withoutAdminPassword(req.body)));
+
+    if (temporaryPassword && patient.email && !patient.userId) {
+      const passwordHash = await hashPasswordScrypt(temporaryPassword);
+      const user = await User.create({
+        firstName: patient.firstName,
+        lastName: patient.lastName,
+        email: patient.email,
+        username: username || undefined,
+        contactNumber: patient.contactNumber,
+        passwordHash,
+        role: "patient",
+        accountStatus: patient.registrationStatus === "verified" ? "verified_patient" : "unverified_user",
+        status: patient.status || "active",
+      });
+      patient.userId = user._id;
+      if (username) patient.username = username;
+      await patient.save();
+      await sendPatientTemporaryPasswordEmail({ patient, temporaryPassword });
+    }
+
+    await AuditLog.create({
+      action: "Patient Created",
+      entityType: "Patient",
+      entityId: patient._id,
+      performedBy: req.user.id,
+      performedByEmail: req.user.email,
+      metadata: {
+        patientId: patient.patientId,
+        status: getPatientDisplayStatus(patient),
+        createdByRole: req.user.role,
+      },
+    });
+
+    res.status(201).json(patient);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.use(
   "/patients",
   authorize("admin"),
   createCrudRouter(Patient, {
     beforeCreate: async (body, req) => {
       await verifyAdminPasswordForPatientAction(req);
-      const temporaryPassword = String(body.temporaryPassword || "").trim();
+      const temporaryPassword = String(body.temporaryPassword || DEFAULT_PATIENT_TEMPORARY_PASSWORD).trim();
       if (temporaryPassword && temporaryPassword.length < 8) {
         const error = new Error("Temporary password must be at least 8 characters.");
         error.status = 400;
@@ -1328,7 +1415,7 @@ router.use(
       return preparePatientCreateBody(withoutAdminPassword(body));
     },
     afterCreate: async (patient, req) => {
-      const temporaryPassword = String(req.body.temporaryPassword || "").trim();
+      const temporaryPassword = String(req.body.temporaryPassword || DEFAULT_PATIENT_TEMPORARY_PASSWORD).trim();
       const username = String(req.body.username || "").trim();
 
       if (temporaryPassword && patient.email && !patient.userId) {
@@ -1347,6 +1434,7 @@ router.use(
         patient.userId = user._id;
         if (username) patient.username = username;
         await patient.save();
+        await sendPatientTemporaryPasswordEmail({ patient, temporaryPassword });
       }
 
       await AuditLog.create({

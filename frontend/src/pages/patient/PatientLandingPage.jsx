@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   FaArrowRight,
-  FaBell,
   FaCalendarCheck,
   FaCheckCircle,
   FaClock,
@@ -86,17 +85,21 @@ function formatClock(date = new Date()) {
   })
 }
 
-function formatRelativeTime(value) {
-  if (!value) return 'Just now'
+function toDateInputValue(value) {
+  if (!value) return ''
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Just now'
-  const minutes = Math.max(Math.floor((Date.now() - date.getTime()) / 60000), 0)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
-  const days = Math.floor(hours / 24)
-  return `${days} day${days === 1 ? '' : 's'} ago`
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function addDaysInputValue(days) {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + days)
+  return toDateInputValue(date)
 }
 
 function getDisplayName(user) {
@@ -110,6 +113,7 @@ function getFirstName(user) {
 function isUpcoming(appointment) {
   const status = appointment.status
   if (status === 'cancelled' || status === 'declined' || status === 'completed' || status === 'no_show') return false
+  if (status === 'pending') return true
 
   if (!appointment.appointmentDate) return true
 
@@ -227,7 +231,7 @@ function AppointmentsPreview({ appointments, isLoading, onSelect }) {
             </tr>
           </thead>
           <tbody>
-            {appointments.slice(0, 6).map((appointment) => (
+            {appointments.map((appointment) => (
               <tr key={appointment.id} className="border-t border-slate-100 transition hover:bg-slate-50">
                 <td className="px-4 py-4">
                   <div className="flex items-center gap-3">
@@ -260,7 +264,7 @@ function AppointmentsPreview({ appointments, isLoading, onSelect }) {
       </div>
 
       <div className="grid gap-4 lg:hidden">
-        {appointments.slice(0, 6).map((appointment) => (
+        {appointments.map((appointment) => (
           <article key={appointment.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -289,8 +293,13 @@ function PatientLandingPage() {
   const [appointments, setAppointments] = useState([])
   const [records, setRecords] = useState([])
   const [promotions, setPromotions] = useState([])
-  const [notifications, setNotifications] = useState([])
   const [selectedAppointment, setSelectedAppointment] = useState(null)
+  const [isUpdatingAppointment, setIsUpdatingAppointment] = useState(false)
+  const [isRescheduling, setIsRescheduling] = useState(false)
+  const [rescheduleForm, setRescheduleForm] = useState({ date: '', time: '' })
+  const [availableRescheduleSlots, setAvailableRescheduleSlots] = useState([])
+  const [rescheduleMessage, setRescheduleMessage] = useState('')
+  const [isLoadingRescheduleSlots, setIsLoadingRescheduleSlots] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [now, setNow] = useState(() => new Date())
 
@@ -314,15 +323,13 @@ function PatientLandingPage() {
       fdmstApi.getMyAppointments(),
       fdmstApi.getMyDentalRecords(),
       fdmstApi.list('promotions'),
-      fdmstApi.getNotifications(),
       fdmstApi.getProfile(),
     ])
-      .then(([appointmentResult, recordsResult, promotionsResult, notificationsResult, profileResult]) => {
+      .then(([appointmentResult, recordsResult, promotionsResult, profileResult]) => {
         if (!isActive) return
         setAppointments(appointmentResult.status === 'fulfilled' && Array.isArray(appointmentResult.value.data) ? appointmentResult.value.data : [])
         setRecords(recordsResult.status === 'fulfilled' && Array.isArray(recordsResult.value.data) ? recordsResult.value.data : [])
         setPromotions(promotionsResult.status === 'fulfilled' && Array.isArray(promotionsResult.value.data) ? promotionsResult.value.data : [])
-        setNotifications(notificationsResult.status === 'fulfilled' && Array.isArray(notificationsResult.value.data) ? notificationsResult.value.data : [])
         if (profileResult.status === 'fulfilled' && profileResult.value.user) {
           authStorage.saveSession({ user: profileResult.value.user })
           setUser(profileResult.value.user)
@@ -369,6 +376,45 @@ function PatientLandingPage() {
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, syncUser)
   }, [])
 
+  useEffect(() => {
+    if (!isRescheduling || !selectedAppointment || !rescheduleForm.date) {
+      setAvailableRescheduleSlots([])
+      setRescheduleMessage('')
+      return undefined
+    }
+
+    let isActive = true
+    setIsLoadingRescheduleSlots(true)
+    setRescheduleMessage('')
+
+    fdmstApi.getAppointmentAvailability({
+      date: rescheduleForm.date,
+      dentistName: selectedAppointment.dentistName,
+      service: selectedAppointment.service,
+    })
+      .then((result) => {
+        if (!isActive) return
+        const slots = Array.isArray(result.slots) ? result.slots : []
+        setAvailableRescheduleSlots(slots)
+        setRescheduleMessage(slots.length ? '' : result.message || 'No available appointments for this date.')
+        setRescheduleForm((current) => (
+          current.time && !slots.includes(current.time) ? { ...current, time: '' } : current
+        ))
+      })
+      .catch((error) => {
+        if (!isActive) return
+        setAvailableRescheduleSlots([])
+        setRescheduleMessage(error.message || 'Unable to load available appointment times.')
+      })
+      .finally(() => {
+        if (isActive) setIsLoadingRescheduleSlots(false)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [isRescheduling, rescheduleForm.date, selectedAppointment])
+
   const firstName = getFirstName(user)
   const upcomingAppointments = useMemo(() => appointments.filter(isUpcoming), [appointments])
   const nextAppointment = upcomingAppointments[0]
@@ -379,6 +425,75 @@ function PatientLandingPage() {
     [nextAppointment, upcomingAppointments],
   )
   const currentProgressIndex = activeAppointment ? Math.max(progressSteps.indexOf(activeAppointment.status), 0) : -1
+
+  const closeAppointmentModal = useCallback(() => {
+    setSelectedAppointment(null)
+    setIsRescheduling(false)
+    setRescheduleForm({ date: '', time: '' })
+    setAvailableRescheduleSlots([])
+    setRescheduleMessage('')
+  }, [])
+
+  const updateAppointmentInState = useCallback((updatedAppointment) => {
+    setAppointments((current) => current.map((appointment) => (
+      appointment.id === updatedAppointment.id ? updatedAppointment : appointment
+    )))
+    setSelectedAppointment(updatedAppointment)
+  }, [])
+
+  const handleCancelAppointment = useCallback(async () => {
+    if (!selectedAppointment || selectedAppointment.status !== 'pending') return
+
+    const confirmed = window.confirm('Cancel this pending appointment request?')
+    if (!confirmed) return
+
+    setIsUpdatingAppointment(true)
+    try {
+      const result = await fdmstApi.cancelMyAppointment(selectedAppointment.id)
+      if (result.appointment) updateAppointmentInState(result.appointment)
+      setIsRescheduling(false)
+      toast.success(result.message || 'Appointment request cancelled successfully.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to cancel this appointment request.')
+    } finally {
+      setIsUpdatingAppointment(false)
+    }
+  }, [selectedAppointment, toast, updateAppointmentInState])
+
+  const openReschedulePanel = useCallback(() => {
+    if (!selectedAppointment) return
+    setRescheduleForm({
+      date: toDateInputValue(selectedAppointment.appointmentDate),
+      time: '',
+    })
+    setIsRescheduling(true)
+  }, [selectedAppointment])
+
+  const handleSubmitReschedule = useCallback(async (event) => {
+    event.preventDefault()
+    if (!selectedAppointment || selectedAppointment.status !== 'pending') return
+
+    if (!rescheduleForm.date || !rescheduleForm.time) {
+      toast.error('Please select a new appointment date and time.')
+      return
+    }
+
+    setIsUpdatingAppointment(true)
+    try {
+      const result = await fdmstApi.rescheduleMyAppointment(selectedAppointment.id, {
+        appointmentDate: rescheduleForm.date,
+        appointmentTime: rescheduleForm.time,
+      })
+      if (result.appointment) updateAppointmentInState(result.appointment)
+      setIsRescheduling(false)
+      setRescheduleForm({ date: '', time: '' })
+      toast.success(result.message || 'Appointment request rescheduled successfully.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to reschedule this appointment request.')
+    } finally {
+      setIsUpdatingAppointment(false)
+    }
+  }, [rescheduleForm.date, rescheduleForm.time, selectedAppointment, toast, updateAppointmentInState])
 
   if (!user) {
     return (
@@ -519,32 +634,17 @@ function PatientLandingPage() {
 
         <section className="mt-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-sky-950">Recent Notifications</h2>
-                <p className="mt-2 text-sm text-slate-500">Latest appointment, promotion, and account updates.</p>
+                <h2 className="text-xl font-semibold text-sky-950">Upcoming Appointments</h2>
+                <p className="mt-2 text-sm text-slate-500">Your scheduled visits and pending booking requests.</p>
               </div>
-              <Link to="/patient/notifications" className="text-sm font-semibold text-sky-950 hover:text-amber-600">View All</Link>
+              <Link to="/patient/book-appointment" className="inline-flex h-11 items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
+                Book Appointment
+              </Link>
             </div>
-            <div className="mt-5 grid gap-3">
-              {notifications.slice(0, 5).length ? notifications.slice(0, 5).map((notification) => (
-                <Link
-                  key={notification.id}
-                  to="/patient/notifications"
-                  className={`flex gap-3 rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${notification.isRead ? 'border-slate-200 bg-white' : 'border-sky-100 bg-sky-50'}`}
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
-                    <FaBell className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-sky-950">{notification.title || 'Clinic update'}</p>
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{notification.message || 'No additional details.'}</p>
-                    <p className="mt-2 text-xs font-medium text-slate-400">{formatRelativeTime(notification.createdAt || notification.scheduledFor)}</p>
-                  </div>
-                </Link>
-              )) : (
-                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">No notifications yet.</p>
-              )}
+            <div className="mt-6">
+              <AppointmentsPreview appointments={upcomingAppointments} isLoading={isLoading} onSelect={setSelectedAppointment} />
             </div>
           </article>
 
@@ -563,33 +663,17 @@ function PatientLandingPage() {
           </article>
         </section>
 
-        <section className="mt-10">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-sky-950">Upcoming Appointments</h2>
-                <p className="mt-2 text-sm text-slate-500">Your scheduled visits and pending booking requests.</p>
-              </div>
-              <Link to="/patient/book-appointment" className="inline-flex h-11 items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
-                Book Appointment
-              </Link>
-            </div>
-            <div className="mt-6">
-              <AppointmentsPreview appointments={upcomingAppointments} isLoading={isLoading} onSelect={setSelectedAppointment} />
-            </div>
-          </article>
-        </section>
       </div>
 
       {selectedAppointment ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Appointment Details</p>
                 <h3 className="mt-2 text-2xl font-semibold text-sky-950">{selectedAppointment.service || 'Dental Visit'}</h3>
               </div>
-              <button type="button" onClick={() => setSelectedAppointment(null)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close appointment details">
+              <button type="button" onClick={closeAppointmentModal} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close appointment details">
                 x
               </button>
             </div>
@@ -603,6 +687,89 @@ function PatientLandingPage() {
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Status</dt><dd><AppointmentStatus status={selectedAppointment.status} /></dd></div>
             </dl>
             <AppointmentTimeline appointment={selectedAppointment} />
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              {selectedAppointment.status === 'pending' ? (
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-sky-950">Pending Request Actions</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">You can reschedule or cancel only before the clinic approves this request.</p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={openReschedulePanel}
+                        disabled={isUpdatingAppointment}
+                        className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-sky-950 ring-1 ring-slate-200 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelAppointment}
+                        disabled={isUpdatingAppointment}
+                        className="inline-flex h-10 items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel Appointment
+                      </button>
+                    </div>
+                  </div>
+
+                  {isRescheduling ? (
+                    <form onSubmit={handleSubmitReschedule} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">New Date</span>
+                          <input
+                            type="date"
+                            min={addDaysInputValue(0)}
+                            max={addDaysInputValue(14)}
+                            value={rescheduleForm.date}
+                            onChange={(event) => setRescheduleForm({ date: event.target.value, time: '' })}
+                            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-sky-950 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available Time</span>
+                          <select
+                            value={rescheduleForm.time}
+                            onChange={(event) => setRescheduleForm((current) => ({ ...current, time: event.target.value }))}
+                            disabled={!rescheduleForm.date || isLoadingRescheduleSlots || !availableRescheduleSlots.length}
+                            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-sky-950 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                          >
+                            <option value="">{isLoadingRescheduleSlots ? 'Loading times...' : 'Select time'}</option>
+                            {availableRescheduleSlots.map((slot) => (
+                              <option key={slot} value={slot}>{slot}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      {rescheduleMessage ? (
+                        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">{rescheduleMessage}</p>
+                      ) : null}
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setIsRescheduling(false)}
+                          className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                        >
+                          Close
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isUpdatingAppointment || isLoadingRescheduleSlots || !rescheduleForm.date || !rescheduleForm.time}
+                          className="inline-flex h-10 items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Save New Schedule
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-sm font-medium text-slate-500">Cancel and reschedule options are available only while the appointment request is pending clinic approval.</p>
+              )}
+            </div>
           </div>
         </div>
       ) : null}

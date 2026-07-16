@@ -41,7 +41,6 @@ const initialForm = {
   emergencyContactName: '',
   emergencyContactNumber: '',
   username: '',
-  temporaryPassword: '',
   assignedDentist: '',
   assignedDentistName: '',
   registrationStatus: 'unverified',
@@ -151,16 +150,16 @@ function AdminPatientsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [patientResponse, appointmentResponse, recordResponse, staffResponse] = await Promise.all([
+      const [patientResponse, appointmentResponse, recordResponse, dentistResponse] = await Promise.all([
         fdmstApi.list('patients'),
         fdmstApi.getAppointments(),
         fdmstApi.list('dentalrecords'),
-        fdmstApi.getStaff(),
+        fdmstApi.getDentists(),
       ])
       setPatients(patientResponse.data || [])
       setAppointments(appointmentResponse.data || [])
       setRecords(recordResponse.data || [])
-      setDentists((staffResponse.data || []).filter((user) => user.role === 'dentist' && (user.status || 'active') === 'active'))
+      setDentists(dentistResponse.data || [])
     } catch (error) {
       toast.error(error.message || 'Unable to load patient records.')
     } finally {
@@ -241,8 +240,8 @@ function AdminPatientsPage() {
     const { name, value } = event.target
     const nextValue = ['contactNumber', 'emergencyContactNumber'].includes(name) ? digitsOnly(value) : value
     if (name === 'assignedDentist') {
-      const dentist = dentists.find((item) => String(item._id) === value)
-      setForm((current) => ({ ...current, assignedDentist: value, assignedDentistName: dentist ? `${dentist.firstName || ''} ${dentist.lastName || ''}`.trim() : '' }))
+      const dentist = dentists.find((item) => String(item.id) === value)
+      setForm((current) => ({ ...current, assignedDentist: value, assignedDentistName: dentist?.name || '' }))
       return
     }
     setForm((current) => ({ ...current, [name]: nextValue }))
@@ -278,7 +277,6 @@ function AdminPatientsPage() {
       emergencyContactName: form.emergencyContactName.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
       username: form.username.trim(),
-      temporaryPassword: form.temporaryPassword.trim(),
     }
 
     openConfirmation({
@@ -306,7 +304,6 @@ function AdminPatientsPage() {
       emergencyContactName: patient.emergencyContactName || '',
       emergencyContactNumber: patient.emergencyContactNumber || '',
       username: patient.username || '',
-      temporaryPassword: '',
       assignedDentist: patient.assignedDentist || '',
       assignedDentistName: patient.assignedDentistName || '',
     })
@@ -439,7 +436,7 @@ function AdminPatientsPage() {
             <select className={`${patientInputClass} h-11`} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)}>
               <option value="all">All Dentists</option>
               {dentists.map((dentist) => (
-                <option key={dentist._id} value={dentist._id}>{[dentist.firstName, dentist.lastName].filter(Boolean).join(' ')}</option>
+                <option key={dentist.id} value={dentist.id}>{dentist.name}</option>
               ))}
             </select>
             <input className={`${patientInputClass} h-11`} type="date" value={registrationDateFilter} onChange={(event) => setRegistrationDateFilter(event.target.value)} aria-label="Registration date" />
@@ -604,7 +601,7 @@ function AdminPatientsPage() {
                     <select className={patientIconInputClass} name="assignedDentist" value={form.assignedDentist || ''} onChange={handleChange}>
                       <option value="">No assigned dentist</option>
                       {dentists.map((dentist) => (
-                        <option key={dentist._id} value={dentist._id}>{[dentist.firstName, dentist.lastName].filter(Boolean).join(' ')}</option>
+                        <option key={dentist.id} value={dentist.id}>{dentist.name}</option>
                       ))}
                     </select>
                   </IconField>
@@ -652,13 +649,6 @@ function AdminPatientsPage() {
                     <input className={patientIconInputClass} name="username" value={form.username || ''} onChange={handleChange} placeholder="Optional account username" />
                   </IconField>
                   {fieldErrors.username ? <span className="text-xs font-medium text-red-600">{fieldErrors.username}</span> : null}
-                </label>
-                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
-                  Temporary Password
-                  <IconField icon={FaShieldAlt}>
-                    <input className={patientIconInputClass} name="temporaryPassword" type="password" value={form.temporaryPassword || ''} onChange={handleChange} placeholder="Optional temporary password" />
-                  </IconField>
-                  {fieldErrors.temporaryPassword ? <span className="text-xs font-medium text-red-600">{fieldErrors.temporaryPassword}</span> : null}
                 </label>
               </div>
 

@@ -24,7 +24,7 @@ const authenticate = asyncHandler(async (req, res, next) => {
     req.user = {
       id: user._id,
       email: user.email,
-      role: user.role,
+      role: String(user.role || "").toLowerCase(),
       firstName: user.firstName,
       lastName: user.lastName,
       contactNumber: user.contactNumber,
@@ -40,7 +40,10 @@ const authenticate = asyncHandler(async (req, res, next) => {
 const authorize =
   (...roles) =>
   (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    const userRole = String(req.user?.role || "").toLowerCase();
+    const allowedRoles = roles.map((role) => String(role).toLowerCase());
+
+    if (!req.user || !allowedRoles.includes(userRole)) {
       return res.status(403).json({ message: "You do not have permission to access this resource." });
     }
 
