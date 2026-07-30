@@ -7,7 +7,6 @@ import {
   FaCog,
   FaDatabase,
   FaEdit,
-  FaEnvelope,
   FaFileExcel,
   FaFilePdf,
   FaHistory,
@@ -55,7 +54,7 @@ const defaultSettings = {
   contactNumber: '',
   email: '',
   website: '',
-  operatingHours: 'Monday to Saturday, 9:00 AM - 6:00 PM',
+  operatingHours: 'Monday to Saturday, 9:00 AM - 5:00 PM',
   services: officialServices.map((serviceName) => ({
     serviceName,
     category: serviceName.includes('Surgery') || serviceName.includes('Extraction') ? 'Surgery' : serviceName.includes('Braces') ? 'Orthodontics' : 'General Dentistry',
@@ -65,7 +64,7 @@ const defaultSettings = {
   })),
   appointmentSettings: {
     openingTime: '09:00',
-    closingTime: '18:00',
+    closingTime: '17:00',
     appointmentDuration: 30,
     workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
     maxAppointmentsPerDay: 20,

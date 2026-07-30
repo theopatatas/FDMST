@@ -65,6 +65,11 @@ function userToForm(user) {
     specialization: user?.specialization || '',
     preferredDentistName: patient.preferredDentistName || '',
     dateOfBirth: toDateInputValue(patient.dateOfBirth),
+    guardianName: patient.guardianName || '',
+    guardianRelationship: patient.guardianRelationship || '',
+    guardianContactNumber: patient.guardianContactNumber || '',
+    guardianEmail: patient.guardianEmail || '',
+    guardianAddress: patient.guardianAddress || '',
     gender: patient.gender || '',
     address: patient.address || '',
     emergencyContactName: patient.emergencyContactName || '',
@@ -81,6 +86,18 @@ function userToForm(user) {
 
 function getDisplayName(user) {
   return [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'FDMST User'
+}
+
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null
+  const birthDate = new Date(dateOfBirth)
+  const today = new Date()
+  if (Number.isNaN(birthDate.getTime()) || birthDate > today) return null
+
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const monthDifference = today.getMonth() - birthDate.getMonth()
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) age -= 1
+  return age >= 0 ? age : null
 }
 
 function getInitials(user) {
@@ -238,14 +255,12 @@ function ProfilePage() {
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [loginHistoryPage, setLoginHistoryPage] = useState(1)
   const [dentists, setDentists] = useState([])
-  const [patientRecords, setPatientRecords] = useState([])
   const [patientAppointments, setPatientAppointments] = useState([])
 
   const user = useMemo(() => layoutUser || authStorage.getUser(), [layoutUser])
   const patient = user?.patient || {}
   const isAdmin = user?.role === 'admin'
-  const isStaffProfile = ['staff', 'dentist'].includes(user?.role)
-  const isDentist = user?.role === 'dentist'
+  const isStaffProfile = user?.role === 'staff'
   const deviceInfo = useMemo(() => getDeviceInfo(), [])
   const loginHistory = user?.loginHistory || []
   const loginHistoryPageSize = 5
@@ -293,10 +308,10 @@ function ProfilePage() {
     if (user?.role !== 'patient') return undefined
 
     let isActive = true
-    fdmstApi.getDentists()
+    fdmstApi.getClinicDentist()
       .then((response) => {
         if (!isActive) return
-        setDentists(Array.isArray(response.data) ? response.data : [])
+        setDentists(response.data ? [response.data] : [])
       })
       .catch(() => {
         if (isActive) setDentists([])
@@ -314,12 +329,10 @@ function ProfilePage() {
     fdmstApi.getMyDentalRecords()
       .then((response) => {
         if (!isActive) return
-        setPatientRecords(Array.isArray(response.data) ? response.data : [])
         setPatientAppointments(Array.isArray(response.appointments) ? response.appointments : [])
       })
       .catch(() => {
         if (!isActive) return
-        setPatientRecords([])
         setPatientAppointments([])
       })
 
@@ -370,7 +383,7 @@ function ProfilePage() {
 
   const handleChange = useCallback((event) => {
     const { name, value } = event.target
-    const nextValue = ['contactNumber', 'emergencyContactNumber', 'alternateContactNumber'].includes(name)
+    const nextValue = ['contactNumber', 'emergencyContactNumber', 'alternateContactNumber', 'guardianContactNumber'].includes(name)
       ? digitsOnly(value)
       : value
 
@@ -436,6 +449,30 @@ function ProfilePage() {
     }
 
     if (user?.role === 'patient') {
+      const age = calculateAge(form.dateOfBirth)
+      if (age !== null && age < 18) {
+        const guardianErrors = {}
+        if (!form.guardianName.trim()) guardianErrors.guardianName = 'Parent/guardian full name is required.'
+        if (!form.guardianRelationship.trim()) guardianErrors.guardianRelationship = 'Relationship to patient is required.'
+        const guardianMobileError = validateMobileNumber(form.guardianContactNumber, { required: true })
+        if (guardianMobileError) guardianErrors.guardianContactNumber = guardianMobileError
+        if (Object.keys(guardianErrors).length > 0) {
+          setFieldErrors(guardianErrors)
+          return 'Complete the required parent/guardian information.'
+        }
+      } else if (form.guardianContactNumber) {
+        const guardianMobileError = validateMobileNumber(form.guardianContactNumber)
+        if (guardianMobileError) {
+          setFieldErrors({ guardianContactNumber: guardianMobileError })
+          return guardianMobileError
+        }
+      }
+
+      if (form.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.guardianEmail.trim())) {
+        setFieldErrors({ guardianEmail: 'Enter a valid guardian email address.' })
+        return 'Enter a valid guardian email address.'
+      }
+
       const hasEmergencyInfo = form.emergencyContactName || form.emergencyContactRelationship || form.emergencyContactNumber
       if (hasEmergencyInfo && (!form.emergencyContactName.trim() || !form.emergencyContactRelationship.trim() || !form.emergencyContactNumber.trim())) {
         setFieldErrors({ emergencyContact: 'Complete the emergency contact name, relationship, and contact number.' })
@@ -520,14 +557,14 @@ function ProfilePage() {
         payload.recoveryEmail = form.recoveryEmail.trim()
       }
 
-      if (user?.role === 'dentist') {
-        payload.licenseNumber = form.licenseNumber.trim()
-        payload.specialization = form.specialization.trim()
-      }
-
       if (user?.role === 'patient') {
         payload.preferredDentistName = form.preferredDentistName
         payload.dateOfBirth = form.dateOfBirth
+        payload.guardianName = form.guardianName.trim()
+        payload.guardianRelationship = form.guardianRelationship.trim()
+        payload.guardianContactNumber = form.guardianContactNumber.trim()
+        payload.guardianEmail = form.guardianEmail.trim()
+        payload.guardianAddress = form.guardianAddress.trim()
         payload.gender = form.gender
         payload.address = form.address.trim()
         payload.emergencyContactName = form.emergencyContactName.trim()
@@ -656,10 +693,10 @@ function ProfilePage() {
                   </span>
                 )}
                 <div>
-                  <p className="text-sm font-medium uppercase tracking-[0.2em] text-sky-200">{isDentist ? 'Dentist Profile' : 'Staff Profile'}</p>
+                  <p className="text-sm font-medium uppercase tracking-[0.2em] text-sky-200">Staff Profile</p>
                   <h2 className="mt-2 text-3xl font-semibold">{getDisplayName(user)}</h2>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-sky-100 ring-1 ring-white/15">{isDentist ? 'Dentist' : 'Staff'}</span>
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-sky-100 ring-1 ring-white/15">Staff</span>
                     <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-emerald-100 ring-1 ring-emerald-200/20">{formatAccountStatus(user?.accountStatus)}</span>
                   </div>
                 </div>
@@ -768,20 +805,8 @@ function ProfilePage() {
                 <div className="mt-6 grid gap-5">
                   <label className="grid gap-2 text-sm font-semibold text-slate-500">
                     Position
-                    <input className={`${inputClass} bg-slate-50`} value={isDentist ? 'Dentist' : 'Staff'} readOnly disabled />
+                    <input className={`${inputClass} bg-slate-50`} value="Staff" readOnly disabled />
                   </label>
-                  {isDentist ? (
-                    <div className="grid gap-5 sm:grid-cols-2">
-                      <label className="grid gap-2 text-sm font-semibold text-slate-500">
-                        License Number
-                        <input className={inputClass} name="licenseNumber" value={form.licenseNumber} onChange={handleChange} disabled={!isEditingProfile} placeholder="Dental license number" />
-                      </label>
-                      <label className="grid gap-2 text-sm font-semibold text-slate-500">
-                        Specialization
-                        <input className={inputClass} name="specialization" value={form.specialization} onChange={handleChange} disabled={!isEditingProfile} placeholder="Orthodontics, Surgery, etc." />
-                      </label>
-                    </div>
-                  ) : null}
                 </div>
               </article>
 
@@ -1215,18 +1240,95 @@ function ProfilePage() {
               </label>
               {!isAdmin ? (
                 <>
-                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
-                    Date of Birth
-                    <input
-                      className={inputClass}
-                      type="date"
+	                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+	                    Date of Birth
+	                    <input
+	                      className={inputClass}
+	                      type="date"
                       name="dateOfBirth"
                       value={form.dateOfBirth}
-                      onChange={handleChange}
-                    />
-                  </label>
-                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
-                    Gender
+	                      onChange={handleChange}
+	                    />
+	                  </label>
+		                  {(() => {
+		                    const age = calculateAge(form.dateOfBirth)
+		                    return age !== null && age < 18 ? (
+		                      <section className="grid gap-4 rounded-3xl border border-amber-100 bg-amber-50/70 p-5 sm:col-span-2">
+		                        <div>
+		                          <h3 className="text-base font-bold text-sky-950">Parent/Guardian Information</h3>
+		                          <p className="mt-1 text-sm font-medium leading-6 text-slate-500">
+		                            The parent/guardian will serve as the primary contact for this minor patient.
+		                          </p>
+		                        </div>
+		                        <div className="grid gap-4 sm:grid-cols-2">
+		                          <label className="grid gap-2 text-sm font-semibold text-slate-500">
+		                            Parent/Guardian Full Name
+		                            <input
+		                              className={inputClass}
+		                              type="text"
+		                              name="guardianName"
+		                              value={form.guardianName}
+		                              onChange={handleChange}
+		                              placeholder="Parent or legal guardian full name"
+		                              required
+		                            />
+		                            {fieldErrors.guardianName ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianName}</span> : null}
+		                          </label>
+		                          <label className="grid gap-2 text-sm font-semibold text-slate-500">
+		                            Relationship to Patient
+		                            <select className={inputClass} name="guardianRelationship" value={form.guardianRelationship} onChange={handleChange} required>
+		                              <option value="">Select relationship</option>
+		                              <option value="Mother">Mother</option>
+		                              <option value="Father">Father</option>
+		                              <option value="Legal Guardian">Legal Guardian</option>
+		                              <option value="Grandparent">Grandparent</option>
+		                              <option value="Relative">Relative</option>
+		                            </select>
+		                            {fieldErrors.guardianRelationship ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianRelationship}</span> : null}
+		                          </label>
+		                          <label className="grid gap-2 text-sm font-semibold text-slate-500">
+		                            Contact Number
+		                            <input
+		                              className={inputClass}
+		                              type="tel"
+		                              name="guardianContactNumber"
+		                              inputMode="numeric"
+		                              maxLength={11}
+		                              value={form.guardianContactNumber}
+		                              onChange={handleChange}
+		                              placeholder="09XXXXXXXXX"
+		                              required
+		                            />
+		                            {fieldErrors.guardianContactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianContactNumber}</span> : null}
+		                          </label>
+		                          <label className="grid gap-2 text-sm font-semibold text-slate-500">
+		                            Email Address (if applicable)
+		                            <input
+		                              className={inputClass}
+		                              type="email"
+		                              name="guardianEmail"
+		                              value={form.guardianEmail}
+		                              onChange={handleChange}
+		                              placeholder="guardian@email.com"
+		                            />
+		                            {fieldErrors.guardianEmail ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianEmail}</span> : null}
+		                          </label>
+		                          <label className="grid gap-2 text-sm font-semibold text-slate-500 sm:col-span-2">
+		                            Home Address (optional)
+		                            <textarea
+		                              className={`${inputClass} min-h-24 py-4`}
+		                              name="guardianAddress"
+		                              value={form.guardianAddress}
+		                              onChange={handleChange}
+		                              placeholder="Leave blank if same as patient address"
+		                            />
+		                          </label>
+		                        </div>
+		                      </section>
+		                    ) : null
+		                  })()}
+	                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+	                    Gender
                     <select className={inputClass} name="gender" value={form.gender} onChange={handleChange}>
                       <option value="">Select gender</option>
                       <option value="female">Female</option>

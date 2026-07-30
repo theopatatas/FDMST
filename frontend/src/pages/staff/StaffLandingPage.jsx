@@ -61,7 +61,7 @@ function getGreeting() {
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
   if (!fullName) return 'Team'
-  return user?.role === 'dentist' ? `Dr. ${fullName}` : fullName
+  return fullName
 }
 
 function formatTime(value) {
@@ -113,11 +113,10 @@ function StaffLandingPage() {
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [currentTime, setCurrentTime] = useState(new Date())
   const user = authStorage.getUser()
-  const isDentist = user?.role === 'dentist'
-  const dashboardLabel = isDentist ? 'Dentist Dashboard' : 'Staff Dashboard'
-  const dashboardNoun = isDentist ? 'dentist' : 'staff'
-  const appointmentsPath = isDentist ? '/dentist/appointments' : '/staff/appointments'
-  const promotionsPath = isDentist ? '/dentist/promotions' : '/staff/promotions'
+  const dashboardLabel = 'Staff Dashboard'
+  const dashboardNoun = 'staff'
+  const appointmentsPath = '/staff/appointments'
+  const promotionsPath = '/staff/promotions'
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsRefreshing(true)

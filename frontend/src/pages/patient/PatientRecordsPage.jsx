@@ -85,7 +85,6 @@ function PatientRecordsPage() {
   const [appointments, setAppointments] = useState([])
   const [query, setQuery] = useState('')
   const [dateFilter, setDateFilter] = useState('all')
-  const [dentistFilter, setDentistFilter] = useState('all')
   const [treatmentFilter, setTreatmentFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('date_desc')
@@ -126,11 +125,6 @@ function PatientRecordsPage() {
     return () => cleanup?.()
   }, [loadRecords])
 
-  const dentists = useMemo(() => {
-    const names = [...records, ...appointments].map((item) => item.dentistName).filter(Boolean)
-    return [...new Set(names)].sort((a, b) => a.localeCompare(b))
-  }, [appointments, records])
-
   const treatments = useMemo(() => {
     const names = records.map((record) => record.procedure || record.treatment).filter(Boolean)
     return [...new Set(names)].sort((a, b) => a.localeCompare(b))
@@ -153,7 +147,6 @@ function PatientRecordsPage() {
       const matchesQuery = !normalizedQuery || [row.dentistName, row.service, row.toothNumber, row.notes, row.status]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalizedQuery))
-      const matchesDentist = dentistFilter === 'all' || row.dentistName === dentistFilter
       const matchesTreatment = treatmentFilter === 'all' || row.service === treatmentFilter
       const matchesStatus = statusFilter === 'all' || row.status === statusFilter
       const visitDate = row.appointmentDate ? new Date(row.appointmentDate) : null
@@ -161,16 +154,15 @@ function PatientRecordsPage() {
       const cutoffDate = daysAgo ? new Date(REFERENCE_TIME - daysAgo * 24 * 60 * 60 * 1000) : null
       const matchesDate = !daysAgo || (visitDate && !Number.isNaN(visitDate.getTime()) && visitDate >= cutoffDate)
 
-      return matchesQuery && matchesDentist && matchesTreatment && matchesStatus && matchesDate
+      return matchesQuery && matchesTreatment && matchesStatus && matchesDate
     })
 
     return [...filtered].sort((a, b) => {
       if (sortBy === 'date_asc') return new Date(a.appointmentDate || 0) - new Date(b.appointmentDate || 0)
-      if (sortBy === 'dentist_asc') return a.dentistName.localeCompare(b.dentistName)
       if (sortBy === 'treatment_asc') return a.service.localeCompare(b.service)
       return new Date(b.appointmentDate || 0) - new Date(a.appointmentDate || 0)
     })
-  }, [dateFilter, dentistFilter, query, records, sortBy, statusFilter, treatmentFilter])
+  }, [dateFilter, query, records, sortBy, statusFilter, treatmentFilter])
 
   const appointmentHistory = useMemo(
     () => [...appointments].sort((a, b) => new Date(b.appointmentDate || 0) - new Date(a.appointmentDate || 0)),
@@ -245,16 +237,12 @@ function PatientRecordsPage() {
               <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input className={`${inputClass} pl-11`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search date, dentist, treatment, notes..." />
             </label>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[9.5rem_12rem_minmax(12rem,1fr)_9.5rem_10.5rem_auto]">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[9.5rem_minmax(12rem,1fr)_9.5rem_10.5rem_auto]">
               <select className={inputClass} value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} aria-label="Filter by date">
                 <option value="all">All dates</option>
                 <option value="30_days">Last 30 days</option>
                 <option value="90_days">Last 90 days</option>
                 <option value="1_year">Last year</option>
-              </select>
-              <select className={inputClass} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)} aria-label="Filter by dentist">
-                <option value="all">All dentists</option>
-                {dentists.map((dentist) => <option key={dentist} value={dentist}>{dentist}</option>)}
               </select>
               <select className={inputClass} value={treatmentFilter} onChange={(event) => setTreatmentFilter(event.target.value)} aria-label="Filter by treatment">
                 <option value="all">All treatments</option>
@@ -275,7 +263,6 @@ function PatientRecordsPage() {
                 onClick={() => {
                   setQuery('')
                   setDateFilter('all')
-                  setDentistFilter('all')
                   setTreatmentFilter('all')
                   setStatusFilter('all')
                   setSortBy('date_desc')

@@ -1,4 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5050/api'
+export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '')
 const AUTH_TOKEN_KEY = 'fdmst_auth_token'
 const AUTH_USER_KEY = 'fdmst_auth_user'
 export const AUTH_CHANGED_EVENT = 'fdmst-auth-changed'
@@ -158,6 +159,30 @@ export const fdmstApi = {
     request(`/users/me/notifications/${id}/read`, {
       method: 'PATCH',
     }),
+  getMessageRecipients: () => request('/messages/recipients'),
+  getConversations: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/messages/conversations${query ? `?${query}` : ''}`)
+  },
+  startConversation: (payload = {}) =>
+    request('/messages/conversations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getConversationMessages: (id) => request(`/messages/conversations/${id}/messages`),
+  sendConversationMessage: (id, payload) =>
+    request(`/messages/conversations/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  markConversationRead: (id) =>
+    request(`/messages/conversations/${id}/read`, {
+      method: 'PATCH',
+    }),
   updateProfile: async (payload) => {
     const data = await request('/users/me', {
       method: 'PATCH',
@@ -172,7 +197,7 @@ export const fdmstApi = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  getDentists: () => request('/appointments/dentists'),
+  getClinicDentist: () => request('/appointments/clinic-dentist'),
   getAppointmentAvailability: (filters = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {

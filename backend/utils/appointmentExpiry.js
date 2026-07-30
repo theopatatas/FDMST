@@ -125,17 +125,11 @@ const notifyPatientOfAutoNoShow = async (appointment) => {
 
 const getClinicReviewRecipients = async (appointment) => {
   const users = await User.find({
-    role: { $in: ["admin", "staff", "dentist"] },
+    role: { $in: ["admin", "staff"] },
     status: "active",
   }).select("_id firstName lastName role");
 
-  const assignedDentistName = String(appointment.dentistName || "").trim().toLowerCase();
-  const isSpecificDentist = assignedDentistName && assignedDentistName !== "any available dentist";
-
-  return users.filter((user) => {
-    if (user.role !== "dentist" || !isSpecificDentist) return true;
-    return fullName(user).toLowerCase() === assignedDentistName;
-  });
+  return users;
 };
 
 const notifyClinicUsersOfExpiringAppointment = async (appointment) => {

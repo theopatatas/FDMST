@@ -33,6 +33,11 @@ const initialPatientForm = {
   email: '',
   contactNumber: '',
   dateOfBirth: '',
+  guardianName: '',
+  guardianRelationship: '',
+  guardianContactNumber: '',
+  guardianEmail: '',
+  guardianAddress: '',
   gender: 'prefer_not_to_say',
   address: '',
   allergies: '',
@@ -52,6 +57,18 @@ function formatDate(value) {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null
+  const birthDate = new Date(dateOfBirth)
+  const today = new Date()
+  if (Number.isNaN(birthDate.getTime()) || birthDate > today) return null
+
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const monthDifference = today.getMonth() - birthDate.getMonth()
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) age -= 1
+  return age >= 0 ? age : null
 }
 
 function initials(patient) {
@@ -88,7 +105,7 @@ function StaffPatientsPage() {
   const toast = useToast()
   const navigate = useNavigate()
   const user = authStorage.getUser()
-  const basePath = user?.role === 'dentist' ? '/dentist' : '/staff'
+  const basePath = '/staff'
   const isStaff = user?.role === 'staff'
   const [patients, setPatients] = useState([])
   const [dentists, setDentists] = useState([])
@@ -105,10 +122,18 @@ function StaffPatientsPage() {
     try {
       const [patientResponse, dentistResponse] = await Promise.all([
         fdmstApi.getMyCarePatients(),
-        fdmstApi.getDentists(),
+        fdmstApi.getClinicDentist(),
       ])
       setPatients(patientResponse.data || [])
-      setDentists(dentistResponse.data || [])
+      const clinicDentists = dentistResponse.data ? [dentistResponse.data] : []
+      setDentists(clinicDentists)
+      if (clinicDentists[0]) {
+        setPatientForm((current) => ({
+          ...current,
+          assignedDentist: current.assignedDentist || clinicDentists[0].id,
+          assignedDentistName: current.assignedDentistName || clinicDentists[0].name,
+        }))
+      }
     } catch (error) {
       toast.error(error.message || `Unable to load ${isStaff ? 'patients' : 'your patients'}.`)
     } finally {
@@ -141,13 +166,17 @@ function StaffPatientsPage() {
 
   const closeCreatePatient = () => {
     setIsCreateOpen(false)
-    setPatientForm(initialPatientForm)
+    setPatientForm({
+      ...initialPatientForm,
+      assignedDentist: dentists[0]?.id || '',
+      assignedDentistName: dentists[0]?.name || '',
+    })
     setFieldErrors({})
   }
 
   const handlePatientFormChange = (event) => {
     const { name, value } = event.target
-    const nextValue = ['contactNumber', 'emergencyContactNumber'].includes(name) ? digitsOnly(value) : value
+    const nextValue = ['contactNumber', 'emergencyContactNumber', 'guardianContactNumber'].includes(name) ? digitsOnly(value) : value
 
     if (name === 'assignedDentist') {
       const dentist = dentists.find((item) => String(item.id) === value)
@@ -170,6 +199,17 @@ function StaffPatientsPage() {
     if (patientForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patientForm.email)) errors.email = 'Enter a valid email address.'
     const mobileError = validateMobileNumber(patientForm.contactNumber)
     if (mobileError) errors.contactNumber = mobileError
+    const age = calculateAge(patientForm.dateOfBirth)
+    if (age !== null && age < 18) {
+      if (!patientForm.guardianName.trim()) errors.guardianName = 'Parent/guardian full name is required.'
+      if (!patientForm.guardianRelationship.trim()) errors.guardianRelationship = 'Relationship to patient is required.'
+      const guardianMobileError = validateMobileNumber(patientForm.guardianContactNumber, { required: true })
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    } else if (patientForm.guardianContactNumber) {
+      const guardianMobileError = validateMobileNumber(patientForm.guardianContactNumber)
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    }
+    if (patientForm.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patientForm.guardianEmail)) errors.guardianEmail = 'Enter a valid guardian email address.'
     const emergencyMobileError = patientForm.emergencyContactNumber ? validateMobileNumber(patientForm.emergencyContactNumber) : ''
     if (emergencyMobileError) errors.emergencyContactNumber = emergencyMobileError
     setFieldErrors(errors)
@@ -188,6 +228,11 @@ function StaffPatientsPage() {
         lastName: patientForm.lastName.trim(),
         email: patientForm.email.trim(),
         contactNumber: patientForm.contactNumber.trim(),
+        guardianName: patientForm.guardianName.trim(),
+        guardianRelationship: patientForm.guardianRelationship.trim(),
+        guardianContactNumber: patientForm.guardianContactNumber.trim(),
+        guardianEmail: patientForm.guardianEmail.trim(),
+        guardianAddress: patientForm.guardianAddress.trim(),
         allergies: patientForm.allergies.trim(),
         medicalConditions: patientForm.medicalConditions.trim(),
         medicalHistory: patientForm.medicalHistory.trim(),
@@ -406,6 +451,61 @@ function StaffPatientsPage() {
                     </select>
                   </span>
                 </label>
+                {(() => {
+	                  const age = calculateAge(patientForm.dateOfBirth)
+	                  return age !== null && age < 18 ? (
+	                    <section className="grid min-w-0 gap-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 sm:col-span-2">
+	                      <div>
+	                        <h3 className="text-sm font-bold text-sky-950">Parent/Guardian Information</h3>
+	                        <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+	                          The parent/guardian will serve as the primary contact for this minor patient.
+	                        </p>
+	                      </div>
+	                      <div className="grid gap-4 sm:grid-cols-2">
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Parent/Guardian Full Name
+	                          <span className="relative">
+	                            <FaUser className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+	                            <input className={`${inputClass} pl-12`} name="guardianName" value={patientForm.guardianName} onChange={handlePatientFormChange} placeholder="Parent or legal guardian full name" required />
+	                          </span>
+	                          {fieldErrors.guardianName ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianName}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Relationship to Patient
+	                          <select className={inputClass} name="guardianRelationship" value={patientForm.guardianRelationship} onChange={handlePatientFormChange} required>
+	                            <option value="">Select relationship</option>
+	                            <option value="Mother">Mother</option>
+	                            <option value="Father">Father</option>
+	                            <option value="Legal Guardian">Legal Guardian</option>
+	                            <option value="Grandparent">Grandparent</option>
+	                            <option value="Relative">Relative</option>
+	                          </select>
+	                          {fieldErrors.guardianRelationship ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianRelationship}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Contact Number
+	                          <span className="relative">
+	                            <FaPhone className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+	                            <input className={`${inputClass} pl-12`} name="guardianContactNumber" inputMode="numeric" maxLength={11} value={patientForm.guardianContactNumber} onChange={handlePatientFormChange} placeholder="09XXXXXXXXX" required />
+	                          </span>
+	                          {fieldErrors.guardianContactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianContactNumber}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Email Address (if applicable)
+	                          <span className="relative">
+	                            <FaEnvelope className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+	                            <input className={`${inputClass} pl-12`} type="email" name="guardianEmail" value={patientForm.guardianEmail} onChange={handlePatientFormChange} placeholder="guardian@email.com" />
+	                          </span>
+	                          {fieldErrors.guardianEmail ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianEmail}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
+	                          Home Address (optional)
+	                          <textarea className={textareaClass} name="guardianAddress" value={patientForm.guardianAddress} onChange={handlePatientFormChange} placeholder="Leave blank if same as patient address" />
+	                        </label>
+	                      </div>
+	                    </section>
+	                  ) : null
+	                })()}
                 <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
                   Email
                   <span className="relative">
@@ -433,10 +533,7 @@ function StaffPatientsPage() {
                   Assigned Dentist
                   <span className="relative">
                     <FaUserMd className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <select className={`${inputClass} pl-12`} name="assignedDentist" value={patientForm.assignedDentist} onChange={handlePatientFormChange}>
-                      <option value="">No assigned dentist</option>
-                      {dentists.map((dentist) => <option key={dentist.id} value={dentist.id}>{dentist.name}</option>)}
-                    </select>
+                    <input className={`${inputClass} bg-slate-50 pl-12`} value={patientForm.assignedDentistName || dentists[0]?.name || 'Clinic dentist'} readOnly />
                   </span>
                 </label>
                 {[

@@ -41,7 +41,6 @@ function getNotificationIcon(notification) {
 
 function getRoleBasePath(role) {
   if (role === 'patient') return '/patient'
-  if (role === 'dentist') return '/dentist'
   if (role === 'staff') return '/staff'
   return '/admin'
 }

@@ -7,7 +7,7 @@ const ADVANCE_BOOKING_DAYS = 14;
 const BLOCKING_APPOINTMENT_STATUSES = ["pending", "confirmed", "follow_up", "checked_in", "in_consultation", "rescheduled"];
 const DEFAULT_APPOINTMENT_SETTINGS = {
   openingTime: "09:00",
-  closingTime: "18:00",
+  closingTime: "17:00",
   appointmentDuration: 30,
   workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
   maxAppointmentsPerDay: 20,
@@ -192,9 +192,9 @@ const getDentistPersonalSchedule = async (dentistName) => {
   const normalized = String(dentistName).trim().toLowerCase();
   if (!normalized || normalized === "any available dentist") return null;
 
-  const dentists = await User.find({ role: { $in: ["dentist", "admin"] }, status: "active" }).select("firstName lastName workPreferences").lean();
-  const dentist = dentists.find((item) => fullName(item).toLowerCase() === normalized);
-  const schedule = dentist?.workPreferences?.schedule;
+  const admin = await User.findOne({ role: "admin", status: "active" }).select("firstName lastName workPreferences").lean();
+  if (fullName(admin).toLowerCase() !== normalized) return null;
+  const schedule = admin?.workPreferences?.schedule;
 
   if (!schedule?.workingDays?.length || !schedule.startTime || !schedule.endTime) return null;
 

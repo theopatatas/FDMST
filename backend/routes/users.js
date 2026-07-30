@@ -105,6 +105,11 @@ const sanitizePatientProfile = (patient) => patient && ({
   id: patient._id,
   patientId: patient.patientId,
   dateOfBirth: patient.dateOfBirth,
+  guardianName: patient.guardianName,
+  guardianRelationship: patient.guardianRelationship,
+  guardianContactNumber: patient.guardianContactNumber,
+  guardianEmail: patient.guardianEmail,
+  guardianAddress: patient.guardianAddress,
   gender: patient.gender,
   address: patient.address,
   emergencyContactName: patient.emergencyContactName,
@@ -124,6 +129,22 @@ const sanitizePatientProfile = (patient) => patient && ({
   preferredDentistName: patient.preferredDentistName,
   createdAt: patient.createdAt,
 });
+
+const calculateAge = (dateOfBirth) => {
+  if (!dateOfBirth) return null;
+  const birthDate = new Date(dateOfBirth);
+  const today = new Date();
+
+  if (Number.isNaN(birthDate.getTime()) || birthDate > today) return null;
+
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDifference = today.getMonth() - birthDate.getMonth();
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
+};
 
 const sanitizeNotification = (notification) => ({
   id: notification._id,
@@ -283,7 +304,7 @@ router.get(
 router.get(
   "/me/settings",
   authenticate,
-  authorize("staff", "dentist"),
+  authorize("staff"),
   asyncHandler(async (req, res) => {
     const user = await User.findById(req.user.id).select("workPreferences role firstName lastName email");
 
@@ -300,7 +321,7 @@ router.get(
 router.patch(
   "/me/settings",
   authenticate,
-  authorize("staff", "dentist"),
+  authorize("staff"),
   asyncHandler(async (req, res) => {
     const { schedule = {}, notifications = {}, appearance = {} } = req.body || {};
     const workingDays = Array.isArray(schedule.workingDays)
@@ -376,7 +397,7 @@ router.patch(
 router.post(
   "/me/report-action",
   authenticate,
-  authorize("staff", "dentist"),
+  authorize("staff"),
   asyncHandler(async (req, res) => {
     const action = ["Report viewed", "Report exported", "Report printed"].includes(req.body?.action)
       ? req.body.action
@@ -395,7 +416,7 @@ router.post(
       metadata: {
         userName: [user.firstName, user.lastName].filter(Boolean).join(" ").trim(),
         role: user.role,
-        module: "Dentist/Staff Reports",
+        module: "Staff Reports",
         filters: req.body?.filters || {},
       },
     });
@@ -513,6 +534,11 @@ router.patch(
       specialization,
       preferredDentistName,
       dateOfBirth,
+      guardianName,
+      guardianRelationship,
+      guardianContactNumber,
+      guardianEmail,
+      guardianAddress,
       gender,
       address,
       emergencyContactName,
@@ -571,6 +597,37 @@ router.patch(
       const emergencyRelationship = String(emergencyContactRelationship || "").trim();
       const emergencyNumber = String(emergencyContactNumber || "").trim();
       const alternateNumber = String(alternateContactNumber || "").trim();
+      const normalizedGuardianName = String(guardianName || "").trim();
+      const normalizedGuardianRelationship = String(guardianRelationship || "").trim();
+      const normalizedGuardianContact = String(guardianContactNumber || "").trim();
+      const normalizedGuardianEmail = String(guardianEmail || "").trim().toLowerCase();
+      const age = calculateAge(dateOfBirth);
+
+      if (age !== null && age < 18 && (!normalizedGuardianName || !normalizedGuardianRelationship || !normalizedGuardianContact)) {
+        const guardianErrors = {};
+        if (!normalizedGuardianName) guardianErrors.guardianName = "Parent/guardian full name is required.";
+        if (!normalizedGuardianRelationship) guardianErrors.guardianRelationship = "Relationship to patient is required.";
+        if (!normalizedGuardianContact) guardianErrors.guardianContactNumber = "Guardian contact number is required.";
+
+        return res.status(400).json({
+          message: "Parent/guardian full name, relationship, and contact number are required for patients under 18.",
+          errors: guardianErrors,
+        });
+      }
+
+      if (normalizedGuardianContact && !isValidMobileNumber(normalizedGuardianContact)) {
+        return res.status(400).json({
+          message: MOBILE_NUMBER_MESSAGE,
+          errors: { guardianContactNumber: MOBILE_NUMBER_MESSAGE },
+        });
+      }
+
+      if (normalizedGuardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedGuardianEmail)) {
+        return res.status(400).json({
+          message: "Enter a valid guardian email address.",
+          errors: { guardianEmail: "Enter a valid guardian email address." },
+        });
+      }
 
       if ((emergencyName || emergencyRelationship || emergencyNumber) && (!emergencyName || !emergencyRelationship || !emergencyNumber)) {
         return res.status(400).json({
@@ -643,18 +700,10 @@ router.patch(
       user.recoveryEmail = recoveryEmail ? String(recoveryEmail).trim().toLowerCase() : "";
     }
 
-    if (user.role === "dentist") {
-      user.licenseNumber = licenseNumber ? String(licenseNumber).trim() : "";
-      user.specialization = specialization ? String(specialization).trim() : "";
-    }
-
     await user.save();
 
     const profileActions = ["Updated Personal Information"];
     if (profilePhoto !== undefined) profileActions.push("Changed Profile Picture");
-    if (user.role === "dentist" && (licenseNumber !== undefined || specialization !== undefined)) {
-      profileActions.push("Updated Professional Information");
-    }
     if (newPassword || currentPassword || confirmPassword) profileActions.push("Changed Password");
 
     await Promise.all(profileActions.map((action) => auditSelfProfileAction(req, user, action)));
@@ -664,7 +713,7 @@ router.patch(
       if (preferredDentistName !== undefined) {
         const preferredName = String(preferredDentistName || "").trim();
         const activeDentists = preferredName
-          ? await User.find({ role: "dentist", status: "active" }).select("firstName lastName").lean()
+          ? await User.find({ role: "admin", status: "active" }).select("firstName lastName").lean()
           : [];
         const preferredDentist = activeDentists.find((dentist) =>
           [dentist.firstName, dentist.lastName].filter(Boolean).join(" ").trim() === preferredName
@@ -684,6 +733,11 @@ router.patch(
           email: user.email,
           contactNumber: user.contactNumber,
           dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+          guardianName: String(guardianName || "").trim(),
+          guardianRelationship: String(guardianRelationship || "").trim(),
+          guardianContactNumber: guardianContactNumber ? normalizeMobileNumber(guardianContactNumber) : "",
+          guardianEmail: String(guardianEmail || "").trim().toLowerCase(),
+          guardianAddress: String(guardianAddress || "").trim(),
           gender: ["male", "female", "other", "prefer_not_to_say"].includes(gender) ? gender : undefined,
           address: String(address || "").trim(),
           emergencyContactName: String(emergencyContactName || "").trim(),
@@ -721,7 +775,7 @@ router.get(
   authenticate,
   authorize("admin"),
   asyncHandler(async (req, res) => {
-    const staff = await User.find({ role: { $in: ["staff", "dentist"] } })
+    const staff = await User.find({ role: "staff" })
       .sort({ createdAt: -1 })
       .select("-passwordHash");
 
@@ -756,7 +810,7 @@ router.post(
   authenticate,
   authorize("admin"),
   asyncHandler(async (req, res) => {
-    const { firstName, lastName, email, password, role, contactNumber, adminPassword } = req.body;
+    const { firstName, lastName, email, password, contactNumber, adminPassword } = req.body;
 
     if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !password || !adminPassword) {
       return res.status(400).json({
@@ -777,7 +831,6 @@ router.post(
       });
     }
 
-    const staffRole = role === "dentist" ? "dentist" : "staff";
     const normalizedEmail = email.trim().toLowerCase();
     const adminVerification = await verifyAdminPasswordForAction(req.user.id, adminPassword);
 
@@ -803,11 +856,11 @@ router.post(
       email: normalizedEmail,
       contactNumber: normalizeMobileNumber(contactNumber),
       passwordHash,
-      role: staffRole,
+      role: "staff",
       accountStatus: "active_staff",
       status: "active",
     });
-    user.employeeId = `${staffRole.toUpperCase()}-${String(user._id).slice(-6).toUpperCase()}`;
+    user.employeeId = `STAFF-${String(user._id).slice(-6).toUpperCase()}`;
     await user.save();
 
     await logStaffAudit({
@@ -829,7 +882,7 @@ router.patch(
   authorize("admin"),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { firstName, lastName, email, role, contactNumber, adminPassword } = req.body;
+    const { firstName, lastName, email, contactNumber, adminPassword } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid staff account ID." });
@@ -858,7 +911,7 @@ router.patch(
 
     const staffUser = await User.findOne({
       _id: id,
-      role: { $in: ["staff", "dentist"] },
+      role: "staff",
     });
 
     if (!staffUser) {
@@ -881,14 +934,13 @@ router.patch(
       firstName: staffUser.firstName,
       lastName: staffUser.lastName,
       email: staffUser.email,
-      role: staffUser.role,
       contactNumber: staffUser.contactNumber,
     };
 
     staffUser.firstName = firstName.trim();
     staffUser.lastName = lastName.trim();
     staffUser.email = normalizedEmail;
-    staffUser.role = role === "dentist" ? "dentist" : "staff";
+    staffUser.role = "staff";
     staffUser.contactNumber = normalizeMobileNumber(contactNumber);
     staffUser.accountStatus = "active_staff";
 
@@ -934,7 +986,7 @@ router.patch(
 
     const staffUser = await User.findOne({
       _id: id,
-      role: { $in: ["staff", "dentist"] },
+      role: "staff",
     });
 
     if (!staffUser) {

@@ -1,0 +1,330 @@
+const express = require("express");
+const mongoose = require("mongoose");
+
+const Conversation = require("../models/Conversation");
+const Message = require("../models/Message");
+const Notification = require("../models/Notification");
+const User = require("../models/User");
+const asyncHandler = require("../utils/asyncHandler");
+const { authenticate, authorize } = require("../middleware/auth");
+const { emitToConversation, emitToUser, isUserOnline } = require("../utils/messagingSocket");
+
+const router = express.Router();
+const MESSAGE_LIMIT = 80;
+const PREVIEW_LIMIT = 90;
+
+const fullName = (user) => [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || "FDMST User";
+const cleanMessage = (value) => String(value || "")
+  .replace(/[<>]/g, "")
+  .replace(/[\u0000-\u001f\u007f]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, 2000);
+
+const sanitizeUser = (user) => ({
+  id: user?._id || user?.id,
+  firstName: user?.firstName || "",
+  lastName: user?.lastName || "",
+  name: fullName(user),
+  email: user?.email || "",
+  role: user?.role || "",
+  profilePhoto: user?.profilePhoto || "",
+  isOnline: isUserOnline(user?._id || user?.id),
+});
+
+const sanitizeMessage = (message) => ({
+  id: message._id,
+  conversationId: message.conversation,
+  sender: message.sender,
+  receiver: message.receiver,
+  content: message.content,
+  attachment: message.attachment || null,
+  deliveryStatus: message.deliveryStatus,
+  readBy: message.readBy || [],
+  createdAt: message.createdAt,
+});
+
+const getOtherParticipant = (conversation, currentUserId) => {
+  const participants = [conversation.patient, conversation.clinicUser].filter(Boolean);
+  return participants.find((participant) => String(participant._id || participant.id) !== String(currentUserId));
+};
+
+const getConversationQuery = (user) => (
+  user.role === "patient"
+    ? { patient: user.id }
+    : { participants: user.id }
+);
+
+const canAccessConversation = (conversation, user) => (
+  conversation?.participants?.some((participant) => String(participant._id || participant) === String(user.id))
+);
+
+const getDefaultClinicUser = async () => {
+  const admin = await User.findOne({ role: "admin", status: "active" }).sort({ createdAt: 1 });
+  if (admin) return admin;
+  return User.findOne({ role: "staff", status: "active" }).sort({ createdAt: 1 });
+};
+
+const resolveConversationParticipants = async (req) => {
+  if (req.user.role === "patient") {
+    const clinicUserId = req.body.clinicUserId || req.query.clinicUserId;
+    const clinicUser = clinicUserId && mongoose.Types.ObjectId.isValid(clinicUserId)
+      ? await User.findOne({ _id: clinicUserId, role: { $in: ["admin", "staff"] }, status: "active" })
+      : await getDefaultClinicUser();
+
+    if (!clinicUser) {
+      const error = new Error("No clinic staff are available for messaging right now.");
+      error.status = 404;
+      throw error;
+    }
+
+    return { patient: req.user.id, clinicUser: clinicUser._id };
+  }
+
+  const patientId = req.body.patientId || req.query.patientId;
+  if (!patientId || !mongoose.Types.ObjectId.isValid(patientId)) {
+    const error = new Error("Please select a patient conversation.");
+    error.status = 400;
+    throw error;
+  }
+
+  const patient = await User.findOne({ _id: patientId, role: "patient", status: { $ne: "inactive" } });
+  if (!patient) {
+    const error = new Error("Patient account not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  return { patient: patient._id, clinicUser: req.user.id };
+};
+
+const findOrCreateConversation = async ({ patient, clinicUser }) => {
+  const existing = await Conversation.findOne({ patient, clinicUser });
+  if (existing) return existing;
+
+  return Conversation.create({
+    patient,
+    clinicUser,
+    participants: [patient, clinicUser],
+    lastMessageAt: new Date(),
+  });
+};
+
+const populateConversation = (query) => query
+  .populate("patient", "firstName lastName email profilePhoto role status")
+  .populate("clinicUser", "firstName lastName email profilePhoto role status")
+  .populate("lastMessageSender", "firstName lastName email role");
+
+const sanitizeConversation = async (conversation, currentUserId) => {
+  const unreadCount = await Message.countDocuments({
+    conversation: conversation._id,
+    receiver: currentUserId,
+    "readBy.user": { $ne: currentUserId },
+    deletedFor: { $ne: currentUserId },
+  });
+  const otherUser = getOtherParticipant(conversation, currentUserId);
+
+  return {
+    id: conversation._id,
+    patient: sanitizeUser(conversation.patient),
+    clinicUser: sanitizeUser(conversation.clinicUser),
+    otherUser: sanitizeUser(otherUser),
+    lastMessage: conversation.lastMessage,
+    lastMessageAt: conversation.lastMessageAt,
+    lastMessageSender: conversation.lastMessageSender ? sanitizeUser(conversation.lastMessageSender) : null,
+    unreadCount,
+    isArchived: (conversation.archivedBy || []).some((userId) => String(userId) === String(currentUserId)),
+    updatedAt: conversation.updatedAt,
+  };
+};
+
+router.use(authenticate);
+
+router.get(
+  "/recipients",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    const query = req.user.role === "patient"
+      ? { role: { $in: ["admin", "staff"] }, status: "active" }
+      : { role: "patient", status: { $ne: "inactive" } };
+    const users = await User.find(query).sort({ role: 1, firstName: 1, lastName: 1 }).select("firstName lastName email role profilePhoto status").limit(100);
+    res.json({ data: users.map(sanitizeUser) });
+  }),
+);
+
+router.get(
+  "/conversations",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    const query = getConversationQuery(req.user);
+    if (req.query.status === "archived") query.archivedBy = req.user.id;
+    if (req.query.status === "active") query.archivedBy = { $ne: req.user.id };
+
+    const conversations = await populateConversation(
+      Conversation.find(query).sort({ lastMessageAt: -1, updatedAt: -1 }).limit(100),
+    );
+    let data = await Promise.all(conversations.map((conversation) => sanitizeConversation(conversation, req.user.id)));
+
+    if (req.query.status === "unread") {
+      data = data.filter((conversation) => conversation.unreadCount > 0);
+    }
+
+    const search = String(req.query.search || "").trim().toLowerCase();
+    if (search) {
+      data = data.filter((conversation) =>
+        [conversation.patient.name, conversation.clinicUser.name, conversation.otherUser.name, conversation.lastMessage]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search)),
+      );
+    }
+
+    res.json({ data });
+  }),
+);
+
+router.post(
+  "/conversations",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    const participants = await resolveConversationParticipants(req);
+    const conversation = await populateConversation(
+      Conversation.findById((await findOrCreateConversation(participants))._id),
+    );
+
+    res.status(201).json({ conversation: await sanitizeConversation(conversation, req.user.id) });
+  }),
+);
+
+router.get(
+  "/conversations/:id/messages",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid conversation ID." });
+    }
+
+    const conversation = await populateConversation(Conversation.findById(req.params.id));
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+
+    const messages = await Message.find({
+      conversation: conversation._id,
+      deletedFor: { $ne: req.user.id },
+    })
+      .sort({ createdAt: -1 })
+      .limit(Math.min(Number(req.query.limit) || MESSAGE_LIMIT, 150))
+      .lean();
+
+    res.json({
+      conversation: await sanitizeConversation(conversation, req.user.id),
+      data: messages.reverse().map(sanitizeMessage),
+    });
+  }),
+);
+
+router.post(
+  "/conversations/:id/messages",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid conversation ID." });
+    }
+
+    const conversation = await populateConversation(Conversation.findById(req.params.id));
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+
+    const content = cleanMessage(req.body.content);
+    if (!content && !req.body.attachment) {
+      return res.status(400).json({ message: "Message cannot be empty." });
+    }
+
+    const receiver = getOtherParticipant(conversation, req.user.id);
+    const message = await Message.create({
+      conversation: conversation._id,
+      sender: req.user.id,
+      receiver: receiver._id,
+      content,
+      attachment: req.body.attachment || undefined,
+      deliveryStatus: isUserOnline(receiver._id) ? "delivered" : "sent",
+      readBy: [{ user: req.user.id, readAt: new Date() }],
+    });
+
+    conversation.lastMessage = content.slice(0, PREVIEW_LIMIT) || "Attachment";
+    conversation.lastMessageAt = message.createdAt;
+    conversation.lastMessageSender = req.user.id;
+    await conversation.save();
+
+    const notification = await Notification.create({
+      user: receiver._id,
+      title: "New message",
+      message: `${fullName(req.user)}: ${conversation.lastMessage}`,
+      type: "message",
+      metadata: {
+        conversationId: conversation._id,
+        senderId: req.user.id,
+        target: "messages",
+      },
+    });
+
+    const payload = {
+      conversationId: conversation._id,
+      message: sanitizeMessage(message.toObject()),
+      sender: sanitizeUser(req.user),
+      notification: {
+        id: notification._id,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        isRead: notification.isRead,
+        metadata: notification.metadata,
+        createdAt: notification.createdAt,
+      },
+    };
+
+    emitToConversation(conversation._id, "message:new", payload);
+    emitToUser(receiver._id, "message:notification", payload);
+
+    res.status(201).json(payload);
+  }),
+);
+
+router.patch(
+  "/conversations/:id/read",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid conversation ID." });
+    }
+
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+
+    const now = new Date();
+    await Message.updateMany(
+      {
+        conversation: conversation._id,
+        receiver: req.user.id,
+        "readBy.user": { $ne: req.user.id },
+      },
+      {
+        $set: { deliveryStatus: "read" },
+        $push: { readBy: { user: req.user.id, readAt: now } },
+      },
+    );
+    await Notification.updateMany({
+      user: req.user.id,
+      type: "message",
+      "metadata.conversationId": conversation._id,
+    }, { $set: { isRead: true } });
+
+    emitToConversation(conversation._id, "message:read", { conversationId: conversation._id, userId: req.user.id, readAt: now });
+    res.json({ message: "Conversation marked as read." });
+  }),
+);
+
+module.exports = router;

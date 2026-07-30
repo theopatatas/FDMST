@@ -17,7 +17,7 @@ function PatientPromotionsPage() {
     const params = new URLSearchParams(location.search)
     return params.get('promotion') || ''
   }, [location.search])
-  const actionPath = userRole === 'dentist' ? '/dentist/appointments' : userRole === 'staff' ? '/staff/appointments' : '/patient/book-appointment'
+  const actionPath = userRole === 'staff' ? '/staff/appointments' : userRole === 'admin' ? '/admin/promotions' : '/patient/book-appointment'
   const actionLabel = userRole === 'patient' ? 'Book Appointment' : 'View Appointments'
   const getPromotionActionPath = (promotion) => {
     if (userRole !== 'patient') return actionPath

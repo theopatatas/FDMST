@@ -469,7 +469,7 @@ function StaffTreatmentRecordsPage() {
           canEdit={modal.mode === 'create' || canEditRecord(modal.record, currentUser)}
           onAddClinicalNote={
             modal.mode === 'view' && form.appointment && !isStaff
-              ? () => navigate(`${isAdmin ? '/admin' : '/dentist'}/clinical-notes?appointment=${form.appointment}`)
+              ? () => navigate('/admin/clinical-notes?appointment=' + form.appointment)
               : null
           }
         />

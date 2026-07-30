@@ -39,6 +39,11 @@ const sanitizePatient = (patient) => ({
   email: patient.email,
   contactNumber: patient.contactNumber,
   dateOfBirth: patient.dateOfBirth,
+  guardianName: patient.guardianName,
+  guardianRelationship: patient.guardianRelationship,
+  guardianContactNumber: patient.guardianContactNumber,
+  guardianEmail: patient.guardianEmail,
+  guardianAddress: patient.guardianAddress,
   gender: patient.gender,
   address: patient.address,
   medicalHistory: patient.medicalHistory,
@@ -190,6 +195,11 @@ const validateRegistrationPayload = async (body) => {
     dateOfBirth,
     gender,
     address,
+    guardianName,
+    guardianRelationship,
+    guardianContactNumber,
+    guardianEmail,
+    guardianAddress,
     allergies,
     medicalHistory,
     dentalHistory,
@@ -229,6 +239,11 @@ const validateRegistrationPayload = async (body) => {
       dateOfBirth,
       gender,
       address,
+      guardianName,
+      guardianRelationship,
+      guardianContactNumber,
+      guardianEmail,
+      guardianAddress,
       allergies,
       medicalHistory,
       dentalHistory,
@@ -484,6 +499,12 @@ router.post(
     if (user.status === "inactive") {
       return res.status(403).json({
         message: "This account is deactivated. Please contact the clinic.",
+      });
+    }
+
+    if (!["admin", "staff", "patient"].includes(String(user.role || "").toLowerCase())) {
+      return res.status(403).json({
+        message: "This account role is no longer supported. Please contact the clinic administrator.",
       });
     }
 

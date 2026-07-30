@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FaCalendarAlt,
   FaCheckCircle,
-  FaNotesMedical,
   FaRegCalendarAlt,
   FaSearch,
   FaTimes,
@@ -181,7 +180,6 @@ function AppointmentsPage({ allowApproval = false }) {
   const isAdmin = currentUser?.role === 'admin'
   const isStaff = currentUser?.role === 'staff'
   const [appointments, setAppointments] = useState([])
-  const [dentists, setDentists] = useState([])
   const [serviceOptions, setServiceOptions] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState(null)
@@ -216,21 +214,17 @@ function AppointmentsPage({ allowApproval = false }) {
 
   const loadAppointments = useCallback(async ({ silent = false } = {}) => {
     try {
-      const [appointmentResponse, dentistResponse] = await Promise.all([
-        fdmstApi.getAppointments({
-          ...filters,
-          page: pagination.page,
-          limit: pagination.limit,
-        }),
-        fdmstApi.getDentists(),
-      ])
+      const appointmentResponse = await fdmstApi.getAppointments({
+        ...filters,
+        page: pagination.page,
+        limit: pagination.limit,
+      })
       setAppointments(appointmentResponse.data || [])
       setPagination((current) => ({
         ...current,
         ...(appointmentResponse.pagination || {}),
       }))
       setServiceOptions([...new Set([...officialClinicServices, ...(appointmentResponse.filters?.services || [])])])
-      setDentists((dentistResponse.data || []).filter((dentist) => dentist.role === 'dentist'))
     } catch (loadError) {
       if (!silent) toast.error(loadError.message || 'Unable to load appointments.')
     } finally {
@@ -677,7 +671,6 @@ function AppointmentsPage({ allowApproval = false }) {
             <option value="custom">Custom Date Range</option>
             <option value="all">All Appointments</option>
           </select>
-          {isAdmin ? <select className={`${inputClass} min-w-[11rem] flex-1 xl:flex-none`} value={filters.dentist} onChange={(event) => updateFilter('dentist', event.target.value)}><option value="all">All dentists</option>{dentists.map((dentist) => <option key={dentist.id} value={dentist.name}>{dentist.name}</option>)}</select> : null}
           <select className={`${inputClass} min-w-[14rem] flex-1 xl:flex-none`} value={filters.service} onChange={(event) => updateFilter('service', event.target.value)}><option value="all">All services</option>{serviceOptions.map((service) => <option key={service} value={service}>{service}</option>)}</select>
           <select className={`${inputClass} min-w-[11rem] flex-1 xl:flex-none`} value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="follow_up">Follow Up</option><option value="checked_in">Checked In</option><option value="in_consultation">In Consultation</option><option value="completed">Completed</option><option value="no_show">No Show</option><option value="cancelled">Cancelled</option><option value="declined">Declined</option><option value="rescheduled">Rescheduled</option></select>
           <input className={`${inputClass} min-w-[10.5rem] flex-1 xl:flex-none`} type="date" value={filters.date} onChange={(event) => updateFilter('date', event.target.value)} title="Exact appointment date" />
@@ -1222,7 +1215,7 @@ function AppointmentsPage({ allowApproval = false }) {
               {!isStaff ? (
                 <button type="button" onClick={() => openClinicalNoteModal(documentationPrompt)} className="h-12 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900">Add Clinical Note</button>
               ) : (
-                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">Clinical documentation is restricted to Admin and Dentist accounts.</p>
+                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">Clinical documentation is restricted to the Admin account.</p>
               )}
               <button type="button" onClick={() => setDocumentationPrompt(null)} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50">Finish</button>
             </div>

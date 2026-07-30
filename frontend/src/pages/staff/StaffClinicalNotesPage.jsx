@@ -362,7 +362,7 @@ function StaffClinicalNotesPage() {
       .then((response) => {
         if (!isMounted) return
         const options = (response.data || [])
-          .filter((user) => ['staff', 'dentist'].includes(user.role))
+          .filter((user) => ['admin', 'staff'].includes(user.role))
           .map((user) => [user.firstName, user.lastName].filter(Boolean).join(' ').trim())
           .filter(Boolean)
           .sort((left, right) => left.localeCompare(right))

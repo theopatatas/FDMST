@@ -175,7 +175,7 @@ function AdminLandingPage() {
     ['completed', 'Completed Today', todayStatusCounts.completed || 0, 'Finished visits', FaCheckCircle, 'emerald'],
     ['cancelled', 'Cancelled Today', todayStatusCounts.cancelled || 0, 'Cancelled visits', FaTimesCircle, 'red'],
     ['no_show', 'No Show Today', todayStatusCounts.no_show || 0, 'Missed visits', FaUserClock, 'slate'],
-    ['dentists', 'Active Dentists Today', `${stats.activeDentistsToday || 0} / ${stats.totalDentists || 0}`, 'Dentists with visits today', FaUserMd, 'emerald'],
+    ['dentists', 'Clinic Dentist Today', `${stats.activeDentistsToday || 0} / ${stats.totalDentists || 0}`, 'Admin dentist schedule today', FaUserMd, 'emerald'],
   ], [stats, todayStatusCounts])
   const todayAppointments = useMemo(
     () => [...(dashboard?.todaysSchedule || [])].sort(compareDashboardAppointments),
@@ -215,7 +215,7 @@ function AdminLandingPage() {
   const quickActions = [
     ['Add Appointment', FaCalendarPlus, '/admin/appointments'],
     ['Add Patient', FaUsers, '/admin/patients'],
-    ['Register Dentist/Staff', FaUserMd, '/admin/staff'],
+    ['Register Staff', FaUserMd, '/admin/staff'],
     ['View Reports', FaFileAlt, '/admin/reports'],
     ['Open Analytics', FaChartLine, '/admin/analytics'],
   ]
@@ -245,7 +245,7 @@ function AdminLandingPage() {
             if (statusOptions.includes(filter)) setStatusFilter(filter)
             else if (filter === 'today' || filter === 'all') setStatusFilter('all')
             else if (filter === 'patients') navigate('/admin/patients')
-            else if (filter === 'dentists') navigate('/admin/staff')
+            else if (filter === 'dentists') navigate('/admin/appointments')
             else navigate('/admin/appointments')
           }} />
         ))}
@@ -292,7 +292,7 @@ function AdminLandingPage() {
       </Panel>
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <Panel title="Clinic Schedule Timeline" subtitle="Chronological view across all dentists.">
+        <Panel title="Clinic Schedule Timeline" subtitle="Chronological view of today's clinic schedule.">
           <div className="grid max-h-96 gap-3 overflow-y-auto pr-1">
             {todayAppointments.length ? todayAppointments.map((appointment) => (
               <div key={appointment.id} className="grid gap-3 rounded-2xl border border-slate-200 p-4 sm:grid-cols-[5rem_1fr_auto] sm:items-center">

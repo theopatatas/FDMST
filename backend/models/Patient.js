@@ -101,6 +101,27 @@ const patientSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    guardianName: {
+      type: String,
+      trim: true,
+    },
+    guardianRelationship: {
+      type: String,
+      trim: true,
+    },
+    guardianContactNumber: {
+      type: String,
+      trim: true,
+    },
+    guardianEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    guardianAddress: {
+      type: String,
+      trim: true,
+    },
     allergies: [String],
     medicalConditions: {
       type: String,

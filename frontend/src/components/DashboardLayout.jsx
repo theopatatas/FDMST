@@ -9,6 +9,7 @@ import {
   FaCalendarCheck,
   FaChartLine,
   FaCheckCircle,
+  FaComments,
   FaCog,
   FaCreditCard,
   FaFileAlt,
@@ -25,6 +26,8 @@ import {
   FaUserTie,
 } from 'react-icons/fa'
 import { AUTH_CHANGED_EVENT, authStorage, fdmstApi } from '../api/fdmstApi.js'
+import FloatingChatHead from './FloatingChatHead.jsx'
+import { getChatSocket } from '../utils/chatSocket.js'
 
 const iconMap = {
   analytics: FaChartLine,
@@ -35,6 +38,7 @@ const iconMap = {
   dentists: FaUserMd,
   inventory: FaBoxOpen,
   logout: FaSignOutAlt,
+  messages: FaComments,
   notifications: FaBell,
   patients: FaUsers,
   profile: FaUser,
@@ -55,6 +59,7 @@ const iconColorMap = {
   dentists: 'text-cyan-700 bg-cyan-50 ring-cyan-100',
   inventory: 'text-indigo-700 bg-indigo-50 ring-indigo-100',
   logout: 'text-red-600 bg-red-50 ring-red-100',
+  messages: 'text-blue-700 bg-blue-50 ring-blue-100',
   notifications: 'text-amber-600 bg-amber-50 ring-amber-100',
   patients: 'text-violet-700 bg-violet-50 ring-violet-100',
   profile: 'text-slate-700 bg-slate-50 ring-slate-100',
@@ -91,7 +96,7 @@ const adminPageMeta = [
   { path: '/admin/promotions', title: 'Promotions', subtitle: 'Manage clinic promotions, offers, and patient announcements.' },
   { path: '/admin/reports', title: 'Reports', subtitle: 'Generate, export, and print clinic operational reports.' },
   { path: '/admin/settings', title: 'Settings', subtitle: 'Manage clinic profile, account, notification, and security preferences.' },
-  { path: '/admin/staff', title: 'Staff Management', subtitle: 'Manage staff and dentist accounts securely.' },
+  { path: '/admin/staff', title: 'Staff Management', subtitle: 'Manage staff accounts securely.' },
   { path: '/admin', title: 'Dashboard', subtitle: "Overview of today's clinic operations." },
 ]
 
@@ -137,21 +142,18 @@ function getSidebarPageMeta(pathname, navItems, role) {
 function getProfilePath(role) {
   if (role === 'admin') return '/admin/profile'
   if (role === 'patient') return '/patient/profile'
-  if (role === 'dentist') return '/dentist/profile'
   return '/staff/profile'
 }
 
 function getNotificationsPath(role) {
   if (role === 'admin') return '/admin/notifications'
   if (role === 'patient') return '/patient/notifications'
-  if (role === 'dentist') return '/dentist/notifications'
   return '/staff/notifications'
 }
 
 function getPromotionsPath(role) {
   if (role === 'admin') return '/admin/promotions'
   if (role === 'patient') return '/patient/promotions'
-  if (role === 'dentist') return '/dentist/promotions'
   return '/staff/promotions'
 }
 
@@ -175,6 +177,7 @@ function getNotificationIcon(notification) {
   const text = `${notification?.title || ''} ${notification?.message || ''}`.toLowerCase()
 
   if (text.includes('payment')) return FaMoneyBillWave
+  if (notification?.type === 'message' || text.includes('message')) return FaComments
   if (text.includes('cancel')) return FaTimes
   if (text.includes('confirm')) return FaCheckCircle
   if (text.includes('appointment') || text.includes('reminder')) return FaCalendarCheck
@@ -221,6 +224,8 @@ function DashboardLayout({ portalLabel, navItems }) {
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [clinicSettings, setClinicSettings] = useState(null)
+  const [isChatOpen, setIsChatOpen] = useState(false)
+  const [requestedChatConversationId, setRequestedChatConversationId] = useState('')
 
   useEffect(() => {
     const syncUser = () => setUser(authStorage.getUser())
@@ -335,6 +340,20 @@ function DashboardLayout({ portalLabel, navItems }) {
     }
   }, [location.pathname])
 
+  useEffect(() => {
+    const socket = getChatSocket()
+    if (!socket) return undefined
+
+    const handleMessageNotification = ({ notification }) => {
+      if (!notification) return
+      setNotifications((current) => [notification, ...current.filter((item) => item.id !== notification.id)].slice(0, 10))
+      setUnreadCount((current) => current + 1)
+    }
+
+    socket.on('message:notification', handleMessageNotification)
+    return () => socket.off('message:notification', handleMessageNotification)
+  }, [user?.id])
+
   const handleLogout = async () => {
     try {
       await fdmstApi.logout()
@@ -378,6 +397,13 @@ function DashboardLayout({ portalLabel, navItems }) {
       const promotionId = notification.metadata?.promotionId
       const query = promotionId ? `?promotion=${encodeURIComponent(promotionId)}` : ''
       navigate(`${getPromotionsPath(user?.role)}${query}`)
+      return
+    }
+
+    if (notification.type === 'message' || notification.metadata?.target === 'messages') {
+      const conversationId = notification.metadata?.conversationId
+      setRequestedChatConversationId(conversationId ? String(conversationId) : '')
+      setIsChatOpen(true)
       return
     }
 
@@ -676,6 +702,12 @@ function DashboardLayout({ portalLabel, navItems }) {
         </header>
 
         <Outlet context={{ user, setUser }} />
+        <FloatingChatHead
+          requestedConversationId={requestedChatConversationId}
+          isOpen={isChatOpen}
+          onOpen={() => setIsChatOpen(true)}
+          onClose={() => setIsChatOpen(false)}
+        />
       </div>
     </div>
   )

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  FaBriefcase,
   FaEdit,
   FaEnvelope,
   FaLock,
@@ -11,7 +10,6 @@ import {
   FaShieldAlt,
   FaTrashAlt,
   FaUser,
-  FaUserPlus,
   FaUsers,
 } from 'react-icons/fa'
 import { FaTimes } from 'react-icons/fa'
@@ -45,8 +43,8 @@ const initialConfirmation = {
   status: '',
 }
 
-function formatRole(role) {
-  return role === 'dentist' ? 'Dentist' : 'Staff'
+function formatRole() {
+  return 'Staff'
 }
 
 function fullName(member) {
@@ -80,10 +78,8 @@ function StaffAvatar({ member, index = 0 }) {
 }
 
 function RoleBadge({ role }) {
-  const isDentist = role === 'dentist'
-
   return (
-    <span className={`inline-flex rounded-lg px-3 py-1 text-xs font-semibold ring-1 ${isDentist ? 'bg-violet-50 text-violet-700 ring-violet-100' : 'bg-blue-50 text-blue-700 ring-blue-100'}`}>
+    <span className="inline-flex rounded-lg bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
       {formatRole(role)}
     </span>
   )
@@ -128,7 +124,6 @@ function AdminStaffPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [query, setQuery] = useState('')
-  const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
@@ -149,12 +144,11 @@ function AdminStaffPage() {
       sortedStaff.filter((member) => {
         const searchText = [fullName(member), member.email, member.contactNumber, formatRole(member.role)].filter(Boolean).join(' ').toLowerCase()
         const matchesQuery = !query.trim() || searchText.includes(query.trim().toLowerCase())
-        const matchesRole = roleFilter === 'all' || member.role === roleFilter
         const matchesStatus = statusFilter === 'all' || (member.status || 'active') === statusFilter
 
-        return matchesQuery && matchesRole && matchesStatus
+        return matchesQuery && matchesStatus
       }),
-    [query, roleFilter, sortedStaff, statusFilter],
+    [query, sortedStaff, statusFilter],
   )
   const pageSize = 5
   const totalPages = Math.max(Math.ceil(filteredStaff.length / pageSize), 1)
@@ -162,7 +156,7 @@ function AdminStaffPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [query, roleFilter, statusFilter])
+  }, [query, statusFilter])
 
   const loadStaff = useCallback(async () => {
     try {
@@ -311,7 +305,7 @@ function AdminStaffPage() {
       lastName: member.lastName || '',
       email: member.email || '',
       password: '',
-      role: member.role === 'dentist' ? 'dentist' : 'staff',
+      role: 'staff',
       contactNumber: member.contactNumber || '',
     })
     setFieldErrors({})
@@ -428,16 +422,11 @@ function AdminStaffPage() {
             </button>
           </div>
 
-          <div className="mt-8 grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]">
+          <div className="mt-8 grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_auto]">
             <label className="relative">
               <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
               <input className={iconInputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search staff by name, email, or role..." />
             </label>
-            <select className={inputClass} value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
-              <option value="all">All Roles</option>
-              <option value="staff">Staff</option>
-              <option value="dentist">Dentist</option>
-            </select>
             <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">All Status</option>
               <option value="active">Active</option>
@@ -447,7 +436,6 @@ function AdminStaffPage() {
               type="button"
               onClick={() => {
                 setQuery('')
-                setRoleFilter('all')
                 setStatusFilter('all')
               }}
               className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-sky-950"
@@ -549,7 +537,7 @@ function AdminStaffPage() {
                 <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">
                   {isEditing ? 'Edit Staff Account' : 'Add Staff Account'}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">Create and update staff or dentist portal access.</p>
+                <p className="mt-1 text-sm text-slate-500">Create and update staff portal access.</p>
               </div>
               <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
                 <FaTimes className="h-5 w-5" />
@@ -593,16 +581,6 @@ function AdminStaffPage() {
                     <input className={iconInputClass} type="tel" name="contactNumber" inputMode="numeric" maxLength={11} placeholder="09XXXXXXXXX" value={form.contactNumber} onChange={handleChange} />
                   </IconField>
                   {fieldErrors.contactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.contactNumber}</span> : null}
-                </label>
-
-                <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
-                  Role
-                  <IconField icon={FaBriefcase}>
-                    <select className={iconInputClass} name="role" value={form.role} onChange={handleChange}>
-                      <option value="staff">Staff</option>
-                      <option value="dentist">Dentist</option>
-                    </select>
-                  </IconField>
                 </label>
 
                 {!isEditing ? (

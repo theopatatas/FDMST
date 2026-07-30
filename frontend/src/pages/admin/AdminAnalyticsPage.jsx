@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ArcElement,
   BarElement,
@@ -466,10 +466,6 @@ function FilterToolbar({ filters, options, onChange, onExport }) {
           </div>
         </details>
 
-        <select className={controlClass} value={filters.dentist} onChange={(event) => update('dentist', event.target.value)}>
-          <option value="">All Dentists</option>
-          {(options.dentists || []).map((dentist) => <option key={dentist} value={dentist}>{dentist}</option>)}
-        </select>
         <select className={controlClass} value={filters.service} onChange={(event) => update('service', event.target.value)}>
           <option value="">All Services</option>
           {(options.services || []).map((service) => <option key={service} value={service}>{service}</option>)}

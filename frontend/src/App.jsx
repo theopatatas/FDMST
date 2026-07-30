@@ -3,6 +3,7 @@ import AppointmentsPage from './pages/AppointmentsPage.jsx'
 import DashboardLayout from './components/DashboardLayout.jsx'
 import { GuestRoute, ProtectedRoute } from './components/ProtectedRoute.jsx'
 import LandingPage from './pages/LandingPage.jsx'
+import MessagesPage from './pages/MessagesPage.jsx'
 import AdminStaffPage from './pages/admin/AdminStaffPage.jsx'
 import AdminPatientsPage from './pages/admin/AdminPatientsPage.jsx'
 import AdminInventoryPage from './pages/admin/AdminInventoryPage.jsx'
@@ -57,19 +58,6 @@ const staffNavItems = [
   { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
-const dentistNavItems = [
-  { label: 'Dashboard', to: '/dentist', end: true, icon: 'dashboard' },
-  { label: 'Appointments', to: '/dentist/appointments', icon: 'appointments' },
-  { label: 'Patients', to: '/dentist/patients', icon: 'patients' },
-  { label: 'Treatment Records', to: '/dentist/treatment-records', icon: 'treatmentRecords' },
-  { label: 'Clinical Notes', to: '/dentist/clinical-notes', icon: 'clinicalNotes' },
-  { label: 'Reports', to: '/dentist/reports', icon: 'reports' },
-  { label: 'Inventory', to: '/dentist/inventory', icon: 'inventory' },
-  { label: 'Promotions', to: '/dentist/promotions', icon: 'promotions' },
-  { label: 'Settings', to: '/dentist/settings', icon: 'settings' },
-  { label: 'Logout', action: 'logout', icon: 'logout' },
-]
-
 const patientNavItems = [
   { label: 'Dashboard', to: '/patient', end: true, icon: 'dashboard' },
   { label: 'Book Appointment', to: '/patient/book-appointment', icon: 'appointments' },
@@ -106,6 +94,7 @@ function App() {
         <Route path="book-appointment" element={<BookAppointmentPage />} />
         <Route path="records" element={<PatientRecordsPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
+        <Route path="messages" element={<MessagesPage />} />
         <Route
           path="notifications"
           element={<PatientNotificationsPage />}
@@ -141,6 +130,7 @@ function App() {
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="inventory" element={<AdminInventoryPage />} />
         <Route path="promotions" element={<AdminPromotionsPage />} />
+        <Route path="messages" element={<MessagesPage />} />
         <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
@@ -149,7 +139,7 @@ function App() {
       <Route
         path="/staff"
         element={
-          <ProtectedRoute allowedRoles={['staff', 'dentist']}>
+          <ProtectedRoute allowedRoles={['staff']}>
             <DashboardLayout portalLabel="Staff Portal" navItems={staffNavItems} />
           </ProtectedRoute>
         }
@@ -166,36 +156,7 @@ function App() {
           }
         />
         <Route path="patients" element={<StaffPatientsPage />} />
-        <Route path="notifications" element={<AdminNotificationsPage />} />
-        <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
-        <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
-        <Route path="reports" element={<StaffReportsPage />} />
-        <Route path="inventory" element={<StaffInventoryPage />} />
-        <Route path="promotions" element={<PatientPromotionsPage />} />
-        <Route path="settings" element={<StaffSettingsPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-      </Route>
-
-      <Route
-        path="/dentist"
-        element={
-          <ProtectedRoute allowedRoles={['dentist']}>
-            <DashboardLayout portalLabel="Dentist Portal" navItems={dentistNavItems} />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<StaffLandingPage />} />
-        <Route
-          path="appointments"
-          element={
-            <AppointmentsPage
-              title="Appointments"
-              description="Review scheduled visits and patient appointment requests."
-              allowApproval
-            />
-          }
-        />
-        <Route path="patients" element={<StaffPatientsPage />} />
+        <Route path="messages" element={<MessagesPage />} />
         <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
         <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />

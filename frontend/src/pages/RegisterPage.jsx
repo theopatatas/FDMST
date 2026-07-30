@@ -11,6 +11,11 @@ const initialForm = {
   email: '',
   contactNumber: '',
   dateOfBirth: '',
+  guardianName: '',
+  guardianRelationship: '',
+  guardianContactNumber: '',
+  guardianEmail: '',
+  guardianAddress: '',
   gender: 'prefer_not_to_say',
   address: '',
   allergies: '',
@@ -111,6 +116,7 @@ function RegisterPage() {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
 
   const age = useMemo(() => calculateAge(form.dateOfBirth), [form.dateOfBirth])
+  const isMinor = age !== '' && Number(age) < 18
 
   useEffect(() => {
     let isMounted = true
@@ -130,7 +136,7 @@ function RegisterPage() {
 
   const handleChange = (event) => {
     const { name, type, checked, value } = event.target
-    const nextValue = name === 'contactNumber' ? digitsOnly(value) : value
+    const nextValue = ['contactNumber', 'guardianContactNumber'].includes(name) ? digitsOnly(value) : value
 
     setForm((currentForm) => ({
       ...currentForm,
@@ -165,6 +171,18 @@ function RegisterPage() {
     if (!form.lastName.trim()) errors.lastName = 'Last name is required.'
     if (!form.email.trim()) errors.email = 'Email address is required.'
     if (!form.dateOfBirth) errors.dateOfBirth = 'Birth date is required.'
+    if (isMinor) {
+      if (!form.guardianName.trim()) errors.guardianName = 'Parent/guardian full name is required.'
+      if (!form.guardianRelationship.trim()) errors.guardianRelationship = 'Relationship to patient is required.'
+      const guardianMobileError = validateMobileNumber(form.guardianContactNumber, { required: true })
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    } else if (form.guardianContactNumber) {
+      const guardianMobileError = validateMobileNumber(form.guardianContactNumber)
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    }
+    if (form.guardianEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.guardianEmail.trim())) {
+      errors.guardianEmail = 'Enter a valid guardian email address.'
+    }
 
     const mobileError = validateMobileNumber(form.contactNumber, { required: true })
 
@@ -187,6 +205,11 @@ function RegisterPage() {
         email: form.email.trim(),
         contactNumber: form.contactNumber.trim(),
         dateOfBirth: form.dateOfBirth,
+        guardianName: form.guardianName.trim(),
+        guardianRelationship: form.guardianRelationship.trim(),
+        guardianContactNumber: form.guardianContactNumber.trim(),
+        guardianEmail: form.guardianEmail.trim(),
+        guardianAddress: form.guardianAddress.trim(),
         gender: form.gender,
         address: form.address.trim(),
         allergies: form.allergies.trim(),
@@ -428,6 +451,99 @@ function RegisterPage() {
                 />
               </label>
             </div>
+
+            {isMinor ? (
+              <section className="grid gap-5 rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-sky-950">Parent/Guardian Information</h3>
+                  <p className="text-sm font-medium leading-6 text-slate-500">
+                    The parent/guardian will serve as the primary contact for this minor patient.
+                  </p>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+                    Parent/Guardian Full Name *
+                    <input
+                      className={inputClass}
+                      name="guardianName"
+                      onChange={handleChange}
+                      placeholder="Parent or legal guardian full name"
+                      required
+                      type="text"
+                      value={form.guardianName}
+                    />
+                    {fieldErrors.guardianName ? (
+                      <span className="text-xs font-medium text-red-600">{fieldErrors.guardianName}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+                    Relationship to Patient *
+                    <select
+                      className={inputClass}
+                      name="guardianRelationship"
+                      onChange={handleChange}
+                      required
+                      value={form.guardianRelationship}
+                    >
+                      <option value="">Select relationship</option>
+                      <option value="Mother">Mother</option>
+                      <option value="Father">Father</option>
+                      <option value="Legal Guardian">Legal Guardian</option>
+                      <option value="Grandparent">Grandparent</option>
+                      <option value="Relative">Relative</option>
+                    </select>
+                    {fieldErrors.guardianRelationship ? (
+                      <span className="text-xs font-medium text-red-600">{fieldErrors.guardianRelationship}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+                    Contact Number *
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      maxLength={11}
+                      name="guardianContactNumber"
+                      onChange={handleChange}
+                      placeholder="09XXXXXXXXX"
+                      required
+                      type="tel"
+                      value={form.guardianContactNumber}
+                    />
+                    {fieldErrors.guardianContactNumber ? (
+                      <span className="text-xs font-medium text-red-600">{fieldErrors.guardianContactNumber}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="grid gap-2 text-sm font-semibold text-slate-500">
+                    Email Address (if applicable)
+                    <input
+                      className={inputClass}
+                      name="guardianEmail"
+                      onChange={handleChange}
+                      placeholder="guardian@email.com"
+                      type="email"
+                      value={form.guardianEmail}
+                    />
+                    {fieldErrors.guardianEmail ? (
+                      <span className="text-xs font-medium text-red-600">{fieldErrors.guardianEmail}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="grid gap-2 text-sm font-semibold text-slate-500 sm:col-span-2">
+                    Home Address (optional)
+                    <textarea
+                      className={`${inputClass} min-h-24 py-4`}
+                      name="guardianAddress"
+                      onChange={handleChange}
+                      placeholder="Leave blank if same as patient address"
+                      value={form.guardianAddress}
+                    />
+                  </label>
+                </div>
+              </section>
+            ) : null}
 
             <label className="grid gap-2 text-sm font-semibold text-slate-500">
               Gender

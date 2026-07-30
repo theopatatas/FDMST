@@ -554,7 +554,7 @@ const buildDentistAnalytics = (appointments, records) => {
 const buildAdminAnalytics = (patients, users, appointments, auditLogs, feedback) => {
   const accountCounts = new Map();
   const auditCounts = new Map();
-  const activeStaff = users.filter((user) => ["staff", "dentist"].includes(user.role) && user.status === "active").length;
+  const activeStaff = users.filter((user) => user.role === "staff" && user.status === "active").length;
   const cancelled = appointments.filter((item) => item.status === "cancelled").length;
   const noShow = appointments.filter(isNoShowAppointment).length;
   const pendingAppointments = appointments.filter((item) => item.status === "pending");
@@ -710,7 +710,7 @@ router.get(
       mySchedule,
     ] = await Promise.all([
       Patient.countDocuments({}),
-      User.countDocuments({ role: "dentist", status: "active" }),
+      User.countDocuments({ role: "admin", status: "active" }),
       Appointment.countDocuments({}),
       Appointment.countDocuments({ status: "completed" }),
       Appointment.find({ status: "pending" })
@@ -761,7 +761,7 @@ router.get(
         .limit(10)
         .lean(),
       Patient.countDocuments({ status: "inactive" }),
-      User.countDocuments({ role: { $in: ["staff", "dentist"] }, status: "inactive" }),
+      User.countDocuments({ role: "staff", status: "inactive" }),
       Appointment.find({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
         dentistName: fullName(req.user),
@@ -840,7 +840,7 @@ router.get(
       statusOptions,
     ] = await Promise.all([
       User.countDocuments({ role: "staff", status: "active" }),
-      User.countDocuments({ role: "dentist", status: "active" }),
+      User.countDocuments({ role: "admin", status: "active" }),
       Appointment.countDocuments({
         appointmentDate: { $gte: todayStart, $lte: todayEnd },
         status: { $nin: ["cancelled", "declined"] },
@@ -962,14 +962,13 @@ router.get(
 router.get(
   "/staff",
   authenticate,
-  authorize("staff", "dentist"),
+  authorize("staff"),
   asyncHandler(async (req, res) => {
     const todayStart = startOfDay(new Date());
     const todayEnd = endOfDay(new Date());
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const providerName = fullName(req.user);
-    const appointmentScope = req.user.role === "dentist" && providerName ? { dentistName: providerName } : {};
+    const appointmentScope = {};
 
     const [todaysAppointments, upcomingAppointments, recentPatients, recentActivity] = await Promise.all([
       Appointment.find({
@@ -991,7 +990,6 @@ router.get(
         .limit(8),
       AuditLog.find({
         action: { $regex: /Appointment confirmed|Appointment checked_in|Appointment in_consultation|Appointment completed|Appointment rescheduled|Appointment cancelled|Clinical Note|Treatment Record/i },
-        ...(req.user.role === "dentist" ? { $or: [{ performedByEmail: req.user.email }, { "metadata.dentistName": providerName }] } : {}),
       })
         .sort({ createdAt: -1 })
         .limit(8)

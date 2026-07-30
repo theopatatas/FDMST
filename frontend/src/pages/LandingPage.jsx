@@ -122,7 +122,7 @@ const processSteps = [
   {
     title: 'Book Your Appointment',
     description:
-      'Use our easy online booking form to schedule your dental visit. Walk-ins are also welcome during clinic hours (Monday–Saturday, 9AM–6PM).',
+      'Use our easy online booking form to schedule your dental visit. Walk-ins are also welcome during clinic hours (Monday–Saturday, 9AM–5PM).',
     icon: 'calendarCheck',
     iconClass: 'bg-emerald-50 text-emerald-500 ring-emerald-100',
   },
@@ -539,7 +539,7 @@ function LandingPage() {
                 <span className="text-sky-300">
                   <LineIcon type="clock" />
                 </span>
-                Mon–Sat, 9AM–6PM
+                Mon–Sat, 9AM–5PM
               </span>
             </div>
             <div className="mt-6 flex flex-col gap-2.5 sm:mt-8 sm:flex-row sm:gap-3">

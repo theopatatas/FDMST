@@ -15,7 +15,6 @@ import {
   FaTimes,
   FaUser,
   FaUserMd,
-  FaUserPlus,
   FaUsers,
   FaVenusMars,
 } from 'react-icons/fa'
@@ -31,6 +30,11 @@ const initialForm = {
   email: '',
   contactNumber: '',
   dateOfBirth: '',
+  guardianName: '',
+  guardianRelationship: '',
+  guardianContactNumber: '',
+  guardianEmail: '',
+  guardianAddress: '',
   gender: 'prefer_not_to_say',
   address: '',
   allergies: '',
@@ -67,6 +71,18 @@ const initialConfirmation = {
 
 function fullName(patient) {
   return [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Unnamed Patient'
+}
+
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null
+  const birthDate = new Date(dateOfBirth)
+  const today = new Date()
+  if (Number.isNaN(birthDate.getTime()) || birthDate > today) return null
+
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const monthDifference = today.getMonth() - birthDate.getMonth()
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) age -= 1
+  return age >= 0 ? age : null
 }
 
 function initials(patient) {
@@ -138,7 +154,6 @@ function AdminPatientsPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [genderFilter, setGenderFilter] = useState('all')
-  const [dentistFilter, setDentistFilter] = useState('all')
   const [registrationDateFilter, setRegistrationDateFilter] = useState('')
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
@@ -154,12 +169,20 @@ function AdminPatientsPage() {
         fdmstApi.list('patients'),
         fdmstApi.getAppointments(),
         fdmstApi.list('dentalrecords'),
-        fdmstApi.getDentists(),
+        fdmstApi.getClinicDentist(),
       ])
       setPatients(patientResponse.data || [])
       setAppointments(appointmentResponse.data || [])
       setRecords(recordResponse.data || [])
-      setDentists(dentistResponse.data || [])
+      const clinicDentists = dentistResponse.data ? [dentistResponse.data] : []
+      setDentists(clinicDentists)
+      if (clinicDentists[0]) {
+        setForm((current) => ({
+          ...current,
+          assignedDentist: current.assignedDentist || clinicDentists[0].id,
+          assignedDentistName: current.assignedDentistName || clinicDentists[0].name,
+        }))
+      }
     } catch (error) {
       toast.error(error.message || 'Unable to load patient records.')
     } finally {
@@ -180,11 +203,10 @@ function AdminPatientsPage() {
       const normalizedStatus = patientDisplayStatus(patient).toLowerCase()
       const matchesStatus = statusFilter === 'all' || normalizedStatus === statusFilter
       const matchesGender = genderFilter === 'all' || patient.gender === genderFilter
-      const matchesDentist = dentistFilter === 'all' || String(patient.assignedDentist || '') === dentistFilter
       const matchesRegistrationDate = !registrationDateFilter || (patient.createdAt || '').slice(0, 10) === registrationDateFilter
-      return matchesQuery && matchesStatus && matchesGender && matchesDentist && matchesRegistrationDate
+      return matchesQuery && matchesStatus && matchesGender && matchesRegistrationDate
     })
-  }, [dentistFilter, genderFilter, patients, query, registrationDateFilter, statusFilter])
+  }, [genderFilter, patients, query, registrationDateFilter, statusFilter])
 
   const pageSize = 6
   const totalPages = Math.max(Math.ceil(filteredPatients.length / pageSize), 1)
@@ -192,7 +214,7 @@ function AdminPatientsPage() {
 
   useEffect(() => {
     queueMicrotask(() => setPage(1))
-  }, [dentistFilter, genderFilter, query, registrationDateFilter, statusFilter])
+  }, [genderFilter, query, registrationDateFilter, statusFilter])
 
   const selectedAppointments = useMemo(
     () => appointments.filter((appointment) => {
@@ -211,7 +233,11 @@ function AdminPatientsPage() {
   )
 
   const resetForm = () => {
-    setForm(initialForm)
+    setForm({
+      ...initialForm,
+      assignedDentist: dentists[0]?.id || '',
+      assignedDentistName: dentists[0]?.name || '',
+    })
     setEditingId('')
     setFieldErrors({})
   }
@@ -238,7 +264,7 @@ function AdminPatientsPage() {
 
   const handleChange = (event) => {
     const { name, value } = event.target
-    const nextValue = ['contactNumber', 'emergencyContactNumber'].includes(name) ? digitsOnly(value) : value
+    const nextValue = ['contactNumber', 'emergencyContactNumber', 'guardianContactNumber'].includes(name) ? digitsOnly(value) : value
     if (name === 'assignedDentist') {
       const dentist = dentists.find((item) => String(item.id) === value)
       setForm((current) => ({ ...current, assignedDentist: value, assignedDentistName: dentist?.name || '' }))
@@ -255,6 +281,17 @@ function AdminPatientsPage() {
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Enter a valid email address.'
     const mobileError = validateMobileNumber(form.contactNumber)
     if (mobileError) errors.contactNumber = mobileError
+    const age = calculateAge(form.dateOfBirth)
+    if (age !== null && age < 18) {
+      if (!form.guardianName.trim()) errors.guardianName = 'Parent/guardian full name is required.'
+      if (!form.guardianRelationship.trim()) errors.guardianRelationship = 'Relationship to patient is required.'
+      const guardianMobileError = validateMobileNumber(form.guardianContactNumber, { required: true })
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    } else if (form.guardianContactNumber) {
+      const guardianMobileError = validateMobileNumber(form.guardianContactNumber)
+      if (guardianMobileError) errors.guardianContactNumber = guardianMobileError
+    }
+    if (form.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.guardianEmail)) errors.guardianEmail = 'Enter a valid guardian email address.'
     const emergencyMobileError = form.emergencyContactNumber ? validateMobileNumber(form.emergencyContactNumber) : ''
     if (emergencyMobileError) errors.emergencyContactNumber = emergencyMobileError
     setFieldErrors(errors)
@@ -271,6 +308,11 @@ function AdminPatientsPage() {
       lastName: form.lastName.trim(),
       email: form.email.trim(),
       contactNumber: form.contactNumber.trim(),
+      guardianName: form.guardianName.trim(),
+      guardianRelationship: form.guardianRelationship.trim(),
+      guardianContactNumber: form.guardianContactNumber.trim(),
+      guardianEmail: form.guardianEmail.trim(),
+      guardianAddress: form.guardianAddress.trim(),
       allergies: form.allergies.trim(),
       medicalConditions: form.medicalConditions.trim(),
       emergencyContact: form.emergencyContact.trim(),
@@ -300,6 +342,11 @@ function AdminPatientsPage() {
       dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
       status: patient.status || 'active',
       medicalConditions: patient.medicalConditions || '',
+      guardianName: patient.guardianName || '',
+      guardianRelationship: patient.guardianRelationship || '',
+      guardianContactNumber: patient.guardianContactNumber || '',
+      guardianEmail: patient.guardianEmail || '',
+      guardianAddress: patient.guardianAddress || '',
       emergencyContact: patient.emergencyContact || '',
       emergencyContactName: patient.emergencyContactName || '',
       emergencyContactNumber: patient.emergencyContactNumber || '',
@@ -426,22 +473,16 @@ function AdminPatientsPage() {
             </button>
           </div>
 
-          <div className="grid items-center gap-3 border-b border-slate-100 px-5 pb-5 md:grid-cols-2 xl:grid-cols-[170px_170px_190px_190px_auto_auto]">
+          <div className="grid items-center gap-3 border-b border-slate-100 px-5 pb-5 md:grid-cols-2 xl:grid-cols-[170px_170px_190px_auto_auto]">
             <select className={`${patientInputClass} h-11`} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">All Statuses</option><option value="new">New</option><option value="verified">Verified</option><option value="inactive">Inactive</option>
             </select>
             <select className={`${patientInputClass} h-11`} value={genderFilter} onChange={(event) => setGenderFilter(event.target.value)}>
               <option value="all">All Genders</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option>
             </select>
-            <select className={`${patientInputClass} h-11`} value={dentistFilter} onChange={(event) => setDentistFilter(event.target.value)}>
-              <option value="all">All Dentists</option>
-              {dentists.map((dentist) => (
-                <option key={dentist.id} value={dentist.id}>{dentist.name}</option>
-              ))}
-            </select>
             <input className={`${patientInputClass} h-11`} type="date" value={registrationDateFilter} onChange={(event) => setRegistrationDateFilter(event.target.value)} aria-label="Registration date" />
             <button type="button" onClick={loadData} className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-sky-950" aria-label="Refresh patients"><FaRedo className="h-4 w-4" aria-hidden="true" /></button>
-            <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setGenderFilter('all'); setDentistFilter('all'); setRegistrationDateFilter('') }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-sky-950">
+            <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setGenderFilter('all'); setRegistrationDateFilter('') }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-sky-950">
               <FaTimes className="h-4 w-4" aria-hidden="true" />
               Clear
             </button>
@@ -575,6 +616,58 @@ function AdminPatientsPage() {
                     </select>
                   </IconField>
                 </label>
+                {(() => {
+	                  const age = calculateAge(form.dateOfBirth)
+	                  return age !== null && age < 18 ? (
+	                    <section className="grid min-w-0 gap-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 sm:col-span-2">
+	                      <div>
+	                        <h3 className="text-sm font-bold text-sky-950">Parent/Guardian Information</h3>
+	                        <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+	                          The parent/guardian will serve as the primary contact for this minor patient.
+	                        </p>
+	                      </div>
+	                      <div className="grid gap-4 sm:grid-cols-2">
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Parent/Guardian Full Name
+	                          <IconField icon={FaUser}>
+	                            <input className={patientIconInputClass} name="guardianName" value={form.guardianName || ''} onChange={handleChange} placeholder="Parent or legal guardian full name" required />
+	                          </IconField>
+	                          {fieldErrors.guardianName ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianName}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Relationship to Patient
+	                          <select className={patientInputClass} name="guardianRelationship" value={form.guardianRelationship || ''} onChange={handleChange} required>
+	                            <option value="">Select relationship</option>
+	                            <option value="Mother">Mother</option>
+	                            <option value="Father">Father</option>
+	                            <option value="Legal Guardian">Legal Guardian</option>
+	                            <option value="Grandparent">Grandparent</option>
+	                            <option value="Relative">Relative</option>
+	                          </select>
+	                          {fieldErrors.guardianRelationship ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianRelationship}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Contact Number
+	                          <IconField icon={FaPhone}>
+	                            <input className={patientIconInputClass} name="guardianContactNumber" inputMode="numeric" maxLength={11} value={form.guardianContactNumber || ''} onChange={handleChange} placeholder="09XXXXXXXXX" required />
+	                          </IconField>
+	                          {fieldErrors.guardianContactNumber ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianContactNumber}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
+	                          Email Address (if applicable)
+	                          <IconField icon={FaEnvelope}>
+	                            <input className={patientIconInputClass} type="email" name="guardianEmail" value={form.guardianEmail || ''} onChange={handleChange} placeholder="guardian@email.com" />
+	                          </IconField>
+	                          {fieldErrors.guardianEmail ? <span className="text-xs font-medium text-red-600">{fieldErrors.guardianEmail}</span> : null}
+	                        </label>
+	                        <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
+	                          Home Address (optional)
+	                          <textarea className={patientTextareaClass} name="guardianAddress" value={form.guardianAddress || ''} onChange={handleChange} placeholder="Leave blank if same as patient address" />
+	                        </label>
+	                      </div>
+	                    </section>
+	                  ) : null
+	                })()}
                 <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">
                   Email
                   <IconField icon={FaEnvelope}>
@@ -598,12 +691,7 @@ function AdminPatientsPage() {
                 <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600 sm:col-span-2">
                   Assigned Dentist
                   <IconField icon={FaUserMd}>
-                    <select className={patientIconInputClass} name="assignedDentist" value={form.assignedDentist || ''} onChange={handleChange}>
-                      <option value="">No assigned dentist</option>
-                      {dentists.map((dentist) => (
-                        <option key={dentist.id} value={dentist.id}>{dentist.name}</option>
-                      ))}
-                    </select>
+                    <input className={`${patientIconInputClass} bg-slate-50`} value={form.assignedDentistName || dentists[0]?.name || 'Clinic dentist'} readOnly />
                   </IconField>
                 </label>
                 <label className="grid min-w-0 gap-2 text-sm font-semibold text-slate-600">

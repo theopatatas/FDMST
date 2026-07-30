@@ -37,7 +37,7 @@ const currencyFormatter = new Intl.NumberFormat('en-PH', {
 
 const defaultAppointmentSettings = {
   openingTime: '09:00',
-  closingTime: '18:00',
+  closingTime: '17:00',
   appointmentDuration: 30,
   workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
   bufferTime: 10,
@@ -312,19 +312,13 @@ function BookAppointmentPage() {
   useEffect(() => {
     const loadBookingData = async () => {
       const [dentistsResult, settingsResult, profileResult] = await Promise.allSettled([
-        fdmstApi.getDentists(),
+        fdmstApi.getClinicDentist(),
         fdmstApi.getPublicSettings(),
         fdmstApi.getProfile(),
       ])
 
       const loadedDentists = dentistsResult.status === 'fulfilled'
-        ? Array.from(
-            new Map(
-              (dentistsResult.value.data || [])
-                .filter((dentist) => dentist.name)
-                .map((dentist) => [dentist.name, dentist]),
-            ).values(),
-          )
+        ? (dentistsResult.value.data?.name ? [dentistsResult.value.data] : [])
         : []
 
       if (dentistsResult.status === 'fulfilled') {
@@ -352,14 +346,11 @@ function BookAppointmentPage() {
         }
       }
 
-      if (!preferredDentistAppliedRef.current && profileResult.status === 'fulfilled' && profileResult.value.user?.patient?.preferredDentistName) {
-        const preferredDentist = profileResult.value.user.patient.preferredDentistName
-        if (loadedDentists.some((dentist) => dentist.name === preferredDentist)) {
-          preferredDentistAppliedRef.current = true
-          setForm((currentForm) => currentForm.dentistName
-            ? currentForm
-            : { ...currentForm, dentistName: preferredDentist })
-        }
+      if (loadedDentists[0]?.name) {
+        setForm((currentForm) => ({
+          ...currentForm,
+          dentistName: loadedDentists[0].name,
+        }))
       }
     }
 
@@ -367,19 +358,12 @@ function BookAppointmentPage() {
   }, [navigate, toast])
 
   useEffect(() => {
-    if (preferredDentistAppliedRef.current || !dentists.length || form.dentistName) return
-
-    const preferredDentist = user?.patient?.preferredDentistName
-    if (!preferredDentist) return
-
-    const isAvailable = dentists.some((dentist) => dentist.name === preferredDentist)
-    if (!isAvailable) return
+    const clinicDentist = dentists[0]?.name
+    if (!clinicDentist || form.dentistName === clinicDentist) return
 
     preferredDentistAppliedRef.current = true
-    setForm((currentForm) => currentForm.dentistName
-      ? currentForm
-      : { ...currentForm, dentistName: preferredDentist })
-  }, [dentists, form.dentistName, user?.patient?.preferredDentistName])
+    setForm((currentForm) => ({ ...currentForm, dentistName: clinicDentist }))
+  }, [dentists, form.dentistName])
 
   useEffect(() => {
     const requestId = availabilityRequestRef.current + 1
@@ -767,7 +751,7 @@ function BookAppointmentPage() {
               <SectionHeader
                 icon={FaRegCalendarAlt}
                 title="Appointment Schedule"
-                description="Choose your preferred visit date, time, dentist, and dental service."
+                description="Choose your preferred visit date, time, and dental service."
               />
               <div className="grid gap-5 md:grid-cols-2">
                 <Field label="Preferred Date" icon={FaRegCalendarAlt} error={fieldErrors.appointmentDate}>
@@ -804,19 +788,9 @@ function BookAppointmentPage() {
                 </Field>
 
                 <Field label="Dentist" icon={FaUserMd} error={fieldErrors.dentistName}>
-                  <select
-                    className={iconInputClass}
-                    name="dentistName"
-                    value={form.dentistName}
-                    onChange={handleChange}
-                  >
-                    <option value="">Any available dentist</option>
-                    {dentists.map((dentist) => (
-                      <option key={dentist.id} value={dentist.name}>
-                        {dentist.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className={`${iconInputClass} flex items-center text-slate-900`}>
+                    {form.dentistName || 'Clinic dentist'}
+                  </div>
                 </Field>
 
                 <Field label="Service" icon={FaTooth} error={fieldErrors.service}>

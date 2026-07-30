@@ -15,6 +15,7 @@ const User = require("../models/User");
 const authRoutes = require("./auth");
 const appointmentRoutes = require("./appointments");
 const dashboardRoutes = require("./dashboard");
+const messageRoutes = require("./messages");
 const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
@@ -214,7 +215,7 @@ const notifyUsersOfPromotion = async (promotion) => {
   }
 
   const users = await User.find({
-    role: { $in: ["patient", "staff", "dentist"] },
+    role: { $in: ["patient", "staff"] },
     status: "active",
   }).select("_id");
 
@@ -274,8 +275,27 @@ const withoutAdminPassword = (body) => {
   return safeBody;
 };
 
+const uniqueContactEmails = (...emails) => [...new Set(
+  emails
+    .flat()
+    .map((email) => String(email || "").trim().toLowerCase())
+    .filter(Boolean),
+)];
+
+const sendPatientContactMail = async ({ patient, fallbackEmail, subject, message, html }) => {
+  const recipients = uniqueContactEmails(patient?.email, patient?.guardianEmail, fallbackEmail);
+  if (!recipients.length) return;
+
+  await Promise.allSettled(recipients.map((to) => sendMail({
+    to,
+    subject,
+    message,
+    html,
+  })));
+};
+
 const sendPatientTemporaryPasswordEmail = async ({ patient, temporaryPassword }) => {
-  if (!patient?.email || !temporaryPassword) return;
+  if (!temporaryPassword) return;
 
   const patientName = [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient";
   const message = `Hello ${patientName}, your Flores-Dizon Dental Clinic patient account has been created. Your temporary password is ${temporaryPassword}. Please sign in and change your password as soon as possible.`;
@@ -290,12 +310,12 @@ const sendPatientTemporaryPasswordEmail = async ({ patient, temporaryPassword })
     </div>
   `;
 
-  await sendMail({
-    to: patient.email,
+  await sendPatientContactMail({
+    patient,
     subject: "Your Temporary Patient Password - Flores-Dizon Dental Clinic",
     message,
     html,
-  }).catch(() => {});
+  });
 };
 
 const toStockStatus = ({ quantity = 0, reorderLevel = 0 }) => {
@@ -356,13 +376,6 @@ const inventoryUsageHandler = async (req, res, next) => {
 
     if (appointment && appointment.status !== "completed") {
       return res.status(400).json({ message: "Inventory usage can only be recorded for completed treatments." });
-    }
-
-    if (req.user.role === "dentist" && appointment?.dentistName) {
-      const dentistName = [req.user.firstName, req.user.lastName].filter(Boolean).join(" ").trim();
-      if (dentistName && appointment.dentistName !== dentistName) {
-        return res.status(403).json({ message: "Dentists can only record usage for their assigned treatments." });
-      }
     }
 
     const inventoryItem = await Inventory.findById(req.params.id);
@@ -757,9 +770,7 @@ const buildCarePatientResponse = (patient, appointments = [], records = []) => {
 };
 
 const getProviderCareData = async (req) => {
-  const name = providerName(req.user);
   const email = String(req.user.email || "").toLowerCase();
-  const userId = String(req.user.id);
 
   if (req.user.role === "staff") {
     const [appointments, records, patients] = await Promise.all([
@@ -783,11 +794,6 @@ const getProviderCareData = async (req) => {
     { createdBy: req.user.id },
     { createdByEmail: email },
   ];
-
-  if (req.user.role === "dentist" && name) {
-    appointmentFilters.push({ dentistName: name });
-    recordFilters.push({ dentistName: name });
-  }
 
   const appointmentQuery = { $or: appointmentFilters };
   const recordQuery = { $or: recordFilters };
@@ -828,10 +834,7 @@ const getProviderCareData = async (req) => {
   return {
     appointments,
     records,
-    patients: [...merged.values()].filter((patient) => {
-      if (req.user.role === "dentist" && patient.assignedDentist && String(patient.assignedDentist) === userId) return true;
-      return true;
-    }),
+    patients: [...merged.values()],
   };
 };
 
@@ -942,10 +945,6 @@ const clinicalNoteScope = (req, ownOnly = false) => {
     { createdBy: req.user.id },
     { createdByEmail: req.user.email },
   ];
-
-  if (req.user.role === "dentist" && name) {
-    ownFilters.push({ dentistName: name });
-  }
 
   if (hasPatientScopedRecordLookup(req) && ["admin", "staff"].includes(req.user.role)) {
     return {};
@@ -1102,11 +1101,11 @@ const treatmentRecordScope = (req, ownOnly = false) => {
     { createdByEmail: req.user.email },
   ];
 
-  if ((req.user.role === "dentist" || req.user.role === "admin") && name) {
+  if (req.user.role === "admin" && name) {
     ownFilters.push({ dentistName: name });
   }
 
-  if (hasPatientScopedRecordLookup(req) && ["admin", "staff", "dentist"].includes(req.user.role)) {
+  if (hasPatientScopedRecordLookup(req) && ["admin", "staff"].includes(req.user.role)) {
     return {};
   }
 
@@ -1230,7 +1229,7 @@ const sanitizePublicSettings = (settings) => ({
   address: settings?.address || "",
   contactNumber: settings?.contactNumber || "",
   email: settings?.email || "",
-  operatingHours: settings?.operatingHours || "Monday to Saturday, 9:00 AM - 6:00 PM",
+  operatingHours: settings?.operatingHours || "Monday to Saturday, 9:00 AM - 5:00 PM",
   clinicLogo: settings?.clinicLogo || "",
   services: (settings?.services || []).map((service) => ({
     id: service._id,
@@ -1242,7 +1241,7 @@ const sanitizePublicSettings = (settings) => ({
   })),
   appointmentSettings: {
     openingTime: "09:00",
-    closingTime: "18:00",
+    closingTime: "17:00",
     appointmentDuration: 30,
     workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
     maxAppointmentsPerDay: 20,
@@ -1300,9 +1299,10 @@ router.get("/public-settings", async (req, res, next) => {
 router.use("/dashboard", dashboardRoutes);
 router.use("/users", userRoutes);
 router.use("/appointments", appointmentRoutes);
+router.use("/messages", messageRoutes);
 router.use(authenticate);
 router.use("/users", authorize("admin"), createCrudRouter(User, { hiddenFields: "-passwordHash" }));
-router.get("/patients/my-care", authorize("staff", "dentist"), async (req, res, next) => {
+router.get("/patients/my-care", authorize("staff"), async (req, res, next) => {
   try {
     const { appointments, records, patients } = await getProviderCareData(req);
     const filteredPatients = patients
@@ -1317,7 +1317,7 @@ router.get("/patients/my-care", authorize("staff", "dentist"), async (req, res, 
     next(error);
   }
 });
-router.get("/patients/my-care/:id", authorize("staff", "dentist"), async (req, res, next) => {
+router.get("/patients/my-care/:id", authorize("staff"), async (req, res, next) => {
   try {
     const { appointments, records, patients } = await getProviderCareData(req);
     const patient = patients.find((item) => String(item._id) === String(req.params.id));
@@ -1512,14 +1512,13 @@ router.use(
     },
   }),
 );
-router.get("/dentalrecords/provider/reports", authorize("staff", "dentist"), async (req, res, next) => {
+router.get("/dentalrecords/provider/reports", authorize("staff"), async (req, res, next) => {
   try {
     const name = providerName(req.user);
     const query = {
       $or: [
         { createdBy: req.user.id },
         { createdByEmail: req.user.email },
-        ...(req.user.role === "dentist" && name ? [{ dentistName: name }] : []),
       ],
     };
     const startDate = req.query.startDate ? parseReportDate(req.query.startDate) : null;
@@ -1568,7 +1567,7 @@ router.get("/dentalrecords/provider/reports", authorize("staff", "dentist"), asy
     next(error);
   }
 });
-router.get("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.get("/dentalrecords/clinical-notes", authorize("admin", "staff"), async (req, res, next) => {
   try {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
@@ -1596,7 +1595,7 @@ router.get("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist
     next(error);
   }
 });
-router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.post("/dentalrecords/clinical-notes", authorize("admin", "staff"), async (req, res, next) => {
   try {
     const patientName = String(req.body.patientName || "").trim();
     const notes = req.body.clinicalNotes || {};
@@ -1630,8 +1629,8 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
     }
 
     const patient = appointment?.patient
-      ? await Patient.findById(appointment.patient).select("_id userId firstName middleName lastName contactNumber email").lean()
-      : (await Patient.find({}).select("_id userId firstName middleName lastName contactNumber email").lean())
+      ? await Patient.findById(appointment.patient).select("_id userId firstName middleName lastName contactNumber email guardianEmail").lean()
+      : (await Patient.find({}).select("_id userId firstName middleName lastName contactNumber email guardianEmail").lean())
         .find((candidate) => normalizePersonName(patientFullName(candidate)) === normalizePersonName(patientName)
           || normalizePersonName(patientFullNameWithMiddle(candidate)) === normalizePersonName(patientName));
     const provider = providerName(req.user);
@@ -1643,7 +1642,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
       visitDate: req.body.visitDate ? parseReportDate(req.body.visitDate) || new Date() : new Date(),
       noteType: String(req.body.noteType || "Clinical Note").trim() || "Clinical Note",
       clinicalNotes,
-      dentistName: appointment?.dentistName || (req.user.role === "dentist" || req.user.role === "admin" ? provider : ""),
+      dentistName: appointment?.dentistName || (req.user.role === "admin" ? provider : ""),
       servicePerformed: appointment?.service || "",
       procedure: appointment?.service || "",
       createdBy: req.user.id,
@@ -1725,9 +1724,10 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
           });
         }
 
-        if (patient?.userId && (patient?.email || appointment?.email)) {
-          sendMail({
-            to: patient?.email || appointment.email,
+        if (patient?.userId) {
+          sendPatientContactMail({
+            patient,
+            fallbackEmail: appointment?.email,
             subject: "Follow-up Appointment Scheduled - Flores-Dizon Dental Clinic",
             message: `A follow-up appointment has been scheduled for ${followUpDate.toLocaleDateString()} at ${followUpTime}. Reason: ${followUpReason}${followUpAdjustmentNote}`,
             html: `
@@ -1773,7 +1773,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff", "dentis
     next(error);
   }
 });
-router.get("/dentalrecords/clinical-notes/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.get("/dentalrecords/clinical-notes/:id", authorize("admin", "staff"), async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid clinical note ID." });
@@ -1792,7 +1792,7 @@ router.get("/dentalrecords/clinical-notes/:id", authorize("admin", "staff", "den
     next(error);
   }
 });
-router.patch("/dentalrecords/clinical-notes/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.patch("/dentalrecords/clinical-notes/:id", authorize("admin", "staff"), async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid clinical note ID." });
@@ -1851,7 +1851,7 @@ router.post("/dentalrecords/clinical-notes/export", authorize("admin"), async (r
     next(error);
   }
 });
-router.get("/dentalrecords/treatment-records", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.get("/dentalrecords/treatment-records", authorize("admin", "staff"), async (req, res, next) => {
   try {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
@@ -1890,7 +1890,7 @@ router.get("/dentalrecords/treatment-records", authorize("admin", "staff", "dent
     next(error);
   }
 });
-router.post("/dentalrecords/treatment-records", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.post("/dentalrecords/treatment-records", authorize("admin", "staff"), async (req, res, next) => {
   try {
     if (req.user.role === "staff") {
       return res.status(403).json({ message: "Staff can view treatment records but cannot create official treatment records." });
@@ -1953,7 +1953,7 @@ router.post("/dentalrecords/treatment-records", authorize("admin", "staff", "den
     next(error);
   }
 });
-router.get("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.get("/dentalrecords/treatment-records/:id", authorize("admin", "staff"), async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: "Invalid treatment record ID." });
     const scope = treatmentRecordScope(req, req.user.role !== "admin" || req.query.scope !== "all");
@@ -1970,7 +1970,7 @@ router.get("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "
     next(error);
   }
 });
-router.patch("/dentalrecords/treatment-records/:id", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.patch("/dentalrecords/treatment-records/:id", authorize("admin", "staff"), async (req, res, next) => {
   try {
     if (req.user.role === "staff") {
       return res.status(403).json({ message: "Staff can view treatment records but cannot edit official treatment records." });
@@ -2004,7 +2004,7 @@ router.patch("/dentalrecords/treatment-records/:id", authorize("admin", "staff",
     next(error);
   }
 });
-router.post("/dentalrecords/treatment-records/export", authorize("admin", "staff", "dentist"), async (req, res, next) => {
+router.post("/dentalrecords/treatment-records/export", authorize("admin", "staff"), async (req, res, next) => {
   try {
     await AuditLog.create({
       action: "Treatment Record Exported",
@@ -2059,10 +2059,10 @@ router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => 
     next(error);
   }
 });
-router.use("/dentalrecords", authorize("admin", "staff", "dentist"), createCrudRouter(DentalRecord));
-router.get("/inventory", authorize("admin", "staff", "dentist"), inventoryListHandler);
-router.post("/inventory/:id/usage", authorize("admin", "staff", "dentist"), inventoryUsageHandler);
-router.post("/inventory/:id/sale", authorize("admin", "staff", "dentist"), inventorySaleHandler);
+router.use("/dentalrecords", authorize("admin", "staff"), createCrudRouter(DentalRecord));
+router.get("/inventory", authorize("admin", "staff"), inventoryListHandler);
+router.post("/inventory/:id/usage", authorize("admin", "staff"), inventoryUsageHandler);
+router.post("/inventory/:id/sale", authorize("admin", "staff"), inventorySaleHandler);
 router.post("/inventory/:id/adjust", authorize("admin"), inventoryAdjustmentHandler);
 router.use(
   "/inventory",
@@ -2103,8 +2103,8 @@ router.use(
     },
   }),
 );
-router.use("/feedback", authorize("admin", "staff", "dentist"), createCrudRouter(Feedback));
-router.get("/promotions", authorize("admin", "staff", "dentist", "patient"), async (req, res, next) => {
+router.use("/feedback", authorize("admin", "staff"), createCrudRouter(Feedback));
+router.get("/promotions", authorize("admin", "staff", "patient"), async (req, res, next) => {
   try {
     await expirePromotions();
     const now = new Date();
@@ -2142,7 +2142,7 @@ router.use(
     afterCreate: notifyUsersOfPromotion,
   }),
 );
-router.use("/notifications", authorize("admin", "staff", "dentist", "patient"), createCrudRouter(Notification));
+router.use("/notifications", authorize("admin", "staff", "patient"), createCrudRouter(Notification));
 router.use("/subscribers", authorize("admin"), createCrudRouter(Subscriber));
 router.use(
   "/audit-logs",

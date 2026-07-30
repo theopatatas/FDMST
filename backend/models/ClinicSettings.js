@@ -26,7 +26,7 @@ const clinicSettingsSchema = new mongoose.Schema(
     operatingHours: {
       type: String,
       trim: true,
-      default: "Monday to Saturday, 9:00 AM - 6:00 PM",
+      default: "Monday to Saturday, 9:00 AM - 5:00 PM",
     },
     clinicLogo: {
       type: String,
@@ -51,7 +51,7 @@ const clinicSettingsSchema = new mongoose.Schema(
     },
     appointmentSettings: {
       openingTime: { type: String, default: "09:00" },
-      closingTime: { type: String, default: "18:00" },
+      closingTime: { type: String, default: "17:00" },
       appointmentDuration: { type: Number, default: 30 },
       workingDays: { type: [String], default: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] },
       maxAppointmentsPerDay: { type: Number, default: 20 },

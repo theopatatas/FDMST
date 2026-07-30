@@ -6,6 +6,23 @@ const EMAIL_MESSAGE = "Enter a valid email address.";
 const REQUIRED_PATIENT_MESSAGE = "First name and last name are required.";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const calculateAge = (dateOfBirth) => {
+  if (!dateOfBirth) return null;
+  const birthDate = new Date(dateOfBirth);
+  const today = new Date();
+
+  if (Number.isNaN(birthDate.getTime()) || birthDate > today) return null;
+
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDifference = today.getMonth() - birthDate.getMonth();
+
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
+};
+
 const normalizeAllergies = (value) => {
   if (Array.isArray(value)) {
     return value.map((item) => String(item).trim()).filter(Boolean);
@@ -28,6 +45,11 @@ const normalizePatientPayload = (body = {}) => ({
   emergencyContact: body.emergencyContact?.trim() || "",
   emergencyContactName: body.emergencyContactName?.trim() || "",
   emergencyContactNumber: normalizeMobileNumber(body.emergencyContactNumber),
+  guardianName: body.guardianName?.trim() || "",
+  guardianRelationship: body.guardianRelationship?.trim() || "",
+  guardianContactNumber: normalizeMobileNumber(body.guardianContactNumber),
+  guardianEmail: body.guardianEmail?.trim().toLowerCase() || "",
+  guardianAddress: body.guardianAddress?.trim() || "",
   allergies: normalizeAllergies(body.allergies),
   medicalConditions: body.medicalConditions?.trim() || "",
   medicalHistory: body.medicalHistory?.trim() || "",
@@ -83,6 +105,21 @@ const validatePatientPayload = (payload, { requireEmail = false, requireMobile =
     errors.dateOfBirth = "Birth date is required.";
   }
 
+  const age = calculateAge(payload.dateOfBirth);
+  if (age !== null && age < 18) {
+    if (!payload.guardianName) errors.guardianName = "Parent/guardian full name is required for patients under 18.";
+    if (!payload.guardianRelationship) errors.guardianRelationship = "Relationship to patient is required for patients under 18.";
+    if (!isValidMobileNumber(payload.guardianContactNumber, { required: true })) {
+      errors.guardianContactNumber = MOBILE_NUMBER_MESSAGE;
+    }
+  } else if (payload.guardianContactNumber && !isValidMobileNumber(payload.guardianContactNumber)) {
+    errors.guardianContactNumber = MOBILE_NUMBER_MESSAGE;
+  }
+
+  if (payload.guardianEmail && !EMAIL_REGEX.test(payload.guardianEmail)) {
+    errors.guardianEmail = EMAIL_MESSAGE;
+  }
+
   return errors;
 };
 
@@ -135,6 +172,20 @@ const assertNoDuplicatePatientContact = async ({ email, contactNumber }, { exclu
   throw error;
 };
 
+const getClinicDentistAssignment = async () => {
+  const admin = await User.findOne({ role: "admin", status: "active" })
+    .sort({ createdAt: 1 })
+    .select("firstName lastName")
+    .lean();
+
+  if (!admin) return {};
+
+  return {
+    assignedDentist: admin._id,
+    assignedDentistName: [admin.firstName, admin.lastName].filter(Boolean).join(" ").trim(),
+  };
+};
+
 const preparePatientCreateBody = async (body, options = {}) => {
   const payload = normalizePatientPayload(body);
   const errors = validatePatientPayload(payload, options);
@@ -147,9 +198,11 @@ const preparePatientCreateBody = async (body, options = {}) => {
   }
 
   await assertNoDuplicatePatientContact(payload, options);
+  const clinicDentist = payload.assignedDentist ? {} : await getClinicDentistAssignment();
 
   return {
     ...payload,
+    ...clinicDentist,
     patientId: body.patientId || await generatePatientId(),
   };
 };

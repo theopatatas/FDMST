@@ -19,7 +19,7 @@ const router = express.Router();
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DEFAULT_APPOINTMENT_SETTINGS = {
   openingTime: "09:00",
-  closingTime: "18:00",
+  closingTime: "17:00",
   appointmentDuration: 30,
   workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
   maxAppointmentsPerDay: 20,
@@ -47,6 +47,25 @@ const OFFICIAL_SERVICES = [
   "Root Canal Therapy (RCT)",
   "Oral Check-up",
 ];
+
+const uniqueContactEmails = (...emails) => [...new Set(
+  emails
+    .flat()
+    .map((email) => String(email || "").trim().toLowerCase())
+    .filter(Boolean),
+)];
+
+const sendPatientContactMail = async ({ patient, fallbackEmail, subject, message, html }) => {
+  const recipients = uniqueContactEmails(patient?.email, patient?.guardianEmail, fallbackEmail);
+  if (!recipients.length) return;
+
+  await Promise.allSettled(recipients.map((to) => sendMail({
+    to,
+    subject,
+    message,
+    html,
+  })));
+};
 
 const startOfDay = (date) => {
   const value = new Date(date);
@@ -158,6 +177,14 @@ const compareAppointmentsByStatusThenSchedule = (scheduleComparator) => (left, r
 };
 
 const fullName = (user) => [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+const getClinicDentist = async () => User.findOne({ role: "admin", status: "active" })
+  .sort({ createdAt: 1 })
+  .select("firstName lastName email role profilePhoto specialization workPreferences")
+  .lean();
+const getClinicDentistName = async () => {
+  const admin = await getClinicDentist();
+  return fullName(admin) || "Flores-Dizon Admin";
+};
 
 const verifyPatientAfterCompletedAppointment = async (appointment, user) => {
   const filters = [];
@@ -567,9 +594,9 @@ const getDentistPersonalSchedule = async (dentistName) => {
   const normalized = String(dentistName).trim().toLowerCase();
   if (!normalized || normalized === "any available dentist") return null;
 
-  const dentists = await User.find({ role: { $in: ["dentist", "admin"] }, status: "active" }).select("firstName lastName workPreferences").lean();
-  const dentist = dentists.find((item) => fullName(item).toLowerCase() === normalized);
-  const schedule = dentist?.workPreferences?.schedule;
+  const admin = await getClinicDentist();
+  if (fullName(admin).toLowerCase() !== normalized) return null;
+  const schedule = admin?.workPreferences?.schedule;
 
   if (!schedule?.workingDays?.length || !schedule.startTime || !schedule.endTime) return null;
 
@@ -606,8 +633,8 @@ const notifyPatientOfStatus = async (appointment, settings) => {
   if (!shouldNotify) return;
 
   const patient = appointment.patient
-    ? await Patient.findById(appointment.patient).select("userId email")
-    : await Patient.findOne({ email: appointment.email }).select("userId email");
+    ? await Patient.findById(appointment.patient).select("userId email guardianEmail")
+    : await Patient.findOne({ email: appointment.email }).select("userId email guardianEmail");
 
   if (!patient?.userId) return;
 
@@ -642,9 +669,9 @@ const notifyPatientOfStatus = async (appointment, settings) => {
     },
   });
 
-  if (patient.email || appointment.email) {
-    sendMail({
-      to: patient.email || appointment.email,
+  sendPatientContactMail({
+      patient,
+      fallbackEmail: appointment.email,
       subject: `${title} - Flores-Dizon Dental Clinic`,
       message,
       html: `
@@ -657,7 +684,6 @@ const notifyPatientOfStatus = async (appointment, settings) => {
         </div>
       `,
     }).catch(() => {});
-  }
 };
 
 const getDisplayAppointmentStatus = (appointment) => (
@@ -730,10 +756,6 @@ const buildProviderAppointmentScope = (user) => {
   const providerId = user?.id || user?._id;
   const scopedFilters = [];
 
-  if (user.role === "dentist" && providerName) {
-    scopedFilters.push({ dentistName: providerName });
-  }
-
   if (providerEmail) {
     scopedFilters.push(
       { completedByEmail: providerEmail },
@@ -754,25 +776,21 @@ const buildProviderAppointmentScope = (user) => {
 };
 
 router.get(
-  "/dentists",
+  "/clinic-dentist",
   asyncHandler(async (req, res) => {
-    const dentists = await User.find({
-      role: { $in: ["dentist", "admin"] },
-      status: "active",
-    })
-      .sort({ firstName: 1, lastName: 1 })
-      .select("firstName lastName email role profilePhoto specialization");
+    const dentist = await getClinicDentist();
 
     res.json({
-      data: dentists.map((dentist) => ({
-        id: dentist._id,
-        name: `${dentist.firstName} ${dentist.lastName}`.trim(),
-        email: dentist.email,
-        role: "dentist",
-        accountRole: dentist.role,
-        profilePhoto: dentist.profilePhoto,
-        specialization: dentist.specialization,
-      })),
+      data: dentist
+        ? {
+            id: dentist._id,
+            name: fullName(dentist),
+            email: dentist.email,
+            role: "admin",
+            profilePhoto: dentist.profilePhoto,
+            specialization: dentist.specialization,
+          }
+        : null,
     });
   }),
 );
@@ -780,7 +798,7 @@ router.get(
 router.get(
   "/availability",
   authenticate,
-  authorize("patient", "admin", "staff", "dentist"),
+  authorize("patient", "admin", "staff"),
   asyncHandler(async (req, res) => {
     const parsedDate = parseAppointmentDate(req.query.date);
 
@@ -799,7 +817,7 @@ router.get(
       });
     }
 
-    const dentistName = req.query.dentistName?.trim();
+    const dentistName = await getClinicDentistName();
     const selectedServiceName = String(req.query.service || "").trim();
     const activeServices = (settings.services || []).filter((item) => item.status !== "inactive");
     const selectedService = selectedServiceName
@@ -961,7 +979,6 @@ router.post(
       email,
       appointmentDate,
       appointmentTime,
-      dentistName,
       service,
       promoCode,
       notes,
@@ -983,7 +1000,7 @@ router.post(
 
     const parsedDate = parseAppointmentDate(appointmentDate);
     const settings = await getCurrentSettings();
-    const normalizedDentistName = dentistName?.trim() || "Any Available Dentist";
+    const normalizedDentistName = await getClinicDentistName();
     const appointmentSettings = {
       ...settings.appointmentSettings,
     };
@@ -1428,7 +1445,7 @@ router.patch(
 router.get(
   "/provider/reports",
   authenticate,
-  authorize("staff", "dentist"),
+  authorize("staff"),
   asyncHandler(async (req, res) => {
     const query = buildProviderAppointmentScope(req.user);
     const startDate = req.query.startDate ? parseAppointmentDate(req.query.startDate) : null;
@@ -1477,7 +1494,7 @@ router.get(
       performedBy: req.user.id,
       performedByEmail: req.user.email,
       metadata: {
-        module: "Dentist/Staff Reports",
+        module: "Staff Reports",
         filters: {
           startDate: req.query.startDate,
           endDate: req.query.endDate,
@@ -1496,7 +1513,7 @@ router.get(
 router.get(
   "/:id",
   authenticate,
-  authorize("admin", "staff", "dentist"),
+  authorize("admin", "staff"),
   asyncHandler(async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid appointment ID." });
@@ -1508,15 +1525,6 @@ router.get(
       return res.status(404).json({ message: "Appointment not found." });
     }
 
-    if (req.user.role === "dentist") {
-      const assignedDentist = String(appointment.dentistName || "").trim().toLowerCase();
-      const currentDentist = fullName(req.user).toLowerCase();
-
-      if (!assignedDentist || assignedDentist === "any available dentist" || assignedDentist !== currentDentist) {
-        return res.status(403).json({ message: "Only the assigned dentist can view this appointment." });
-      }
-    }
-
     res.json({ appointment: sanitizeAppointment(appointment) });
   }),
 );
@@ -1524,7 +1532,7 @@ router.get(
 router.patch(
   "/:id/status",
   authenticate,
-  authorize("admin", "staff", "dentist"),
+  authorize("admin", "staff"),
   asyncHandler(async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid appointment ID." });
@@ -1552,15 +1560,6 @@ router.patch(
 
     if (!existingAppointment) {
       return res.status(404).json({ message: "Appointment not found." });
-    }
-
-    if (req.user.role === "dentist") {
-      const assignedDentist = String(existingAppointment.dentistName || "").trim().toLowerCase();
-      const currentDentist = fullName(req.user).toLowerCase();
-
-      if (!assignedDentist || assignedDentist === "any available dentist" || assignedDentist !== currentDentist) {
-        return res.status(403).json({ message: "Only the assigned dentist can update this appointment outcome." });
-      }
     }
 
     const transitionRules = {
@@ -1720,24 +1719,26 @@ router.patch(
         }],
       });
       createdFollowUps.push(followUpAppointment);
-      if (appointment.email) {
-        sendMail({
-          to: appointment.email,
-          subject: "Follow-up Appointment Scheduled - Flores-Dizon Dental Clinic",
-          message: `A follow-up appointment has been scheduled for ${parsedFollowUpDate.toLocaleDateString()} at ${scheduledFollowUpTime}. Reason: ${String(followUp.reason || "Follow-up visit").trim()}${followUpAdjustmentNote}`,
-          html: `
+	      const followUpPatientContact = appointment.patient
+	        ? await Patient.findById(appointment.patient).select("email guardianEmail")
+	        : await Patient.findOne({ email: appointment.email }).select("email guardianEmail");
+	      sendPatientContactMail({
+	          patient: followUpPatientContact,
+	          fallbackEmail: appointment.email,
+	          subject: "Follow-up Appointment Scheduled - Flores-Dizon Dental Clinic",
+	          message: `A follow-up appointment has been scheduled for ${parsedFollowUpDate.toLocaleDateString()} at ${scheduledFollowUpTime}. Reason: ${String(followUp.reason || "Follow-up visit").trim()}${followUpAdjustmentNote}`,
+	          html: `
             <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.6;">
               <h2 style="color:#082f49;">Follow-up Appointment Scheduled</h2>
               <p>Your follow-up appointment has been scheduled.</p>
               <p><strong>Date:</strong> ${parsedFollowUpDate.toLocaleDateString()}</p>
               <p><strong>Time:</strong> ${scheduledFollowUpTime}</p>
               <p><strong>Reason:</strong> ${String(followUp.reason || "Follow-up visit").trim()}</p>
-              ${followUpValidation.autoAdjusted ? `<p>The requested time was unavailable, so the clinic selected the next available appointment time.</p>` : ""}
-            </div>
-          `,
-        }).catch(() => {});
-      }
-    }
+	              ${followUpValidation.autoAdjusted ? `<p>The requested time was unavailable, so the clinic selected the next available appointment time.</p>` : ""}
+	            </div>
+	          `,
+	        }).catch(() => {});
+	    }
 
     await Promise.allSettled([
       notifyPatientOfStatus(appointment, settings),
@@ -1791,7 +1792,7 @@ router.patch(
 router.patch(
   "/:id/notes",
   authenticate,
-  authorize("admin", "staff", "dentist"),
+  authorize("admin", "staff"),
   asyncHandler(async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid appointment ID." });
@@ -1800,15 +1801,6 @@ router.patch(
     const appointment = await Appointment.findById(req.params.id);
     if (!appointment) {
       return res.status(404).json({ message: "Appointment not found." });
-    }
-
-    if (req.user.role === "dentist") {
-      const assignedDentist = String(appointment.dentistName || "").trim().toLowerCase();
-      const currentDentist = fullName(req.user).toLowerCase();
-
-      if (!assignedDentist || assignedDentist === "any available dentist" || assignedDentist !== currentDentist) {
-        return res.status(403).json({ message: "Only the assigned dentist can update notes for this appointment." });
-      }
     }
 
     const notes = String(req.body.notes || "").trim().slice(0, 1000);
@@ -1860,7 +1852,7 @@ router.patch(
 
     const parsedDate = req.body.appointmentDate ? parseAppointmentDate(req.body.appointmentDate) : appointment.appointmentDate;
     const appointmentTime = String(req.body.appointmentTime || appointment.appointmentTime || "").trim();
-    const dentistName = String(req.body.dentistName || appointment.dentistName || "Any Available Dentist").trim();
+    const dentistName = await getClinicDentistName();
 
     if (!parsedDate || !appointmentTime) {
       return res.status(400).json({ message: "Appointment date and time are required." });
@@ -1875,7 +1867,7 @@ router.patch(
     }).select("_id").lean();
 
     if (conflict) {
-      return res.status(409).json({ message: "This dentist already has an appointment at the selected date and time." });
+      return res.status(409).json({ message: "The clinic dentist already has an appointment at the selected date and time." });
     }
 
     const now = new Date();
@@ -1921,7 +1913,7 @@ router.patch(
 router.get(
   "/",
   authenticate,
-  authorize("admin", "staff", "dentist"),
+  authorize("admin", "staff"),
   asyncHandler(async (req, res) => {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
@@ -1932,9 +1924,7 @@ router.get(
     const period = req.query.period || "default";
     const query = {};
 
-    if (req.user.role === "dentist") {
-      query.dentistName = fullName(req.user);
-    } else if (req.query.dentist && req.query.dentist !== "all") {
+    if (req.query.dentist && req.query.dentist !== "all") {
       query.dentistName = req.query.dentist;
     }
 

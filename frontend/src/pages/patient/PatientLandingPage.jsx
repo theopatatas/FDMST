@@ -19,7 +19,7 @@ import { formatDate, formatStatus } from '../../utils/auth.js'
 const quickActions = [
   {
     title: 'Book Appointment',
-    description: 'Choose your preferred visit date, dentist, and dental service.',
+    description: 'Choose your preferred visit date, time, and dental service.',
     href: '/patient/book-appointment',
     icon: FaCalendarCheck,
     accent: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
