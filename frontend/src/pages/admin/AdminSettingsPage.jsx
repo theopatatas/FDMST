@@ -22,6 +22,7 @@ import {
 import { fdmstApi } from '../../api/fdmstApi.js'
 import PasswordField from '../../components/PasswordField.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
+import { uploadImageFile } from '../../utils/imageUpload.js'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
 
 const inputClass =
@@ -368,16 +369,25 @@ function AdminSettingsPage() {
     saveSettings(settings, 'clinic')
   }
 
-  const handleLogoUpload = (event) => {
+  const handleLogoUpload = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
       toast.error('Clinic logo must be an image.')
+      event.target.value = ''
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => updateSettings(['clinicLogo'], reader.result)
-    reader.readAsDataURL(file)
+    try {
+      const imageUrl = await uploadImageFile(file, { folder: 'clinic', maxSizeBytes: 750 * 1024 })
+      const nextSettings = { ...settings, clinicLogo: imageUrl }
+      setSettings(nextSettings)
+      setFieldErrors((current) => ({ ...current, clinicLogo: '' }))
+      await saveSettings(nextSettings, 'clinic', 'Clinic Logo Updated')
+    } catch (error) {
+      toast.error(error.message || 'Unable to upload clinic logo.')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   const serviceCategories = useMemo(() => ['all', ...new Set(settings.services.map((service) => service.category).filter(Boolean))], [settings.services])

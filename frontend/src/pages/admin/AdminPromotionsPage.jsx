@@ -14,6 +14,7 @@ import { fdmstApi } from '../../api/fdmstApi.js'
 import { inputClass } from '../../components/AdminUi.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { formatDate } from '../../utils/auth.js'
+import { uploadImageFile } from '../../utils/imageUpload.js'
 
 const initialForm = {
   title: '',
@@ -143,7 +144,7 @@ function AdminPromotionsPage() {
     }))
   }
 
-  const handleImageFileChange = (event) => {
+  const handleImageFileChange = async (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
 
@@ -161,18 +162,15 @@ function AdminPromotionsPage() {
       return
     }
 
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      setForm((current) => ({ ...current, imageUrl: String(reader.result || '') }))
+    try {
+      const imageUrl = await uploadImageFile(file, { folder: 'promotions', maxSizeBytes: maxImageSize })
+      setForm((current) => ({ ...current, imageUrl }))
       setFieldErrors((current) => ({ ...current, imageUrl: '' }))
+      toast.success('Promotion banner uploaded.')
+    } catch (error) {
+      setFieldErrors((current) => ({ ...current, imageUrl: error.message || 'Unable to upload the selected image.' }))
+      toast.error(error.message || 'Unable to upload the selected image.')
     }
-
-    reader.onerror = () => {
-      toast.error('Unable to read the selected image.')
-    }
-
-    reader.readAsDataURL(file)
   }
 
   const validate = () => {

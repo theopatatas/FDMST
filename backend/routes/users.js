@@ -159,6 +159,7 @@ const sanitizeNotification = (notification) => ({
 
 const isValidProfilePhoto = (profilePhoto) =>
   !profilePhoto ||
+  /^https?:\/\/.+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(profilePhoto) ||
   (/^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(profilePhoto) &&
     profilePhoto.length <= 750000);
 
@@ -762,6 +763,42 @@ router.patch(
 
     res.json({
       message: "Profile updated successfully.",
+      user: {
+        ...sanitizeUser(user),
+        patient: sanitizePatientProfile(patient),
+      },
+    });
+  }),
+);
+
+router.patch(
+  "/me/profile-photo",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { profilePhoto } = req.body;
+
+    if (!isValidProfilePhoto(profilePhoto)) {
+      return res.status(400).json({
+        message: "Profile photo must be a PNG, JPG, WebP, or GIF image URL.",
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Profile not found." });
+    }
+
+    user.profilePhoto = profilePhoto || "";
+    await user.save();
+    await auditSelfProfileAction(req, user, profilePhoto ? "Changed Profile Picture" : "Removed Profile Picture");
+
+    const patient = user.role === "patient"
+      ? await Patient.findOne({ userId: user._id })
+      : null;
+
+    res.json({
+      message: profilePhoto ? "Profile photo updated successfully." : "Profile photo removed successfully.",
       user: {
         ...sanitizeUser(user),
         patient: sanitizePatientProfile(patient),

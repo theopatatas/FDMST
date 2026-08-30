@@ -183,10 +183,24 @@ export const fdmstApi = {
     request(`/messages/conversations/${id}/read`, {
       method: 'PATCH',
     }),
+  uploadImage: (payload) =>
+    request('/uploads/image', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateProfile: async (payload) => {
     const data = await request('/users/me', {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    })
+
+    authStorage.saveSession(data)
+    return data
+  },
+  updateProfilePhoto: async (profilePhoto) => {
+    const data = await request('/users/me/profile-photo', {
+      method: 'PATCH',
+      body: JSON.stringify({ profilePhoto }),
     })
 
     authStorage.saveSession(data)

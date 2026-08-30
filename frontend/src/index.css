@@ -32,3 +32,22 @@
     transform: translateY(0) scale(1);
   }
 }
+
+@keyframes landingTickerRight {
+  from {
+    transform: translateX(-50%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+.landing-service-ticker {
+  animation: landingTickerRight 38s linear infinite;
+  will-change: transform;
+}
+
+.landing-service-ticker:hover {
+  animation-play-state: paused;
+}

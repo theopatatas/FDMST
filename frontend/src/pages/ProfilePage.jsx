@@ -34,6 +34,7 @@ import {
 import { authStorage, fdmstApi } from '../api/fdmstApi.js'
 import PasswordField from '../components/PasswordField.jsx'
 import { useToast } from '../context/ToastContext.jsx'
+import { uploadImageFile } from '../utils/imageUpload.js'
 import { digitsOnly, validateMobileNumber } from '../utils/validation.js'
 
 const inputClass =
@@ -397,7 +398,7 @@ function ProfilePage() {
     }))
   }, [])
 
-  const handlePhotoChange = (event) => {
+  const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0]
     setPhotoError('')
 
@@ -415,16 +416,44 @@ function ProfilePage() {
       return
     }
 
-    const reader = new FileReader()
-
-    reader.onload = () => {
+    try {
+      const imageUrl = await uploadImageFile(file, { folder: 'profiles', maxSizeBytes: 550 * 1024 })
       setForm((currentForm) => ({
         ...currentForm,
-        profilePhoto: reader.result,
+        profilePhoto: imageUrl,
       }))
+      const response = await fdmstApi.updateProfilePhoto(imageUrl)
+      if (response.user) {
+        setLayoutUser?.(response.user)
+        setForm((currentForm) => ({
+          ...currentForm,
+          ...userToForm(response.user),
+          ...emptyPasswordFields,
+        }))
+      }
+      toast.success(response.message || 'Profile photo updated successfully.')
+    } catch (error) {
+      setPhotoError(error.message || 'Unable to upload the selected image.')
+      event.target.value = ''
     }
+  }
 
-    reader.readAsDataURL(file)
+  const handleRemovePhoto = async () => {
+    setPhotoError('')
+
+    try {
+      const response = await fdmstApi.updateProfilePhoto('')
+      setForm((currentForm) => ({
+        ...currentForm,
+        profilePhoto: '',
+      }))
+      if (response.user) {
+        setLayoutUser?.(response.user)
+      }
+      toast.success(response.message || 'Profile photo removed successfully.')
+    } catch (error) {
+      setPhotoError(error.message || 'Unable to remove profile photo.')
+    }
   }
 
   const validateForm = () => {
@@ -743,7 +772,7 @@ function ProfilePage() {
                       <button
                         type="button"
                         disabled={!isEditingProfile}
-                        onClick={() => setForm((currentForm) => ({ ...currentForm, profilePhoto: '' }))}
+	                        onClick={handleRemovePhoto}
                         className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-100 bg-white px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <FaTrash className="h-4 w-4" aria-hidden="true" />
@@ -1157,12 +1186,7 @@ function ProfilePage() {
                 {form.profilePhoto ? (
                   <button
                     type="button"
-                    onClick={() =>
-                      setForm((currentForm) => ({
-                        ...currentForm,
-                        profilePhoto: '',
-                      }))
-                    }
+	                    onClick={handleRemovePhoto}
                     className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-100 bg-white px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50"
                   >
                     <FaTrash className="h-4 w-4" aria-hidden="true" />

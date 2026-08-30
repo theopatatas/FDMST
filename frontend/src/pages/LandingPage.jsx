@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { fdmstApi } from '../api/fdmstApi.js'
 
 const navItems = [
   { label: 'Home', id: 'hero' },
@@ -363,9 +364,47 @@ function LineIcon({ type }) {
   )
 }
 
+function BrandMark({ logo, className = 'h-10 w-10', iconClass = '[&>svg]:h-5 [&>svg]:w-5' }) {
+  return (
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sky-950 text-amber-500 shadow-md ${className} ${logo ? '' : iconClass}`}>
+      {logo ? <img src={logo} alt="" className="h-full w-full object-contain p-1" /> : <LineIcon type="tooth" />}
+    </span>
+  )
+}
+
+function BrandIcon({ logo, className = 'h-5 w-5' }) {
+  if (!logo) return <LineIcon type="tooth" />
+
+  return <img src={logo} alt="" className={`${className} rounded-md object-contain`} />
+}
+
 function LandingPage() {
   const [openFaq, setOpenFaq] = useState(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [clinicSettings, setClinicSettings] = useState(null)
+  const clinicLogo = clinicSettings?.clinicLogo || ''
+  const clinicName = clinicSettings?.clinicName || 'Flores-Dizon Dental Clinic'
+  const clinicLocationLabel = useMemo(() => {
+    const address = clinicSettings?.address || ''
+    if (!address) return 'Clinic · Talavera'
+    return address.includes('Talavera') ? 'Clinic · Talavera' : address
+  }, [clinicSettings?.address])
+
+  useEffect(() => {
+    let isActive = true
+
+    fdmstApi.getPublicSettings()
+      .then((response) => {
+        if (isActive) setClinicSettings(response || null)
+      })
+      .catch(() => {
+        if (isActive) setClinicSettings(null)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [])
 
   const scrollToSection = (sectionId) => {
     document.getElementById(sectionId)?.scrollIntoView({
@@ -388,15 +427,13 @@ function LandingPage() {
             onClick={() => handleNavClick('hero')}
             type="button"
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-950 text-amber-500 shadow-md [&>svg]:h-5 [&>svg]:w-5">
-              <LineIcon type="tooth" />
-            </span>
+            <BrandMark logo={clinicLogo} />
             <span>
               <span className="block whitespace-nowrap text-sm font-semibold leading-none text-sky-950 md:text-base">
-                Flores-Dizon <span className="text-amber-500">Dental</span>
+                {clinicName}
               </span>
               <span className="mt-1 block text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">
-                Clinic · Talavera
+                {clinicLocationLabel}
               </span>
             </span>
           </button>
@@ -434,7 +471,7 @@ function LandingPage() {
               href="/patient/book-appointment"
             >
               <span className="text-amber-500">
-                <LineIcon type="tooth" />
+                <BrandIcon logo={clinicLogo} className="h-4 w-4" />
               </span>
               Book Appointment
             </a>
@@ -490,7 +527,7 @@ function LandingPage() {
                 href="/patient/book-appointment"
               >
                 <span className="text-amber-500">
-                  <LineIcon type="tooth" />
+                  <BrandIcon logo={clinicLogo} className="h-4 w-4" />
                 </span>
                 Book Appointment
               </a>
@@ -509,10 +546,12 @@ function LandingPage() {
         <div className="relative z-10 mx-auto flex min-h-[calc(100svh-4rem)] max-w-7xl items-center px-4 pb-20 pt-8 sm:min-h-[520px] sm:px-6 sm:pb-20 sm:pt-12 md:min-h-[560px] md:pt-16 lg:min-h-[650px] lg:items-start lg:pt-[120px]">
           <div className="max-w-[560px]">
             <div className="mb-4 inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-amber-400 sm:mb-5 sm:gap-3 sm:text-sm">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white sm:h-9 sm:w-9">
-                <LineIcon type="tooth" />
-              </span>
-              Flores-Dizon Dental Clinic · Talavera
+              <BrandMark
+                logo={clinicLogo}
+                className="h-8 w-8 bg-amber-500 text-white sm:h-9 sm:w-9"
+                iconClass="[&>svg]:h-5 [&>svg]:w-5"
+              />
+              {clinicName} · {clinicLocationLabel.replace(/^Clinic ·\s*/i, '')}
             </div>
             <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-5xl">
               Your Smile, <span className="text-amber-500">Our Priority</span>
@@ -523,18 +562,6 @@ function LandingPage() {
               and existing patients this March.
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-gray-200 sm:mt-5 sm:gap-x-6 sm:gap-y-3 sm:text-base">
-              <span className="inline-flex items-center gap-2">
-                <span className="text-amber-400">
-                  <LineIcon type="star" />
-                </span>
-                4.9 / 5.0 Rating
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <span className="text-emerald-400">
-                  <LineIcon type="shield" />
-                </span>
-                PhilHealth Accredited
-              </span>
               <span className="inline-flex items-center gap-2">
                 <span className="text-sky-300">
                   <LineIcon type="clock" />
@@ -548,7 +575,6 @@ function LandingPage() {
                 onClick={() => handleNavClick('promotions')}
                 type="button"
               >
-                <LineIcon type="tooth" />
                 Current Patient Deals
               </button>
               <button
@@ -563,12 +589,12 @@ function LandingPage() {
         </div>
 
         <div className="absolute inset-x-0 bottom-0 z-20 h-14 bg-sky-950/95">
-          <div className="mx-auto flex h-full max-w-7xl items-center overflow-x-auto px-6">
-            <div className="flex min-w-max items-center gap-8">
-              {tickerServices.map((service) => (
+          <div className="mx-auto flex h-full max-w-7xl items-center overflow-hidden px-6">
+            <div className="landing-service-ticker flex min-w-max items-center gap-8">
+              {[...tickerServices, ...tickerServices].map((service, index) => (
                 <span
                   className="inline-flex whitespace-nowrap text-xs font-medium text-gray-200 sm:text-sm"
-                  key={service}
+                  key={`${service}-${index}`}
                 >
                   <span className="mr-3 text-amber-500">•</span>
                   {service}

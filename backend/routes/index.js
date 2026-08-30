@@ -16,6 +16,7 @@ const authRoutes = require("./auth");
 const appointmentRoutes = require("./appointments");
 const dashboardRoutes = require("./dashboard");
 const messageRoutes = require("./messages");
+const uploadRoutes = require("./uploads");
 const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
@@ -1300,6 +1301,7 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/users", userRoutes);
 router.use("/appointments", appointmentRoutes);
 router.use("/messages", messageRoutes);
+router.use("/uploads", uploadRoutes);
 router.use(authenticate);
 router.use("/users", authorize("admin"), createCrudRouter(User, { hiddenFields: "-passwordHash" }));
 router.get("/patients/my-care", authorize("staff"), async (req, res, next) => {
