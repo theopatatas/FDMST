@@ -123,7 +123,7 @@ const processSteps = [
   {
     title: 'Book Your Appointment',
     description:
-      'Use our easy online booking form to schedule your dental visit. Walk-ins are also welcome during clinic hours (Monday–Saturday, 9AM–5PM).',
+      'Use our easy online booking form to schedule your dental visit. Walk-ins are also welcome during clinic hours.',
     icon: 'calendarCheck',
     iconClass: 'bg-emerald-50 text-emerald-500 ring-emerald-100',
   },
@@ -179,6 +179,30 @@ const faqs = [
       'Yes. The page is branded for Flores-Dizon Dental Clinic and the FDMST system.',
   },
 ]
+
+const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+const formatTimeLabel = (value) => {
+  if (!value) return ''
+  const [hourValue, minuteValue = '00'] = String(value).split(':')
+  const hour = Number(hourValue)
+  const minute = Number(minuteValue)
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value
+
+  const period = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`
+}
+
+const formatWorkingDays = (days = []) => {
+  const orderedDays = dayOrder.filter((day) => days.includes(day))
+  if (!orderedDays.length) return 'By appointment'
+  if (orderedDays.length === 7) return 'Monday - Sunday'
+  if (orderedDays.join('|') === 'Monday|Tuesday|Wednesday|Thursday|Friday|Saturday') return 'Monday - Saturday'
+  if (orderedDays.join('|') === 'Monday|Tuesday|Wednesday|Thursday|Friday') return 'Monday - Friday'
+  return orderedDays.join(', ')
+}
 
 function LineIcon({ type }) {
   const icons = {
@@ -346,6 +370,31 @@ function LineIcon({ type }) {
         <path d="m6 6 12 12" />
       </>
     ),
+    chevronRight: (
+      <path d="m9 18 6-6-6-6" />
+    ),
+    mapPin: (
+      <>
+        <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+        <circle cx="12" cy="10" r="3" />
+      </>
+    ),
+    phone: (
+      <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7A2 2 0 0 1 22 16.9Z" />
+    ),
+    mail: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 7 9 6 9-6" />
+      </>
+    ),
+    code: (
+      <>
+        <path d="m8 18-6-6 6-6" />
+        <path d="m16 6 6 6-6 6" />
+        <path d="m14 4-4 16" />
+      </>
+    ),
   }
 
   return (
@@ -372,12 +421,6 @@ function BrandMark({ logo, className = 'h-10 w-10', iconClass = '[&>svg]:h-5 [&>
   )
 }
 
-function BrandIcon({ logo, className = 'h-5 w-5' }) {
-  if (!logo) return <LineIcon type="tooth" />
-
-  return <img src={logo} alt="" className={`${className} rounded-md object-contain`} />
-}
-
 function LandingPage() {
   const [openFaq, setOpenFaq] = useState(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -389,6 +432,18 @@ function LandingPage() {
     if (!address) return 'Clinic · Talavera'
     return address.includes('Talavera') ? 'Clinic · Talavera' : address
   }, [clinicSettings?.address])
+  const appointmentSettings = clinicSettings?.appointmentSettings || {}
+  const workingDays = appointmentSettings.workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const closedDays = dayOrder.filter((day) => !workingDays.includes(day))
+  const clinicHours = `${formatTimeLabel(appointmentSettings.openingTime || '09:00')} - ${formatTimeLabel(appointmentSettings.closingTime || '17:00')}`
+  const footerQuickLinks = [
+    { label: 'Home', action: () => handleNavClick('hero') },
+    { label: 'Services', action: () => handleNavClick('services') },
+    { label: 'How It Works', action: () => handleNavClick('how-it-works') },
+    { label: 'Register', href: '/register' },
+    { label: 'Sign In', href: '/login' },
+    { label: 'Book Appointment', href: '/patient/book-appointment' },
+  ]
 
   useEffect(() => {
     let isActive = true
@@ -467,12 +522,9 @@ function LandingPage() {
               Sign In
             </a>
             <a
-              className="inline-flex h-10 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl bg-sky-950 px-4 text-xs font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 [&_svg]:h-4 [&_svg]:w-4"
+              className="inline-flex h-10 cursor-pointer items-center justify-center whitespace-nowrap rounded-xl bg-sky-950 px-4 text-xs font-medium text-white shadow-md transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
               href="/patient/book-appointment"
             >
-              <span className="text-amber-500">
-                <BrandIcon logo={clinicLogo} className="h-4 w-4" />
-              </span>
               Book Appointment
             </a>
           </div>
@@ -523,12 +575,9 @@ function LandingPage() {
                 Sign In
               </a>
               <a
-                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-medium text-white shadow-md transition hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl bg-sky-950 px-5 text-sm font-medium text-white shadow-md transition hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                 href="/patient/book-appointment"
               >
-                <span className="text-amber-500">
-                  <BrandIcon logo={clinicLogo} className="h-4 w-4" />
-                </span>
                 Book Appointment
               </a>
             </div>
@@ -566,7 +615,7 @@ function LandingPage() {
                 <span className="text-sky-300">
                   <LineIcon type="clock" />
                 </span>
-                Mon–Sat, 9AM–5PM
+                {formatWorkingDays(workingDays)}, {clinicHours}
               </span>
             </div>
             <div className="mt-6 flex flex-col gap-2.5 sm:mt-8 sm:flex-row sm:gap-3">
@@ -661,15 +710,8 @@ function LandingPage() {
               </p>
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-3 sm:hidden">
+            <div className="mt-5 flex items-center sm:hidden">
               <p className="text-xs font-medium text-slate-500">Swipe to explore services</p>
-              <button
-                className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-sky-950 shadow-sm ring-1 ring-gray-100"
-                onClick={() => handleNavClick('services')}
-                type="button"
-              >
-                View All
-              </button>
             </div>
 
             <div className="-mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 sm:mx-0 sm:mt-10 sm:grid sm:overflow-visible sm:px-0 sm:pb-0 sm:grid-cols-2 xl:grid-cols-4">
@@ -800,38 +842,102 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="bg-slate-900 px-4 py-12 text-white sm:py-16 lg:py-20">
-        <div className="mx-auto max-w-5xl text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500 text-slate-900 sm:mb-6 sm:h-14 sm:w-14">
-            <LineIcon type="shield" />
+      <footer className="bg-[#031b2f] text-slate-300">
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.25fr_1fr_1.2fr_1.1fr] lg:gap-12 lg:py-16">
+          <div className="lg:border-r lg:border-white/10 lg:pr-10">
+            <button
+              type="button"
+              onClick={() => handleNavClick('hero')}
+              className="flex max-w-full items-center gap-4 rounded-2xl text-left transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            >
+              <BrandMark logo={clinicLogo} className="h-16 w-16 rounded-2xl bg-white/5 ring-1 ring-white/10" iconClass="[&>svg]:h-9 [&>svg]:w-9" />
+              <span className="min-w-0">
+                <span className="block truncate text-xl font-bold leading-tight text-white">{clinicName}</span>
+                <span className="mt-1 block text-xs font-bold uppercase tracking-[0.2em] text-amber-400">FDMST</span>
+              </span>
+            </button>
+            <p className="mt-6 max-w-sm text-sm leading-7 text-slate-300">
+              Delivering quality dental care with compassion, technology, and trust.
+            </p>
           </div>
-          <p className="text-xs font-medium uppercase tracking-wider text-amber-400 sm:text-base">Ready to begin?</p>
-          <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-            Book your next dental visit with Flores-Dizon Dental Clinic.
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-sm font-normal leading-6 text-gray-300 sm:mt-5 sm:text-base sm:leading-8">
-            FDMST supports a professional, organized, web-based experience for patients
-            and clinic staff.
-          </p>
-          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <a
-              className="rounded-full bg-amber-500 px-7 py-3 font-medium text-slate-900 shadow-lg transition hover:bg-amber-400"
-              href="/patient/book-appointment"
-            >
-              Book Appointment
-            </a>
-            <a
-              className="rounded-full bg-white px-7 py-3 font-medium text-sky-900 shadow-lg transition hover:bg-gray-100"
-              href="/register"
-            >
-              Register
-            </a>
+
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-white">Quick Links</h3>
+            <div className="mt-6 grid gap-3">
+              {footerQuickLinks.map((link) => (
+                link.href ? (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    className="group flex items-center justify-between rounded-xl py-1 text-sm font-medium text-slate-300 transition hover:text-amber-400"
+                  >
+                    <span>{link.label}</span>
+                    <span className="text-slate-500 transition group-hover:translate-x-1 group-hover:text-amber-400">
+                      <LineIcon type="chevronRight" />
+                    </span>
+                  </a>
+                ) : (
+                  <button
+                    key={link.label}
+                    type="button"
+                    onClick={link.action}
+                    className="group flex items-center justify-between rounded-xl py-1 text-left text-sm font-medium text-slate-300 transition hover:text-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                  >
+                    <span>{link.label}</span>
+                    <span className="text-slate-500 transition group-hover:translate-x-1 group-hover:text-amber-400">
+                      <LineIcon type="chevronRight" />
+                    </span>
+                  </button>
+                )
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-white">Contact Us</h3>
+            <div className="mt-6 grid gap-4 text-sm leading-6">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-amber-400"><LineIcon type="mapPin" /></span>
+                <span>{clinicSettings?.address || 'Maharlika Highway, Marcos District, 18 AH26, Talavera, Nueva Ecija'}</span>
+              </div>
+              <a className="flex items-center gap-3 transition hover:text-amber-400" href={`tel:${clinicSettings?.contactNumber || '09123456789'}`}>
+                <span className="text-amber-400"><LineIcon type="phone" /></span>
+                <span>{clinicSettings?.contactNumber || '+63 912 345 6789'}</span>
+              </a>
+              <a className="flex items-center gap-3 transition hover:text-amber-400" href={`mailto:${clinicSettings?.email || 'info@floresdizondental.com'}`}>
+                <span className="text-amber-400"><LineIcon type="mail" /></span>
+                <span>{clinicSettings?.email || 'info@floresdizondental.com'}</span>
+              </a>
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-amber-400"><LineIcon type="clock" /></span>
+                <span>{formatWorkingDays(workingDays)}: {clinicHours}</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-white">Clinic Hours</h3>
+            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 text-sm shadow-xl shadow-slate-950/20">
+              <div className="flex items-center justify-between gap-4 py-2">
+                <span>{formatWorkingDays(workingDays)}</span>
+                <span className="font-semibold text-white">{clinicHours}</span>
+              </div>
+              <div className="mt-2 border-t border-white/10 pt-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span>{closedDays.length ? closedDays.join(', ') : 'Closed Days'}</span>
+                  <span className="font-semibold text-white">{closedDays.length ? 'Closed' : 'None'}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
 
-      <footer className="bg-sky-950 px-4 py-8 text-center text-sm font-normal text-gray-300">
-        © 2026 FDMST - Flores-Dizon Dental Clinic Management System. All rights reserved.
+        <div className="border-t border-white/10">
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-sm sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+            <p>© 2026 FDMST - Flores-Dizon Dental Clinic Management System. All rights reserved.</p>
+            <p className="font-semibold text-white">&lt;/&gt; BeastCode</p>
+          </div>
+        </div>
       </footer>
     </main>
   )

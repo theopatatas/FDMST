@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { fdmstApi } from '../api/fdmstApi.js'
 import OtpInput from '../components/OtpInput.jsx'
 import { useToast } from '../context/ToastContext.jsx'
+import { formatOtpCountdown, getOtpResendErrorMessage, secondsUntil } from '../utils/otpCountdown.js'
 import { digitsOnly, validateMobileNumber } from '../utils/validation.js'
 
 const initialForm = {
@@ -114,6 +115,10 @@ function RegisterPage() {
   const [pendingRegistration, setPendingRegistration] = useState(null)
   const [otp, setOtp] = useState('')
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
+  const [otpExpiresAt, setOtpExpiresAt] = useState('')
+  const [resendAvailableAt, setResendAvailableAt] = useState('')
+  const [otpSecondsRemaining, setOtpSecondsRemaining] = useState(0)
+  const [resendSecondsRemaining, setResendSecondsRemaining] = useState(0)
 
   const age = useMemo(() => calculateAge(form.dateOfBirth), [form.dateOfBirth])
   const isMinor = age !== '' && Number(age) < 18
@@ -133,6 +138,18 @@ function RegisterPage() {
       isMounted = false
     }
   }, [])
+
+  useEffect(() => {
+    const updateCountdowns = () => {
+      setOtpSecondsRemaining(secondsUntil(otpExpiresAt))
+      setResendSecondsRemaining(secondsUntil(resendAvailableAt))
+    }
+
+    updateCountdowns()
+    const timerId = window.setInterval(updateCountdowns, 1000)
+
+    return () => window.clearInterval(timerId)
+  }, [otpExpiresAt, resendAvailableAt])
 
   const handleChange = (event) => {
     const { name, type, checked, value } = event.target
@@ -220,11 +237,14 @@ function RegisterPage() {
 
       const response = await fdmstApi.requestRegistrationOtp(payload)
       setPendingRegistration({ ...payload, email: response.email || payload.email })
+      setOtpExpiresAt(response.otpExpiresAt || '')
+      setResendAvailableAt(response.resendAvailableAt || '')
       setOtp('')
       toast.success(response.message || 'Verification code sent to your email.')
     } catch (registerError) {
       setFieldErrors(registerError.errors || {})
-      toast.error(registerError.message || 'Registration failed. Please try again.')
+      if (registerError.nextAllowedAt) setResendAvailableAt(registerError.nextAllowedAt)
+      toast.error(getOtpResendErrorMessage(registerError) || 'Registration failed. Please try again.')
     } finally {
       setIsSubmitting(false)
     }
@@ -253,6 +273,8 @@ function RegisterPage() {
       )
       setPendingRegistration(null)
       setOtp('')
+      setOtpExpiresAt('')
+      setResendAvailableAt('')
       setForm(initialForm)
       setFieldErrors({})
     } catch (error) {
@@ -264,13 +286,21 @@ function RegisterPage() {
 
   const resendOtp = async () => {
     if (!pendingRegistration) return
+    if (resendSecondsRemaining > 0) {
+      toast.error(`Please wait before requesting another OTP. Try again in ${formatOtpCountdown(resendSecondsRemaining)}.`)
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const response = await fdmstApi.requestRegistrationOtp(pendingRegistration)
+      setOtpExpiresAt(response.otpExpiresAt || '')
+      setResendAvailableAt(response.resendAvailableAt || '')
       toast.success(response.message || 'Verification code resent.')
       setOtp('')
     } catch (error) {
-      toast.error(error.message || 'Unable to resend verification code.')
+      if (error.nextAllowedAt) setResendAvailableAt(error.nextAllowedAt)
+      toast.error(getOtpResendErrorMessage(error) || 'Unable to resend verification code.')
     } finally {
       setIsSubmitting(false)
     }
@@ -688,12 +718,21 @@ function RegisterPage() {
               Verification Code
               <OtpInput value={otp} onChange={setOtp} disabled={isVerifyingOtp} autoFocus idPrefix="registration-otp" />
             </label>
+            <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950">
+              {otpSecondsRemaining > 0 ? (
+                <span>OTP is valid for {formatOtpCountdown(otpSecondsRemaining)}.</span>
+              ) : (
+                <span className="text-red-600">OTP has expired. Please request a new code.</span>
+              )}
+            </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => {
                   setPendingRegistration(null)
                   setOtp('')
+                  setOtpExpiresAt('')
+                  setResendAvailableAt('')
                 }}
                 className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100"
                 disabled={isVerifyingOtp}
@@ -712,9 +751,11 @@ function RegisterPage() {
               type="button"
               onClick={resendOtp}
               className="mt-5 w-full rounded-xl px-4 py-2 text-sm font-semibold text-sky-950 transition hover:bg-amber-50 hover:text-amber-600 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:opacity-60"
-              disabled={isSubmitting || isVerifyingOtp}
+              disabled={isSubmitting || isVerifyingOtp || resendSecondsRemaining > 0}
             >
-              Resend OTP
+              {resendSecondsRemaining > 0
+                ? `Resend OTP in ${formatOtpCountdown(resendSecondsRemaining)}`
+                : 'Resend OTP'}
             </button>
           </form>
         </div>

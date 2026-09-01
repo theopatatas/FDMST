@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  FaBell,
   FaCalendarAlt,
-  FaCloudDownloadAlt,
-  FaCloudUploadAlt,
   FaCog,
-  FaDatabase,
   FaEdit,
   FaFileExcel,
   FaFilePdf,
@@ -20,7 +16,6 @@ import {
   FaUndo,
 } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
-import PasswordField from '../../components/PasswordField.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { uploadImageFile } from '../../utils/imageUpload.js'
 import { digitsOnly, validateMobileNumber } from '../../utils/validation.js'
@@ -108,9 +103,7 @@ const navItems = [
   { id: 'services', label: 'Services & Pricing', icon: FaStethoscope },
   { id: 'appointments', label: 'Appointment Settings', icon: FaCalendarAlt },
   { id: 'preferences', label: 'System Preferences', icon: FaCog },
-  { id: 'backup', label: 'Backup & Restore', icon: FaDatabase },
   { id: 'audit', label: 'Audit Logs', icon: FaHistory },
-  { id: 'notifications', label: 'Notification Settings', icon: FaBell },
 ]
 
 const emptyService = {
@@ -460,49 +453,6 @@ function AdminSettingsPage() {
     toast.info('Appointment settings reset. Save to apply changes.')
   }
 
-  const handleBackup = (type) => {
-    if (type === 'restore') {
-      setConfirmAction({
-        title: 'Restore Backup',
-        message: 'Restoring a backup may overwrite current settings. Continue?',
-        confirmLabel: 'Restore Backup',
-        onConfirm: async () => {
-          const nextSettings = {
-            ...settings,
-            backup: {
-              lastBackupDate: new Date().toISOString(),
-              status: 'Backup restored successfully',
-            },
-          }
-          setSettings(nextSettings)
-          await saveSettings(nextSettings, 'backup', 'Backup Restored')
-          toast.success('Backup restored successfully.')
-        },
-      })
-      return
-    }
-
-    if (type === 'download') {
-      const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `fdmst-settings-backup-${new Date().toISOString().slice(0, 10)}.json`
-      link.click()
-      URL.revokeObjectURL(url)
-    }
-
-    const nextSettings = {
-      ...settings,
-      backup: {
-        lastBackupDate: new Date().toISOString(),
-        status: type === 'download' ? 'Backup downloaded' : 'Backup completed successfully',
-      },
-    }
-    setSettings(nextSettings)
-    saveSettings(nextSettings, 'backup', type === 'download' ? 'Backup Downloaded' : 'Backup Created')
-  }
-
   const filteredAuditLogs = useMemo(() => auditLogs.filter((log) => {
     const text = [log.performedByEmail, log.entityType, log.action, log.status].filter(Boolean).join(' ').toLowerCase()
     const matchesQuery = !auditQuery || text.includes(auditQuery.toLowerCase())
@@ -638,22 +588,6 @@ function AdminSettingsPage() {
       )
     }
 
-    if (activeSection === 'backup') {
-      return (
-        <SettingsCard title="Backup & Restore" description="Create, download, or restore application backup data.">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-500">Last Backup Date</p><p className="mt-2 text-lg font-semibold text-sky-950">{settings.backup.lastBackupDate ? formatWithPreferences(settings.backup.lastBackupDate, settings.systemPreferences, true) : 'No backup yet'}</p></div>
-            <div className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-500">Backup Status</p><p className="mt-2 text-lg font-semibold text-sky-950">{settings.backup.status}</p></div>
-          </div>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <PrimaryButton loading={savingSection === 'backup'} onClick={() => handleBackup('create')} type="button"><FaCloudUploadAlt /> Create Backup</PrimaryButton>
-            <button className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50" onClick={() => handleBackup('download')} type="button"><FaCloudDownloadAlt className="mr-2 inline" />Download Backup</button>
-            <button className="h-12 rounded-xl border border-red-100 bg-red-50 px-5 text-sm font-semibold text-red-700 transition hover:bg-red-100" onClick={() => handleBackup('restore')} type="button">Restore Backup</button>
-          </div>
-        </SettingsCard>
-      )
-    }
-
     if (activeSection === 'audit') {
       return (
         <SettingsCard title="Audit Logs" description="Review and export administrative activity logs.">
@@ -670,27 +604,7 @@ function AdminSettingsPage() {
       )
     }
 
-    const notifications = settings.notifications
-    return (
-      <SettingsCard title="Notification Settings" description="Configure automatic emails, alerts, and optional SMTP settings.">
-        <div className="grid gap-3">
-          {[
-            ['appointmentConfirmationEmail', 'Appointment Confirmation Email'],
-            ['appointmentReminderEmail', 'Appointment Reminder Email'],
-            ['appointmentCancellationNotification', 'Appointment Cancellation Notification'],
-            ['lowInventoryAlert', 'Low Inventory Alert'],
-            ['newAppointmentAlertForAdmin', 'New Appointment Alert for Admin'],
-          ].map(([key, label]) => <Toggle key={key} checked={Boolean(notifications[key])} label={label} onChange={(value) => updateSettings(['notifications', key], value)} />)}
-        </div>
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <Field label="Email Username"><input className={inputClass} value={notifications.emailUsername} onChange={(event) => updateSettings(['notifications', 'emailUsername'], event.target.value)} /></Field>
-          <PasswordField inputClassName={inputClass} label="Email Password" name="emailPassword" value={notifications.emailPassword} onChange={(event) => updateSettings(['notifications', 'emailPassword'], event.target.value)} autoComplete="new-password" />
-        </div>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <PrimaryButton loading={savingSection === 'notifications'} onClick={() => saveSettings(settings, 'notifications')} type="button"><FaSave /> Save Notifications</PrimaryButton>
-        </div>
-      </SettingsCard>
-    )
+    return null
   }
 
   return (

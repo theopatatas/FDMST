@@ -70,6 +70,10 @@ app.use((error, req, res, next) => {
 
   res.status(error.status || 500).json({
     message: error.status ? error.message : "Something went wrong. Please try again.",
+    ...(error.errors ? { errors: error.errors } : {}),
+    ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+    ...(error.nextAllowedAt ? { nextAllowedAt: error.nextAllowedAt } : {}),
+    ...(error.otpExpiresAt ? { otpExpiresAt: error.otpExpiresAt } : {}),
   });
 });
 

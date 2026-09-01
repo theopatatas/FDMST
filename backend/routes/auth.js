@@ -115,6 +115,7 @@ const recordLoginHistory = async (user, req, status) => {
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
+const OTP_RESEND_COOLDOWN_MINUTES = 5;
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
@@ -126,24 +127,61 @@ const hashOtp = (email, purpose, otp) =>
     .update(`${normalizeEmail(email)}:${purpose}:${otp}:${getJwtSecret()}`)
     .digest("hex");
 
+const assertOtpCanBeSent = async ({ email, purpose }) => {
+  const normalizedEmail = normalizeEmail(email);
+  const cooldownMs = OTP_RESEND_COOLDOWN_MINUTES * 60 * 1000;
+  const cooldownStartedAt = new Date(Date.now() - cooldownMs);
+  const recentToken = await OtpToken.findOne({
+    email: normalizedEmail,
+    purpose,
+    createdAt: { $gt: cooldownStartedAt },
+  }).sort({ createdAt: -1 });
+
+  if (!recentToken) return;
+
+  const nextAllowedAt = new Date(recentToken.createdAt.getTime() + cooldownMs);
+  const retryAfterSeconds = Math.max(1, Math.ceil((nextAllowedAt.getTime() - Date.now()) / 1000));
+  const error = new Error("Please wait 5 minutes before requesting another OTP.");
+  error.status = 429;
+  error.errors = { otp: "Please wait 5 minutes before requesting another OTP." };
+  error.retryAfterSeconds = retryAfterSeconds;
+  error.nextAllowedAt = nextAllowedAt.toISOString();
+  error.otpExpiresAt = recentToken.expiresAt?.toISOString();
+  throw error;
+};
+
 const createOtpToken = async ({ email, purpose, payload = {} }) => {
   const normalizedEmail = normalizeEmail(email);
   const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+  await assertOtpCanBeSent({ email: normalizedEmail, purpose });
 
   await OtpToken.updateMany(
     { email: normalizedEmail, purpose, consumedAt: { $exists: false } },
     { consumedAt: new Date() },
   );
 
-  await OtpToken.create({
+  const token = await OtpToken.create({
     email: normalizedEmail,
     purpose,
     otpHash: hashOtp(normalizedEmail, purpose, otp),
     payload,
-    expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000),
+    expiresAt,
   });
 
-  await sendOtpEmail({ to: normalizedEmail, otp, purpose });
+  try {
+    await sendOtpEmail({ to: normalizedEmail, otp, purpose });
+  } catch (error) {
+    await OtpToken.findByIdAndDelete(token._id).catch(() => {});
+    throw error;
+  }
+
+  return {
+    otpExpiresAt: token.expiresAt.toISOString(),
+    resendAvailableAt: new Date(token.createdAt.getTime() + OTP_RESEND_COOLDOWN_MINUTES * 60 * 1000).toISOString(),
+    resendCooldownSeconds: OTP_RESEND_COOLDOWN_MINUTES * 60,
+  };
 };
 
 const verifyOtpToken = async ({ email, purpose, otp }) => {
@@ -320,7 +358,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const registration = await validateRegistrationPayload(req.body);
 
-    await createOtpToken({
+    const otpMeta = await createOtpToken({
       email: registration.normalizedEmail,
       purpose: "registration",
       payload: {
@@ -335,6 +373,7 @@ router.post(
     res.status(202).json({
       message: "Verification code sent to your email.",
       email: registration.normalizedEmail,
+      ...otpMeta,
     });
   }),
 );
@@ -344,7 +383,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const registration = await validateRegistrationPayload(req.body);
 
-    await createOtpToken({
+    const otpMeta = await createOtpToken({
       email: registration.normalizedEmail,
       purpose: "registration",
       payload: {
@@ -359,6 +398,7 @@ router.post(
     res.json({
       message: "Verification code sent to your email.",
       email: registration.normalizedEmail,
+      ...otpMeta,
     });
   }),
 );
@@ -409,13 +449,17 @@ router.post(
       });
     }
 
-    await createOtpToken({
+    const otpMeta = await createOtpToken({
       email: normalizedEmail,
       purpose: "password_reset",
       payload: { userId: user._id },
     });
 
-    res.json({ message: "Password reset code sent to your email." });
+    res.json({
+      message: "Password reset code sent to your email.",
+      email: normalizedEmail,
+      ...otpMeta,
+    });
   }),
 );
 
@@ -531,16 +575,28 @@ router.post(
 
 router.post(
   "/logout",
-  authenticate,
   asyncHandler(async (req, res) => {
-    AuditLog.create({
-      action: "Logout",
-      entityType: "Authentication",
-      entityId: req.user.id,
-      performedBy: req.user.id,
-      performedByEmail: req.user.email,
-      metadata: { role: req.user.role, status: "Success" },
-    }).catch(() => {});
+    const authHeader = req.headers.authorization;
+
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const payload = jwt.verify(authHeader.slice(7), getJwtSecret());
+        const user = await User.findById(payload.sub).select("email role");
+
+        if (user) {
+          AuditLog.create({
+            action: "Logout",
+            entityType: "Authentication",
+            entityId: user._id,
+            performedBy: user._id,
+            performedByEmail: user.email,
+            metadata: { role: user.role, status: "Success" },
+          }).catch(() => {});
+        }
+      } catch {
+        // Logout remains successful locally even if the session token is already invalid.
+      }
+    }
 
     res.json({ message: "Logout recorded." });
   }),

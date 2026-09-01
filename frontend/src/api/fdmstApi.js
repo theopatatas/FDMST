@@ -56,6 +56,9 @@ const parseResponse = async (response) => {
     const error = new Error(data?.message || 'Something went wrong. Please try again.')
     error.status = response.status
     error.errors = data?.errors || {}
+    error.retryAfterSeconds = data?.retryAfterSeconds
+    error.nextAllowedAt = data?.nextAllowedAt
+    error.otpExpiresAt = data?.otpExpiresAt
     throw error
   }
 

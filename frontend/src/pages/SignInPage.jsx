@@ -191,15 +191,6 @@ function SignInPage() {
                 Sign In
               </h2>
 
-              <p className="mt-3 text-base text-slate-400">
-                Don't have an account?{' '}
-                <Link
-                  to="/register"
-                  className="font-semibold text-sky-950 hover:text-amber-500"
-                >
-                  Create one here
-                </Link>
-              </p>
             </div>
 
           </div>
@@ -267,6 +258,16 @@ function SignInPage() {
             >
               {isSubmitting ? 'Signing In...' : 'Sign In'}
             </button>
+
+            <p className="text-left text-base text-slate-400">
+              Don't have an account?{' '}
+              <Link
+                to="/register"
+                className="font-semibold text-sky-950 transition hover:text-amber-500"
+              >
+                Create one here
+              </Link>
+            </p>
 
           </form>
 

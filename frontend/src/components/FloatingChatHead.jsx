@@ -19,6 +19,10 @@ function formatTime(value) {
   return date.toLocaleString('en-PH', sameDay ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric' })
 }
 
+function isAuthError(error) {
+  return error?.status === 401 || error?.status === 403
+}
+
 function Avatar({ user, size = 'md' }) {
   const sizeClass = size === 'sm' ? 'h-10 w-10 text-xs' : size === 'lg' ? 'h-14 w-14 text-base' : 'h-12 w-12 text-sm'
 
@@ -138,6 +142,12 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   )
 
   const loadConversations = useCallback(async ({ preserveSelection = true } = {}) => {
+    if (!authStorage.isAuthenticated()) {
+      setConversations([])
+      setIsLoading(false)
+      return
+    }
+
     try {
       const response = await fdmstApi.getConversations({ search, status: filter })
       const nextConversations = response.data || []
@@ -155,6 +165,10 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
         setSelectedConversation((current) => nextConversations.find((item) => item.id === current?.id) || current || nextConversations[0] || null)
       }
     } catch (error) {
+      if (isAuthError(error)) {
+        setConversations([])
+        return
+      }
       toast.error(error.message || 'Unable to load conversations.')
       setConversations([])
     } finally {
@@ -163,6 +177,11 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   }, [filter, requestedConversationId, search, toast])
 
   const loadRecipients = useCallback(async () => {
+    if (!authStorage.isAuthenticated()) {
+      setRecipients([])
+      return
+    }
+
     try {
       const response = await fdmstApi.getMessageRecipients()
       setRecipients(response.data || [])
@@ -172,12 +191,13 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   }, [])
 
   const ensurePatientConversation = useCallback(async () => {
-    if (!isPatient) return
+    if (!isPatient || !authStorage.isAuthenticated()) return
     try {
       const response = await fdmstApi.startConversation({})
       setSelectedConversation((current) => current || response.conversation || null)
       await loadConversations({ preserveSelection: true })
     } catch (error) {
+      if (isAuthError(error)) return
       toast.error(error.message || 'Unable to start a clinic conversation.')
     }
   }, [isPatient, loadConversations, toast])
@@ -218,6 +238,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
     let cancelled = false
     Promise.resolve()
       .then(async () => {
+        if (!authStorage.isAuthenticated()) return
         const response = await fdmstApi.getConversationMessages(conversationId)
         if (cancelled) return
         setMessages(response.data || [])
@@ -230,6 +251,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
         }
       })
       .catch((error) => {
+        if (isAuthError(error)) return
         if (!cancelled) toast.error(error.message || 'Unable to load messages.')
       })
 
@@ -319,6 +341,8 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   }, [conversations, recipients])
 
   const startConversation = async (recipient) => {
+    if (!authStorage.isAuthenticated()) return
+
     try {
       const payload = isPatient ? { clinicUserId: recipient?.id } : { patientId: recipient.id }
       const response = await fdmstApi.startConversation(payload)
@@ -326,6 +350,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       await loadConversations({ preserveSelection: true })
       onOpen?.()
     } catch (error) {
+      if (isAuthError(error)) return
       toast.error(error.message || 'Unable to open conversation.')
     }
   }
@@ -333,6 +358,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   const sendMessage = async () => {
     const content = composer.trim()
     if (!content || !selectedConversation?.id || isSending) return
+    if (!authStorage.isAuthenticated()) return
 
     setComposer('')
     setIsSending(true)
@@ -342,6 +368,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       await loadConversations({ preserveSelection: true })
     } catch (error) {
       setComposer(content)
+      if (isAuthError(error)) return
       toast.error(error.message || 'Unable to send message.')
     } finally {
       setIsSending(false)

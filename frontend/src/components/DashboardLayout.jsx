@@ -361,6 +361,7 @@ function DashboardLayout({ portalLabel, navItems }) {
       // Logging out should still succeed locally if the audit request fails.
     }
 
+    setIsChatOpen(false)
     authStorage.clearSession()
     navigate('/login', { replace: true })
   }
@@ -702,12 +703,14 @@ function DashboardLayout({ portalLabel, navItems }) {
         </header>
 
         <Outlet context={{ user, setUser }} />
-        <FloatingChatHead
-          requestedConversationId={requestedChatConversationId}
-          isOpen={isChatOpen}
-          onOpen={() => setIsChatOpen(true)}
-          onClose={() => setIsChatOpen(false)}
-        />
+        {user && authStorage.isAuthenticated() ? (
+          <FloatingChatHead
+            requestedConversationId={requestedChatConversationId}
+            isOpen={isChatOpen}
+            onOpen={() => setIsChatOpen(true)}
+            onClose={() => setIsChatOpen(false)}
+          />
+        ) : null}
       </div>
     </div>
   )

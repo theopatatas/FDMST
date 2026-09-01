@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { fdmstApi } from '../api/fdmstApi.js'
 import OtpInput from '../components/OtpInput.jsx'
 import PasswordField from '../components/PasswordField.jsx'
 import { useToast } from '../context/ToastContext.jsx'
+import { formatOtpCountdown, getOtpResendErrorMessage, secondsUntil } from '../utils/otpCountdown.js'
 
 const inputClass =
   'h-14 rounded-2xl border border-gray-200 bg-white px-5 text-base font-normal text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
@@ -28,6 +29,22 @@ function ForgotPasswordPage() {
     confirmPassword: '',
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [otpExpiresAt, setOtpExpiresAt] = useState('')
+  const [resendAvailableAt, setResendAvailableAt] = useState('')
+  const [otpSecondsRemaining, setOtpSecondsRemaining] = useState(0)
+  const [resendSecondsRemaining, setResendSecondsRemaining] = useState(0)
+
+  useEffect(() => {
+    const updateCountdowns = () => {
+      setOtpSecondsRemaining(secondsUntil(otpExpiresAt))
+      setResendSecondsRemaining(secondsUntil(resendAvailableAt))
+    }
+
+    updateCountdowns()
+    const timerId = window.setInterval(updateCountdowns, 1000)
+
+    return () => window.clearInterval(timerId)
+  }, [otpExpiresAt, resendAvailableAt])
 
   const update = (event) => {
     const { name, value } = event.target
@@ -44,13 +61,23 @@ function ForgotPasswordPage() {
       return
     }
 
+    if (step === 'reset' && resendSecondsRemaining > 0) {
+      toast.error(`Please wait before requesting another OTP. Try again in ${formatOtpCountdown(resendSecondsRemaining)}.`)
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const response = await fdmstApi.requestPasswordResetOtp({ email: form.email.trim() })
+      setOtpExpiresAt(response.otpExpiresAt || '')
+      setResendAvailableAt(response.resendAvailableAt || '')
       toast.success(response.message || 'Password reset code sent.')
       setStep('reset')
     } catch (error) {
-      toast.error(error.message || 'Unable to send reset code.')
+      if (error.otpExpiresAt) setOtpExpiresAt(error.otpExpiresAt)
+      if (error.nextAllowedAt) setResendAvailableAt(error.nextAllowedAt)
+      if (error.status === 429) setStep('reset')
+      toast.error(getOtpResendErrorMessage(error) || 'Unable to send reset code.')
     } finally {
       setIsSubmitting(false)
     }
@@ -76,6 +103,8 @@ function ForgotPasswordPage() {
         confirmPassword: form.confirmPassword,
       })
       toast.success(response.message || 'Password reset successful.')
+      setOtpExpiresAt('')
+      setResendAvailableAt('')
       navigate('/login', { replace: true })
     } catch (error) {
       toast.error(error.message || 'Unable to reset password.')
@@ -125,13 +154,22 @@ function ForgotPasswordPage() {
                 idPrefix="password-reset-otp"
               />
             </label>
+            <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950">
+              {otpSecondsRemaining > 0 ? (
+                <span>OTP is valid for {formatOtpCountdown(otpSecondsRemaining)}.</span>
+              ) : (
+                <span className="text-red-600">OTP has expired. Please request a new code.</span>
+              )}
+            </div>
             <PasswordField inputClassName={inputClass} label="New Password" name="newPassword" value={form.newPassword} onChange={update} autoComplete="new-password" />
             <PasswordField inputClassName={inputClass} label="Confirm New Password" name="confirmPassword" value={form.confirmPassword} onChange={update} autoComplete="new-password" />
             <button type="submit" disabled={isSubmitting} className="h-14 rounded-2xl bg-sky-950 px-8 text-base font-semibold text-white shadow-lg shadow-sky-950/15 transition hover:-translate-y-0.5 hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-sky-100 disabled:opacity-60">
               {isSubmitting ? 'Resetting Password...' : 'Reset Password'}
             </button>
-            <button type="button" disabled={isSubmitting} onClick={requestOtp} className="rounded-xl px-4 py-2 text-sm font-semibold text-sky-950 transition hover:bg-amber-50 hover:text-amber-600 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:opacity-60">
-              Resend OTP
+            <button type="button" disabled={isSubmitting || resendSecondsRemaining > 0} onClick={requestOtp} className="rounded-xl px-4 py-2 text-sm font-semibold text-sky-950 transition hover:bg-amber-50 hover:text-amber-600 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:opacity-60">
+              {resendSecondsRemaining > 0
+                ? `Resend OTP in ${formatOtpCountdown(resendSecondsRemaining)}`
+                : 'Resend OTP'}
             </button>
           </form>
         )}
