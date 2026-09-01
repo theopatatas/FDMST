@@ -353,8 +353,8 @@ function StaffPatientsPage() {
                 <h2 className="text-2xl font-bold text-sky-950">{selectedPatient.fullName}</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedPatient.patientId || 'No Patient ID'} • {selectedPatient.contactNumber || 'No contact number'}</p>
               </div>
-              <button type="button" onClick={() => setSelectedPatient(null)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close patient profile">
-                <FaTimes className="h-4 w-4" aria-hidden="true" />
+              <button type="button" onClick={() => setSelectedPatient(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close patient profile">
+                <FaTimes aria-hidden="true" />
               </button>
             </div>
 
@@ -409,8 +409,8 @@ function StaffPatientsPage() {
                 <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">Add Patient</h2>
                 <p className="mt-1 text-sm text-slate-500">Create a patient record for clinic care and scheduling.</p>
               </div>
-              <button type="button" onClick={closeCreatePatient} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeCreatePatient} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close drawer">
+                <FaTimes />
               </button>
             </div>
 

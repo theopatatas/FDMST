@@ -26,6 +26,7 @@ const sanitizeUser = (user) => ({
   accountStatus: user.accountStatus,
   contactNumber: user.contactNumber,
   profilePhoto: user.profilePhoto,
+  requiresPasswordSetup: Boolean(user.requiresPasswordSetup),
   status: user.status,
   createdAt: user.createdAt,
 });

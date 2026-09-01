@@ -2051,10 +2051,31 @@ router.get("/dentalrecords/my", authorize("patient"), async (req, res, next) => 
         ],
       }).sort({ appointmentDate: -1, createdAt: -1 }),
     ]);
+    const appointmentIds = appointments.map((appointment) => appointment._id).filter(Boolean);
+    const clinicalNotes = appointmentIds.length
+      ? await DentalRecord.find({
+          appointment: { $in: appointmentIds },
+          recordType: "clinical_note",
+          "clinicalNotes.recommendations": { $nin: [null, ""] },
+        })
+        .select("appointment clinicalNotes.recommendations updatedAt createdAt")
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean()
+      : [];
+    const recommendationsByAppointment = new Map();
+
+    clinicalNotes.forEach((note) => {
+      const appointmentId = String(note.appointment || "");
+      if (!appointmentId || recommendationsByAppointment.has(appointmentId)) return;
+      recommendationsByAppointment.set(appointmentId, note.clinicalNotes?.recommendations || "");
+    });
 
     res.json({
       data: records.map(sanitizePatientDentalRecord),
-      appointments,
+      appointments: appointments.map((appointment) => ({
+        ...(appointment.toObject ? appointment.toObject() : appointment),
+        clinicalRecommendation: recommendationsByAppointment.get(String(appointment._id)) || "",
+      })),
       patient,
     });
   } catch (error) {

@@ -209,11 +209,14 @@ export const fdmstApi = {
     authStorage.saveSession(data)
     return data
   },
-  updatePassword: (payload) =>
-    request('/users/me/password', {
+  updatePassword: async (payload) => {
+    const data = await request('/users/me/password', {
       method: 'PATCH',
       body: JSON.stringify(payload),
-    }),
+    })
+    if (data?.user) authStorage.saveSession({ user: data.user })
+    return data
+  },
   getClinicDentist: () => request('/appointments/clinic-dentist'),
   getAppointmentAvailability: (filters = {}) => {
     const params = new URLSearchParams()

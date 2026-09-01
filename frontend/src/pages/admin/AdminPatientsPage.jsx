@@ -533,7 +533,7 @@ function AdminPatientsPage() {
       {selectedPatient ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
           <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-[1.75rem] bg-white p-6 shadow-2xl">
-            <div className="flex justify-between gap-4"><div><h2 className="text-2xl font-semibold text-sky-950">{fullName(selectedPatient)}</h2><p className="text-sm text-slate-500">{selectedPatient.email || 'No email'}</p></div><button onClick={() => setSelectedPatient(null)} className="h-10 rounded-xl border px-4 text-sm font-semibold">Close</button></div>
+            <div className="flex justify-between gap-4"><div><h2 className="text-2xl font-semibold text-sky-950">{fullName(selectedPatient)}</h2><p className="text-sm text-slate-500">{selectedPatient.email || 'No email'}</p></div><button type="button" onClick={() => setSelectedPatient(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close patient details"><FaTimes aria-hidden="true" /></button></div>
             <div className="mt-6 grid gap-5 lg:grid-cols-2">
               <section className="rounded-2xl bg-slate-50 p-4">
                 <h3 className="font-semibold text-sky-950">Personal Information</h3>
@@ -574,8 +574,8 @@ function AdminPatientsPage() {
                 <h2 className="mt-1 break-words text-2xl font-semibold text-sky-950">{editingId ? 'Edit Patient' : 'Add Patient'}</h2>
                 <p className="mt-1 text-sm text-slate-500">Patient account changes require admin password verification.</p>
               </div>
-              <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeDrawer} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close drawer">
+                <FaTimes />
               </button>
             </div>
 
@@ -766,8 +766,8 @@ function AdminPatientsPage() {
                   <p className="mt-2 text-sm leading-6 text-slate-500">{confirmation.description}</p>
                 </div>
               </div>
-              <button type="button" onClick={closeConfirmation} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close confirmation">
-                <FaTimes className="h-4 w-4" aria-hidden="true" />
+              <button type="button" onClick={closeConfirmation} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close confirmation">
+                <FaTimes aria-hidden="true" />
               </button>
             </div>
 

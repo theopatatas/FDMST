@@ -488,7 +488,7 @@ function StaffLandingPage() {
                 <h2 className="mt-1 text-xl font-semibold text-sky-950">{selectedAppointment.patientName}</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedAppointment.service}</p>
               </div>
-              <button type="button" onClick={() => setSelectedAppointment(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100">
+              <button type="button" onClick={() => setSelectedAppointment(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50">
                 <FaTimes />
               </button>
             </div>

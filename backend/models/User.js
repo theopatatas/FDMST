@@ -29,6 +29,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       select: false,
     },
+    requiresPasswordSetup: {
+      type: Boolean,
+      default: false,
+    },
     role: {
       type: String,
       enum: ["admin", "staff", "patient"],

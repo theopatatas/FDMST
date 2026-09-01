@@ -11,6 +11,7 @@ import {
   FaPhoneAlt,
   FaRegCalendarAlt,
   FaStethoscope,
+  FaTimes,
   FaTooth,
   FaUser,
   FaUserMd,
@@ -153,6 +154,17 @@ function formatServiceDuration(value) {
   return Number.isFinite(minutes) && minutes > 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : 'Duration not specified'
 }
 
+function formatDentistName(value, fallback = 'Flores Dizon') {
+  const name = String(value || '').trim()
+  if (!name) return fallback
+  if (/^flores[-\s]+dizon\s+admin$/i.test(name)) return 'Flores Dizon'
+  return name
+    .replace(/^admin\s*[-–—]\s*/i, '')
+    .replace(/\s*[-–—]\s*admin$/i, '')
+    .replace(/-/g, ' ')
+    .trim() || fallback
+}
+
 function formatPromoDiscount(promotion) {
   if (!promotion) return ''
 
@@ -189,7 +201,6 @@ function BookAppointmentPage() {
   const [user] = useState(() => authStorage.getUser())
   const availabilityRequestRef = useRef(0)
   const promoRequestRef = useRef(0)
-  const preferredDentistAppliedRef = useRef(false)
   const [dentists, setDentists] = useState([])
   const [clinicSettings, setClinicSettings] = useState(null)
   const [bookingDataError, setBookingDataError] = useState('')
@@ -289,11 +300,15 @@ function BookAppointmentPage() {
 
     if (!service && !promoCode) return
 
-    setForm((currentForm) => ({
-      ...currentForm,
-      service: service || currentForm.service,
-      promoCode: promoCode || currentForm.promoCode,
-    }))
+    const timeoutId = window.setTimeout(() => {
+      setForm((currentForm) => ({
+        ...currentForm,
+        service: service || currentForm.service,
+        promoCode: promoCode || currentForm.promoCode,
+      }))
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [location.search])
 
   useEffect(() => {
@@ -361,8 +376,11 @@ function BookAppointmentPage() {
     const clinicDentist = dentists[0]?.name
     if (!clinicDentist || form.dentistName === clinicDentist) return
 
-    preferredDentistAppliedRef.current = true
-    setForm((currentForm) => ({ ...currentForm, dentistName: clinicDentist }))
+    const timeoutId = window.setTimeout(() => {
+      setForm((currentForm) => ({ ...currentForm, dentistName: clinicDentist }))
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [dentists, form.dentistName])
 
   useEffect(() => {
@@ -479,13 +497,14 @@ function BookAppointmentPage() {
   useEffect(() => {
     const requestId = promoRequestRef.current + 1
     promoRequestRef.current = requestId
-    setAppliedPromo(null)
-    setPromoMessage('')
-
-    if (!form.service || !selectedService) return
 
     const manualCode = form.promoCode.trim()
     const timeoutId = window.setTimeout(async () => {
+      setAppliedPromo(null)
+      setPromoMessage('')
+
+      if (!form.service || !selectedService) return
+
       setIsApplyingPromo(true)
 
       try {
@@ -789,7 +808,7 @@ function BookAppointmentPage() {
 
                 <Field label="Dentist" icon={FaUserMd} error={fieldErrors.dentistName}>
                   <div className={`${iconInputClass} flex items-center text-slate-900`}>
-                    {form.dentistName || 'Clinic dentist'}
+                    {formatDentistName(form.dentistName || dentists[0]?.name)}
                   </div>
                 </Field>
 
@@ -912,7 +931,7 @@ function BookAppointmentPage() {
                     <div>
                       <p className="text-sm font-semibold text-sky-950">Availability Preview</p>
                       <p className="mt-1 text-sm text-slate-500">
-                        {(form.dentistName || 'Any available dentist')} | {formattedSelectedDate} | {form.service || 'Select a service'}
+                        {formatDentistName(form.dentistName || dentists[0]?.name)} | {formattedSelectedDate} | {form.service || 'Select a service'}
                       </p>
                     </div>
                     <span className="inline-flex rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-100">
@@ -993,8 +1012,8 @@ function BookAppointmentPage() {
       </div>
       {isReviewOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
-          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-            <div className="flex items-start justify-between gap-4">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:px-8">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Booking Summary</p>
                 <h2 className="mt-2 text-2xl font-semibold text-sky-950">Review Appointment Details</h2>
@@ -1005,46 +1024,48 @@ function BookAppointmentPage() {
               <button
                 type="button"
                 onClick={() => setIsReviewOpen(false)}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-sky-950"
+                className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"
                 aria-label="Close appointment review"
               >
-                x
+                <FaTimes />
               </button>
             </div>
-            <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Service</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.service}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.dentistName || 'Any available dentist'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Date</dt><dd className="mt-1 font-semibold text-sky-950">{formattedSelectedDate}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Time</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.appointmentTime || 'Not selected'}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Duration</dt><dd className="mt-1 font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</dd></div>
-              {reviewData.reason.trim() ? (
-                <div className="rounded-2xl bg-slate-50 p-4 sm:col-span-2 xl:col-span-3">
-                  <dt className="font-semibold text-slate-900">Reason for Visit</dt>
-                  <dd className="mt-1 whitespace-pre-line font-semibold leading-6 text-sky-950">{reviewData.reason.trim()}</dd>
-                </div>
-              ) : null}
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Original Price</dt><dd className="mt-1 font-semibold text-sky-950">{currencyFormatter.format(priceSummary.originalPrice)}</dd></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Promo Discount</dt><dd className="mt-1 font-semibold text-emerald-700">-{currencyFormatter.format(priceSummary.discountAmount)}</dd></div>
-              <div className="rounded-2xl bg-emerald-50 p-4"><dt className="font-semibold text-slate-900">Final Price</dt><dd className="mt-1 text-lg font-semibold text-emerald-800">{currencyFormatter.format(priceSummary.finalPrice)}</dd></div>
-            </dl>
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setIsReviewOpen(false)}
-                disabled={isSubmitting}
-                className="inline-flex h-12 min-w-40 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Edit Details
-              </button>
-              <button
-                type="button"
-                onClick={submitBookingRequest}
-                disabled={isSubmitting}
-                className="inline-flex h-12 min-w-48 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <FaCalendarCheck className="h-4 w-4" aria-hidden="true" />
-                {isSubmitting ? 'Confirming...' : 'Confirm Appointment'}
-              </button>
+            <div className="p-6 sm:p-8">
+              <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Service</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.service}</dd></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-1 font-semibold text-sky-950">{formatDentistName(reviewData.dentistName || dentists[0]?.name)}</dd></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Date</dt><dd className="mt-1 font-semibold text-sky-950">{formattedSelectedDate}</dd></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Time</dt><dd className="mt-1 font-semibold text-sky-950">{reviewData.appointmentTime || 'Not selected'}</dd></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Duration</dt><dd className="mt-1 font-semibold text-sky-950">{selectedService ? formatServiceDuration(selectedService.duration) : 'Duration not specified'}</dd></div>
+                {reviewData.reason.trim() ? (
+                  <div className="rounded-2xl bg-slate-50 p-4 sm:col-span-2 xl:col-span-3">
+                    <dt className="font-semibold text-slate-900">Reason for Visit</dt>
+                    <dd className="mt-1 whitespace-pre-line font-semibold leading-6 text-sky-950">{reviewData.reason.trim()}</dd>
+                  </div>
+                ) : null}
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Original Price</dt><dd className="mt-1 font-semibold text-sky-950">{currencyFormatter.format(priceSummary.originalPrice)}</dd></div>
+                <div className="rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Promo Discount</dt><dd className="mt-1 font-semibold text-emerald-700">-{currencyFormatter.format(priceSummary.discountAmount)}</dd></div>
+                <div className="rounded-2xl bg-emerald-50 p-4"><dt className="font-semibold text-slate-900">Final Price</dt><dd className="mt-1 text-lg font-semibold text-emerald-800">{currencyFormatter.format(priceSummary.finalPrice)}</dd></div>
+              </dl>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsReviewOpen(false)}
+                  disabled={isSubmitting}
+                  className="inline-flex h-12 min-w-40 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Edit Details
+                </button>
+                <button
+                  type="button"
+                  onClick={submitBookingRequest}
+                  disabled={isSubmitting}
+                  className="inline-flex h-12 min-w-48 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <FaCalendarCheck className="h-4 w-4" aria-hidden="true" />
+                  {isSubmitting ? 'Confirming...' : 'Confirm Appointment'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1067,7 +1088,7 @@ function BookAppointmentPage() {
                   <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Appointment Number</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.appointmentId}</dd></div>
                   <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Current Status</dt><dd className="mt-2 font-semibold text-amber-700">Pending</dd></div>
                   <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Service</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.service}</dd></div>
-                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-2 break-words font-semibold text-sky-950">{bookingSuccess.dentistName || 'Any available dentist'}</dd></div>
+                  <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Dentist</dt><dd className="mt-2 break-words font-semibold text-sky-950">{formatDentistName(bookingSuccess.dentistName || dentists[0]?.name)}</dd></div>
                   <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Date</dt><dd className="mt-2 font-semibold text-sky-950">{bookingSuccess.appointmentDate ? new Date(bookingSuccess.appointmentDate).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not provided'}</dd></div>
                   <div className="flex min-h-24 flex-col justify-between rounded-2xl bg-slate-50 p-4"><dt className="font-semibold text-slate-900">Time</dt><dd className="mt-2 font-semibold text-sky-950">{bookingSuccess.appointmentTime}</dd></div>
                 </dl>
@@ -1079,18 +1100,18 @@ function BookAppointmentPage() {
                   >
                     Book Another Appointment
                   </button>
-                  <Link
-                    to="/patient"
-                    state={{ refreshDashboard: Date.now() }}
-                    className="inline-flex h-12 min-w-44 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50"
-                  >
+	                  <Link
+	                    to="/patient"
+	                    state={{ refreshDashboard: true }}
+	                    className="inline-flex h-12 min-w-44 items-center justify-center rounded-xl border border-slate-200 px-5 text-center text-sm font-semibold text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-50"
+	                  >
                     Return to Dashboard
                   </Link>
-                  <Link
-                    to="/patient"
-                    state={{ refreshDashboard: Date.now(), openAppointments: true }}
-                    className="inline-flex h-12 min-w-48 items-center justify-center rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900"
-                  >
+	                  <Link
+	                    to="/patient"
+	                    state={{ refreshDashboard: true, openAppointments: true }}
+	                    className="inline-flex h-12 min-w-48 items-center justify-center rounded-xl bg-sky-950 px-5 text-center text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sky-900"
+	                  >
                     View My Appointments
                   </Link>
                 </div>

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FaEdit,
   FaEnvelope,
-  FaLock,
   FaPhone,
   FaPlus,
   FaRedo,
@@ -29,7 +28,6 @@ const initialForm = {
   firstName: '',
   lastName: '',
   email: '',
-  password: '',
   role: 'staff',
   contactNumber: '',
 }
@@ -155,7 +153,7 @@ function AdminStaffPage() {
   const visibleStaff = filteredStaff.slice((page - 1) * pageSize, page * pageSize)
 
   useEffect(() => {
-    setPage(1)
+    Promise.resolve().then(() => setPage(1))
   }, [query, statusFilter])
 
   const loadStaff = useCallback(async () => {
@@ -259,10 +257,6 @@ function AdminStaffPage() {
       nextErrors.email = 'Enter a valid email address.'
     }
 
-    if (!isEditing && form.password.length < 8) {
-      nextErrors.password = 'Temporary password must be at least 8 characters long.'
-    }
-
     const mobileError = validateMobileNumber(form.contactNumber)
 
     if (mobileError) {
@@ -289,9 +283,9 @@ function AdminStaffPage() {
     openConfirmation({
       action: isEditing ? 'update' : 'create',
       title: isEditing ? 'Confirm Staff Update' : 'Confirm Staff Creation',
-      description: isEditing
-        ? 'Re-enter your admin password to save changes to this staff account.'
-        : `Re-enter your admin password to create this ${formatRole(form.role).toLowerCase()} account.`,
+	      description: isEditing
+	        ? 'Re-enter your admin password to save changes to this staff account.'
+	        : `Re-enter your admin password to create this ${formatRole(form.role).toLowerCase()} account and send a welcome email.`,
       submitLabel: isEditing ? 'Verify and Save' : 'Verify and Create',
       target: editingStaffId,
       status: '',
@@ -301,12 +295,11 @@ function AdminStaffPage() {
   const handleEdit = (member) => {
     setEditingStaffId(member.id)
     setForm({
-      firstName: member.firstName || '',
-      lastName: member.lastName || '',
-      email: member.email || '',
-      password: '',
-      role: 'staff',
-      contactNumber: member.contactNumber || '',
+	      firstName: member.firstName || '',
+	      lastName: member.lastName || '',
+	      email: member.email || '',
+	      role: 'staff',
+	      contactNumber: member.contactNumber || '',
     })
     setFieldErrors({})
     setIsDrawerOpen(true)
@@ -369,12 +362,11 @@ function AdminStaffPage() {
         closeDrawer()
       } else {
         response = await fdmstApi.createStaff({
-          firstName: form.firstName.trim(),
-          lastName: form.lastName.trim(),
-          email: form.email.trim(),
-          password: form.password,
-          role: form.role,
-          contactNumber: form.contactNumber,
+	          firstName: form.firstName.trim(),
+	          lastName: form.lastName.trim(),
+	          email: form.email.trim(),
+	          role: form.role,
+	          contactNumber: form.contactNumber,
           adminPassword,
         })
 
@@ -539,8 +531,8 @@ function AdminStaffPage() {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">Create and update staff portal access.</p>
               </div>
-              <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeDrawer} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close drawer">
+                <FaTimes />
               </button>
             </div>
 
@@ -584,19 +576,11 @@ function AdminStaffPage() {
                 </label>
 
                 {!isEditing ? (
-                  <div className="sm:col-span-2">
-                    <PasswordField
-                      inputClassName={`${iconInputClass} pl-12`}
-                      label="Temporary Password"
-                      leftIcon={FaLock}
-                      name="password"
-                      minLength={8}
-                      value={form.password}
-                      onChange={handleChange}
-                      autoComplete="new-password"
-                      required
-                    />
-                    {fieldErrors.password ? <span className="mt-2 block text-xs font-medium text-red-600">{fieldErrors.password}</span> : null}
+                  <div className="flex gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-4 text-sm font-semibold leading-6 text-emerald-800 sm:col-span-2">
+                    <FaEnvelope className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <p>
+                      A welcome email will be sent with the default password 12345678. The employee must create their own password on first login.
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -647,10 +631,10 @@ function AdminStaffPage() {
               <button
                 type="button"
                 onClick={handleAccessDismiss}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-sky-950 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"
                 aria-label="Close Staff Management unlock modal"
               >
-                <FaTimes className="h-4 w-4" aria-hidden="true" />
+                <FaTimes aria-hidden="true" />
               </button>
             </div>
 

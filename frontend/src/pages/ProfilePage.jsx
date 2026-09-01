@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   FaAddressCard,
   FaBirthdayCake,
@@ -64,7 +64,6 @@ function userToForm(user) {
     recoveryEmail: user?.recoveryEmail || '',
     licenseNumber: user?.licenseNumber || '',
     specialization: user?.specialization || '',
-    preferredDentistName: patient.preferredDentistName || '',
     dateOfBirth: toDateInputValue(patient.dateOfBirth),
     guardianName: patient.guardianName || '',
     guardianRelationship: patient.guardianRelationship || '',
@@ -255,7 +254,6 @@ function ProfilePage() {
   const [fieldErrors, setFieldErrors] = useState({})
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [loginHistoryPage, setLoginHistoryPage] = useState(1)
-  const [dentists, setDentists] = useState([])
   const [patientAppointments, setPatientAppointments] = useState([])
 
   const user = useMemo(() => layoutUser || authStorage.getUser(), [layoutUser])
@@ -267,10 +265,6 @@ function ProfilePage() {
   const loginHistoryPageSize = 5
   const totalLoginHistoryPages = Math.max(Math.ceil(loginHistory.length / loginHistoryPageSize), 1)
   const paginatedLoginHistory = loginHistory.slice((loginHistoryPage - 1) * loginHistoryPageSize, loginHistoryPage * loginHistoryPageSize)
-  const preferredDentist = useMemo(
-    () => dentists.find((dentist) => dentist.name === form.preferredDentistName || dentist.name === patient.preferredDentistName),
-    [dentists, form.preferredDentistName, patient.preferredDentistName],
-  )
   const completedAppointments = useMemo(
     () => patientAppointments.filter((appointment) => appointment.status === 'completed'),
     [patientAppointments],
@@ -304,24 +298,6 @@ function ProfilePage() {
       isActive = false
     }
   }, [user])
-
-  useEffect(() => {
-    if (user?.role !== 'patient') return undefined
-
-    let isActive = true
-    fdmstApi.getClinicDentist()
-      .then((response) => {
-        if (!isActive) return
-        setDentists(response.data ? [response.data] : [])
-      })
-      .catch(() => {
-        if (isActive) setDentists([])
-      })
-
-    return () => {
-      isActive = false
-    }
-  }, [user?.role])
 
   useEffect(() => {
     if (user?.role !== 'patient') return undefined
@@ -587,7 +563,6 @@ function ProfilePage() {
       }
 
       if (user?.role === 'patient') {
-        payload.preferredDentistName = form.preferredDentistName
         payload.dateOfBirth = form.dateOfBirth
         payload.guardianName = form.guardianName.trim()
         payload.guardianRelationship = form.guardianRelationship.trim()
@@ -657,10 +632,10 @@ function ProfilePage() {
               <button
                 type="button"
                 onClick={handleProfileAccessDismiss}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-sky-950 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"
                 aria-label="Close admin profile unlock modal"
               >
-                <FaTimes className="h-4 w-4" aria-hidden="true" />
+                <FaTimes aria-hidden="true" />
               </button>
             </div>
 
@@ -1065,7 +1040,6 @@ function ProfilePage() {
               <DetailCard icon={FaBirthdayCake} label="Date of Birth" value={formatDate(patient.dateOfBirth)} tone="rose" />
               <DetailCard icon={FaVenusMars} label="Gender" value={formatGender(patient.gender)} tone="slate" />
               <DetailCard icon={FaMapMarkerAlt} label="Address" value={patient.address} />
-              <DetailCard icon={FaUserMd} label="Preferred Dentist" value={patient.preferredDentistName || 'No preference set'} tone="emerald" />
               <DetailCard
                 icon={FaAddressCard}
                 label="Emergency Contact"
@@ -1100,7 +1074,6 @@ function ProfilePage() {
                   </div>
                 </div>
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  <DetailCard icon={FaUserMd} label="Preferred Dentist" value={patient.preferredDentistName || 'No preference set'} tone="emerald" />
                   <DetailCard icon={FaRegCalendarAlt} label="Last Visit Date" value={formatDate(lastCompletedAppointment?.appointmentDate)} />
                   <DetailCard icon={FaUser} label="Last Treating Dentist" value={lastCompletedAppointment?.dentistName || 'Not recorded'} tone="amber" />
                   <DetailCard icon={FaCheckCircle} label="Completed Treatments" value={completedAppointments.length} tone="emerald" />
@@ -1108,38 +1081,7 @@ function ProfilePage() {
               </article>
             </section>
 
-            <section className="mb-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-              <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-3 border-b border-gray-100 pb-5">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-50 text-amber-600"><FaUserMd /></span>
-                  <div>
-                    <h3 className="text-lg font-semibold text-sky-950">Preferred Dentist</h3>
-                    <p className="text-sm text-slate-500">Booking will preselect this dentist when available.</p>
-                  </div>
-                </div>
-                <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-4">
-                    {preferredDentist?.profilePhoto ? (
-                      <img src={preferredDentist.profilePhoto} alt="" className="h-16 w-16 rounded-2xl object-cover ring-1 ring-slate-100" />
-                    ) : (
-                      <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sky-950 text-lg font-semibold text-amber-400">
-                        {patient.preferredDentistName ? patient.preferredDentistName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'FD'}
-                      </span>
-                    )}
-                    <div>
-                      <p className="text-lg font-semibold text-sky-950">{patient.preferredDentistName || 'No preferred dentist set'}</p>
-                      <p className="mt-1 text-sm text-slate-500">{preferredDentist?.specialization || 'General Dentistry'}</p>
-                      <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${preferredDentist ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {preferredDentist ? 'Available' : 'Not selected'}
-                      </span>
-                    </div>
-                  </div>
-                  <Link to="/patient/book-appointment" className="inline-flex h-12 items-center justify-center rounded-xl bg-sky-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-900">
-                    Book with Preferred Dentist
-                  </Link>
-                </div>
-              </article>
-
+            <section className="mb-8">
               <article className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-semibold text-sky-950">Profile Activity</h3>
                 <div className="mt-5 grid gap-3 text-sm">
@@ -1372,24 +1314,6 @@ function ProfilePage() {
                     />
                   </label>
                 </>
-              ) : null}
-              {!isAdmin ? (
-                <label className="grid gap-2 text-sm font-semibold text-slate-500 sm:col-span-2">
-                  Preferred Dentist
-                  <select
-                    className={inputClass}
-                    name="preferredDentistName"
-                    value={form.preferredDentistName}
-                    onChange={handleChange}
-                  >
-                    <option value="">No preferred dentist</option>
-                    {dentists.map((dentist) => (
-                      <option key={dentist.id} value={dentist.name}>
-                        {dentist.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               ) : null}
               {isAdmin ? (
                 <label className="grid gap-2 text-sm font-semibold text-slate-500 sm:col-span-2">

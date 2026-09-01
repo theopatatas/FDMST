@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FaBoxOpen, FaMinus, FaSearch, FaShoppingCart, FaTimes } from 'react-icons/fa'
+import { FaBoxOpen, FaSearch, FaShoppingCart, FaTimes } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
 
@@ -264,7 +264,7 @@ function StaffInventoryPage() {
                 <h2 className="text-xl font-semibold text-sky-950">Sell / Release Item</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedItem.itemName} • Available: {selectedItem.quantity} {selectedItem.unit} • {selectedItem.requiresPrescription ? 'Prescription required' : 'No prescription required'}</p>
               </div>
-              <button type="button" onClick={closeUsageModal} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
+              <button type="button" onClick={closeUsageModal} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close">
                 <FaTimes />
               </button>
             </div>

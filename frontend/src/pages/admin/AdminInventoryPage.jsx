@@ -44,9 +44,6 @@ const inputClass =
 const iconButtonClass =
   'inline-flex h-8 w-8 items-center justify-center rounded-xl transition disabled:cursor-not-allowed disabled:opacity-60'
 
-const filterControlClass =
-  'min-w-0 flex-1 basis-full sm:basis-[calc(50%-0.375rem)] xl:basis-0'
-
 function normalizeStatus(status) {
   return status || 'available'
 }
@@ -513,16 +510,6 @@ function AdminInventoryPage() {
     }
   }
 
-  const toggleActive = async (item) => {
-    try {
-      const saved = await fdmstApi.update('inventory', item._id, { isActive: item.isActive === false })
-      setItems((current) => current.map((entry) => entry._id === saved._id ? saved : entry))
-      toast.success(saved.isActive === false ? 'Inventory item deactivated.' : 'Inventory item activated.')
-    } catch (error) {
-      toast.error(error.message || 'Unable to update inventory item status.')
-    }
-  }
-
   const clearFilters = () => {
     setQuery('')
     setStatusFilter('all')
@@ -756,8 +743,8 @@ function AdminInventoryPage() {
                 <h2 className="mt-1 text-xl font-semibold text-sky-950">Sell Item</h2>
                 <p className="mt-1 text-sm text-slate-500">{saleTarget.itemName} • Current stock: {saleTarget.quantity ?? 0} {saleTarget.unit || 'pcs'}</p>
               </div>
-              <button type="button" onClick={closeSale} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close sale dialog">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeSale} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close sale dialog">
+                <FaTimes />
               </button>
             </div>
 
@@ -821,8 +808,8 @@ function AdminInventoryPage() {
                 <h2 className="mt-1 text-xl font-semibold text-sky-950">{adjustmentType === 'restock' ? 'Restock Inventory' : 'Deduct Inventory'}</h2>
                 <p className="mt-1 text-sm text-slate-500">{adjustmentTarget.itemName} • Current: {adjustmentTarget.quantity ?? 0} {adjustmentTarget.unit || 'pcs'}</p>
               </div>
-              <button type="button" onClick={closeAdjustment} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close stock adjustment">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeAdjustment} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close stock adjustment">
+                <FaTimes />
               </button>
             </div>
             <div className="mt-5 grid gap-4">
@@ -856,8 +843,8 @@ function AdminInventoryPage() {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">Stock status updates automatically from quantity and reorder level.</p>
               </div>
-              <button type="button" onClick={closeDrawer} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeDrawer} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close drawer">
+                <FaTimes />
               </button>
             </div>
 

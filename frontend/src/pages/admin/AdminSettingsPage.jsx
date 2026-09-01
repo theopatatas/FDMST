@@ -641,8 +641,8 @@ function AdminSettingsPage() {
                   <p className="mt-1 text-sm text-slate-500">Update service details, pricing, duration, and availability.</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setServiceModal(null)} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-sky-950" aria-label="Close service modal">
-                <FaTimes className="h-4 w-4" aria-hidden="true" />
+              <button type="button" onClick={() => setServiceModal(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close service modal">
+                <FaTimes aria-hidden="true" />
               </button>
             </div>
 

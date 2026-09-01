@@ -15,6 +15,7 @@ import AdminReportsPage from './pages/admin/AdminReportsPage.jsx'
 import AdminSettingsPage from './pages/admin/AdminSettingsPage.jsx'
 import BookAppointmentPage from './pages/patient/BookAppointmentPage.jsx'
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx'
+import ForcePasswordChangePage from './pages/ForcePasswordChangePage.jsx'
 import PatientLandingPage from './pages/patient/PatientLandingPage.jsx'
 import PatientNotificationsPage from './pages/patient/PatientNotificationsPage.jsx'
 import PatientPromotionsPage from './pages/patient/PatientPromotionsPage.jsx'
@@ -42,7 +43,6 @@ const adminNavItems = [
   { label: 'Inventory', to: '/admin/inventory', icon: 'inventory' },
   { label: 'Promotions', to: '/admin/promotions', icon: 'promotions' },
   { label: 'Settings', to: '/admin/settings', icon: 'settings' },
-  { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
 const staffNavItems = [
@@ -55,7 +55,6 @@ const staffNavItems = [
   { label: 'Inventory', to: '/staff/inventory', icon: 'inventory' },
   { label: 'Promotions', to: '/staff/promotions', icon: 'promotions' },
   { label: 'Settings', to: '/staff/settings', icon: 'settings' },
-  { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
 const patientNavItems = [
@@ -63,7 +62,6 @@ const patientNavItems = [
   { label: 'Book Appointment', to: '/patient/book-appointment', icon: 'appointments' },
   { label: 'Records', to: '/patient/records', icon: 'records' },
   { label: 'Clinic Promotions', to: '/patient/promotions', icon: 'promotions' },
-  { label: 'Logout', action: 'logout', icon: 'logout' },
 ]
 
 function App() {
@@ -81,6 +79,7 @@ function App() {
       />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/force-password-change" element={<ForcePasswordChangePage />} />
 
       <Route
         path="/patient"

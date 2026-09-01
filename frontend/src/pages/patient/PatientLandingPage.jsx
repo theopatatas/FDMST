@@ -1,44 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  FaArrowRight,
   FaCalendarCheck,
   FaCheckCircle,
   FaClock,
   FaFileMedical,
   FaGift,
   FaRegCalendarAlt,
+  FaTimes,
   FaTimesCircle,
   FaTooth,
-  FaUserMd,
 } from 'react-icons/fa'
 import { AUTH_CHANGED_EVENT, authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { formatDate, formatStatus } from '../../utils/auth.js'
-
-const quickActions = [
-  {
-    title: 'Book Appointment',
-    description: 'Choose your preferred visit date, time, and dental service.',
-    href: '/patient/book-appointment',
-    icon: FaCalendarCheck,
-    accent: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
-  },
-  {
-    title: 'My Records',
-    description: 'Review your treatment history, dental files, and care notes.',
-    href: '/patient/records',
-    icon: FaFileMedical,
-    accent: 'bg-sky-50 text-sky-950 ring-sky-100',
-  },
-  {
-    title: 'Clinic Promos',
-    description: 'See current patient offers without leaving your portal.',
-    href: '/patient/promotions',
-    icon: FaGift,
-    accent: 'bg-amber-50 text-amber-600 ring-amber-100',
-  },
-]
 
 const statusStyles = {
   cancelled: {
@@ -341,7 +316,6 @@ function PatientLandingPage() {
         setAppointments([])
         setRecords([])
         setPromotions([])
-        setNotifications([])
       })
       .finally(() => {
         if (isActive) setIsLoading(false)
@@ -378,40 +352,45 @@ function PatientLandingPage() {
 
   useEffect(() => {
     if (!isRescheduling || !selectedAppointment || !rescheduleForm.date) {
-      setAvailableRescheduleSlots([])
-      setRescheduleMessage('')
-      return undefined
+      const resetTimer = window.setTimeout(() => {
+        setAvailableRescheduleSlots([])
+        setRescheduleMessage('')
+      }, 0)
+      return () => window.clearTimeout(resetTimer)
     }
 
     let isActive = true
-    setIsLoadingRescheduleSlots(true)
-    setRescheduleMessage('')
+    const loadTimer = window.setTimeout(() => {
+      setIsLoadingRescheduleSlots(true)
+      setRescheduleMessage('')
 
-    fdmstApi.getAppointmentAvailability({
-      date: rescheduleForm.date,
-      dentistName: selectedAppointment.dentistName,
-      service: selectedAppointment.service,
-    })
-      .then((result) => {
-        if (!isActive) return
-        const slots = Array.isArray(result.slots) ? result.slots : []
-        setAvailableRescheduleSlots(slots)
-        setRescheduleMessage(slots.length ? '' : result.message || 'No available appointments for this date.')
-        setRescheduleForm((current) => (
-          current.time && !slots.includes(current.time) ? { ...current, time: '' } : current
-        ))
+      fdmstApi.getAppointmentAvailability({
+        date: rescheduleForm.date,
+        dentistName: selectedAppointment.dentistName,
+        service: selectedAppointment.service,
       })
-      .catch((error) => {
-        if (!isActive) return
-        setAvailableRescheduleSlots([])
-        setRescheduleMessage(error.message || 'Unable to load available appointment times.')
-      })
-      .finally(() => {
-        if (isActive) setIsLoadingRescheduleSlots(false)
-      })
+        .then((result) => {
+          if (!isActive) return
+          const slots = Array.isArray(result.slots) ? result.slots : []
+          setAvailableRescheduleSlots(slots)
+          setRescheduleMessage(slots.length ? '' : result.message || 'No available appointments for this date.')
+          setRescheduleForm((current) => (
+            current.time && !slots.includes(current.time) ? { ...current, time: '' } : current
+          ))
+        })
+        .catch((error) => {
+          if (!isActive) return
+          setAvailableRescheduleSlots([])
+          setRescheduleMessage(error.message || 'Unable to load available appointment times.')
+        })
+        .finally(() => {
+          if (isActive) setIsLoadingRescheduleSlots(false)
+        })
+    }, 0)
 
     return () => {
       isActive = false
+      window.clearTimeout(loadTimer)
     }
   }, [isRescheduling, rescheduleForm.date, selectedAppointment])
 
@@ -602,37 +581,6 @@ function PatientLandingPage() {
         </section>
 
         <section className="mt-10">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-sky-950">Quick Actions</h2>
-              <p className="mt-2 text-slate-500">Everything you need for your next visit at Flores-Dizon Dental.</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-5 md:grid-cols-3">
-            {quickActions.map((action) => {
-              const Icon = action.icon
-              return (
-                <Link
-                  key={action.title}
-                  to={action.href}
-                  className="group flex min-h-44 flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-sky-200 hover:shadow-lg"
-                >
-                  <span className={`inline-flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ${action.accent}`}>
-                    <Icon className="h-6 w-6" aria-hidden="true" />
-                  </span>
-                  <h3 className="mt-5 text-lg font-semibold text-sky-950 group-hover:text-amber-500">{action.title}</h3>
-                  <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">{action.description}</p>
-                  <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-sky-950">
-                    Open <FaArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-1" aria-hidden="true" />
-                  </span>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="mt-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -647,37 +595,24 @@ function PatientLandingPage() {
               <AppointmentsPreview appointments={upcomingAppointments} isLoading={isLoading} onSelect={setSelectedAppointment} />
             </div>
           </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="text-xl font-semibold text-sky-950">Preferred Dentist</h2>
-            <div className="mt-5 rounded-2xl bg-slate-50 p-5">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-sky-950 ring-1 ring-sky-100">
-                <FaUserMd className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <p className="mt-4 font-semibold text-sky-950">{user?.patient?.preferredDentistName || 'No preferred dentist set'}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Set a preferred dentist in your profile. Booking will preselect them when available.</p>
-              <Link to="/patient/profile" className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900">
-                Update Preference
-              </Link>
-            </div>
-          </article>
         </section>
 
       </div>
 
       {selectedAppointment ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Appointment Details</p>
                 <h3 className="mt-2 text-2xl font-semibold text-sky-950">{selectedAppointment.service || 'Dental Visit'}</h3>
               </div>
-              <button type="button" onClick={closeAppointmentModal} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close appointment details">
-                x
+              <button type="button" onClick={closeAppointmentModal} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close appointment details">
+                <FaTimes />
               </button>
             </div>
-            <dl className="mt-6 grid gap-4 text-sm">
+            <div className="p-6 pt-5">
+            <dl className="grid gap-4 text-sm">
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Date</dt><dd className="font-semibold text-sky-950">{formatDate(selectedAppointment.appointmentDate)}</dd></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Time</dt><dd className="font-semibold text-sky-950">{selectedAppointment.appointmentTime}</dd></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Dentist</dt><dd className="font-semibold text-sky-950">{selectedAppointment.dentistName || 'Any available dentist'}</dd></div>
@@ -686,6 +621,12 @@ function PatientLandingPage() {
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Promotion</dt><dd className="font-semibold text-sky-950">{selectedAppointment.promoCode || 'None'}</dd></div>
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Status</dt><dd><AppointmentStatus status={selectedAppointment.status} /></dd></div>
             </dl>
+            {selectedAppointment.clinicalRecommendation ? (
+              <section className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-sky-950">Dentist Recommendation</p>
+                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">{selectedAppointment.clinicalRecommendation}</p>
+              </section>
+            ) : null}
             <AppointmentTimeline appointment={selectedAppointment} />
             <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               {selectedAppointment.status === 'pending' ? (
@@ -769,6 +710,7 @@ function PatientLandingPage() {
               ) : (
                 <p className="text-sm font-medium text-slate-500">Cancel and reschedule options are available only while the appointment request is pending clinic approval.</p>
               )}
+            </div>
             </div>
           </div>
         </div>

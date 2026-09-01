@@ -319,17 +319,23 @@ function PatientRecordsPage() {
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="text-xl font-semibold text-sky-950">Appointment History</h2>
             <div className="mt-5 grid gap-3">
-              {appointmentHistory.length ? appointmentHistory.slice(0, 6).map((appointment) => (
-                <div key={appointment._id || appointment.id} className="rounded-2xl bg-slate-50 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="font-semibold text-sky-950">{appointment.service || 'Dental Visit'}</p>
-                      <p className="mt-1 text-sm text-slate-500">{formatDate(appointment.appointmentDate)} at {appointment.appointmentTime}</p>
-                    </div>
-                    {statusPill(appointment.status)}
-                  </div>
-                </div>
-              )) : (
+	                  {appointmentHistory.length ? appointmentHistory.slice(0, 6).map((appointment) => (
+	                <div key={appointment._id || appointment.id} className="rounded-2xl bg-slate-50 p-4">
+	                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+	                    <div>
+	                      <p className="font-semibold text-sky-950">{appointment.service || 'Dental Visit'}</p>
+	                      <p className="mt-1 text-sm text-slate-500">{formatDate(appointment.appointmentDate)} at {appointment.appointmentTime}</p>
+	                    </div>
+	                    {statusPill(appointment.status)}
+	                  </div>
+	                  {appointment.clinicalRecommendation ? (
+	                    <div className="mt-4 rounded-xl border border-emerald-100 bg-white p-3">
+	                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Dentist Recommendation</p>
+	                      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{appointment.clinicalRecommendation}</p>
+	                    </div>
+	                  ) : null}
+	                </div>
+	              )) : (
                 <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">No appointment history yet.</p>
               )}
             </div>

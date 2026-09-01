@@ -78,6 +78,38 @@ const roleLabels = {
   staff: 'Staff',
 }
 
+const sidebarSectionMap = {
+  Analytics: 'Insights',
+  Appointments: 'Clinic Work',
+  'Book Appointment': 'Clinic Work',
+  'Clinical Notes': 'Records',
+  'Clinic Promotions': 'Clinic Work',
+  Dashboard: 'Overview',
+  Inventory: 'Clinic Work',
+  Logout: 'Account',
+  Patients: 'Clinic Work',
+  Promotions: 'Clinic Work',
+  Records: 'Records',
+  Reports: 'Insights',
+  Settings: 'Account',
+  Staff: 'Management',
+  'Treatment Records': 'Records',
+}
+
+function getSidebarSections(navItems = []) {
+  return navItems.reduce((sections, item) => {
+    const sectionTitle = sidebarSectionMap[item.label] || 'Workspace'
+    const existingSection = sections.find((section) => section.title === sectionTitle)
+
+    if (existingSection) {
+      existingSection.items.push(item)
+      return sections
+    }
+
+    return [...sections, { title: sectionTitle, items: [item] }]
+  }, [])
+}
+
 function applySystemPreferences(preferences = {}) {
   document.documentElement.dataset.dateFormat = preferences.dateFormat || 'MMM d, yyyy'
   document.documentElement.dataset.timeFormat = String(preferences.timeFormat || '12')
@@ -419,35 +451,36 @@ function DashboardLayout({ portalLabel, navItems }) {
     if (isPatientPortal) return { title: 'Patient Portal', subtitle: 'Access appointments, records, promotions, and profile details.' }
     return getSidebarPageMeta(location.pathname, navItems, user?.role)
   }, [isAdminPortal, isPatientPortal, location.pathname, navItems, user?.role])
+  const sidebarSections = useMemo(() => getSidebarSections(navItems), [navItems])
   const clinicName = clinicSettings?.clinicName || 'Flores-Dizon Dental Clinic'
   const [brandLead, ...brandRestParts] = clinicName.split(' ')
   const brandRest = brandRestParts.join(' ')
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] text-slate-700 lg:grid lg:grid-cols-[17rem_1fr]">
+    <div className="min-h-screen bg-[#f6f8fb] text-slate-700 lg:grid lg:grid-cols-[5rem_1fr]">
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none ${
+        className={`group/sidebar fixed inset-y-0 left-0 z-40 flex w-72 flex-col overflow-hidden border-r border-slate-200 bg-[#fbfdfc] shadow-xl transition-[transform,width] duration-300 lg:sticky lg:top-0 lg:h-screen lg:w-20 lg:translate-x-0 lg:shadow-none lg:hover:w-72 ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-5">
+        <div className="flex min-h-24 items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4 lg:px-[1.1rem]">
           <div className="flex items-center gap-3">
             {clinicSettings?.clinicLogo ? (
               <img
                 src={clinicSettings.clinicLogo}
                 alt=""
-                className="h-11 w-11 rounded-2xl object-cover shadow-md ring-1 ring-slate-200"
+                className="h-11 w-11 rounded-xl object-cover shadow-sm ring-1 ring-slate-200"
               />
             ) : (
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-950 text-amber-500 shadow-md">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-950 text-amber-500 shadow-sm">
                 <FaTooth className="h-5 w-5" aria-hidden="true" />
               </span>
             )}
-            <div>
-              <p className="text-sm font-semibold text-sky-950">
+            <div className="min-w-0 transition-all duration-300 lg:max-w-0 lg:opacity-0 lg:group-hover/sidebar:max-w-[12rem] lg:group-hover/sidebar:opacity-100">
+              <p className="truncate text-sm font-bold text-sky-950">
                 {brandLead || 'Flores-Dizon'} {brandRest ? <span className="text-amber-500">{brandRest}</span> : null}
               </p>
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+              <p className="mt-0.5 truncate text-[0.68rem] font-bold uppercase tracking-[0.18em] text-slate-400">
                 {portalLabel}
               </p>
             </div>
@@ -462,54 +495,72 @@ function DashboardLayout({ portalLabel, navItems }) {
           </button>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-5">
-          {navItems.map((item) => {
-            const iconKey = item.icon || item.action
-            const Icon = iconMap[iconKey] || FaFileAlt
-            const iconColor = iconColorMap[iconKey] || 'text-slate-700 bg-slate-50 ring-slate-100'
+        <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-3 lg:overflow-hidden">
+          {sidebarSections.map((section) => (
+            <div key={section.title} className={section.title === 'Account' ? 'mt-auto pt-2' : 'mb-2'}>
+              <p className="mb-1 px-3 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-slate-400 transition-all duration-300 lg:h-0 lg:overflow-hidden lg:opacity-0 lg:group-hover/sidebar:h-4 lg:group-hover/sidebar:opacity-100">
+                {section.title}
+              </p>
+              <div className="space-y-0.5">
+                {section.items.map((item) => {
+                  const iconKey = item.icon || item.action
+                  const Icon = iconMap[iconKey] || FaFileAlt
+                  const iconColor = iconColorMap[iconKey] || 'text-slate-700 bg-slate-50 ring-slate-100'
 
-            return item.action === 'logout' ? (
-              <button
-                key={item.label}
-                type="button"
-                onClick={handleLogout}
-                className="mt-auto flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-semibold text-slate-600 transition hover:bg-red-50 hover:text-red-600"
-              >
-                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${iconColor}`}>
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span>{item.label}</span>
-              </button>
-            ) : (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                state={item.preserveFrom ? { from: location.pathname } : undefined}
-                onClick={() => setIsSidebarOpen(false)}
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold transition ${
-                    isActive
-                      ? 'bg-sky-950 text-white shadow-lg shadow-sky-950/15 ring-1 ring-sky-900'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-sky-950'
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <span
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${
-                        isActive ? 'bg-amber-400 text-sky-950 ring-amber-300' : iconColor
-                      }`}
+                  return item.action === 'logout' ? (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-left text-sm font-semibold text-slate-600 hover:border-red-100 hover:bg-red-50 hover:text-red-600 lg:justify-center lg:group-hover/sidebar:justify-start"
+                      title={item.label}
                     >
-                      <Icon className="h-4 w-4" aria-hidden="true" />
-                    </span>
-                    <span>{item.label}</span>
-                  </>
-                )}
-              </NavLink>
-            )
-          })}
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1 ${iconColor}`}>
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 truncate transition-all duration-300 lg:max-w-0 lg:opacity-0 lg:group-hover/sidebar:max-w-[12rem] lg:group-hover/sidebar:opacity-100">
+                        {item.label}
+                      </span>
+                    </button>
+                  ) : (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      state={item.preserveFrom ? { from: location.pathname } : undefined}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `relative flex items-center gap-3 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                          isActive
+                            ? 'border-emerald-100 bg-white text-emerald-800 shadow-sm'
+                            : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white hover:text-sky-950'
+                        } lg:justify-center lg:group-hover/sidebar:justify-start`
+                      }
+                      title={item.label}
+                    >
+                      {({ isActive }) => (
+                        <>
+                          {isActive ? (
+                            <span className="absolute left-0 top-2 h-7 w-1 rounded-r-full bg-emerald-500" aria-hidden="true" />
+                          ) : null}
+                          <span
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1 ${
+                              isActive ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : iconColor
+                            }`}
+                          >
+                            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                          </span>
+                          <span className="min-w-0 truncate transition-all duration-300 lg:max-w-0 lg:opacity-0 lg:group-hover/sidebar:max-w-[12rem] lg:group-hover/sidebar:opacity-100">
+                            {item.label}
+                          </span>
+                        </>
+                      )}
+                    </NavLink>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
       </aside>
 

@@ -7,10 +7,13 @@ const AuditLog = require("../models/AuditLog");
 const Notification = require("../models/Notification");
 const asyncHandler = require("../utils/asyncHandler");
 const { authenticate, authorize } = require("../middleware/auth");
+const { sendStaffWelcomeEmail } = require("../services/mailService");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
 const { MOBILE_NUMBER_MESSAGE, isValidMobileNumber, normalizeMobileNumber } = require("../utils/validation");
 
 const router = express.Router();
+
+const DEFAULT_STAFF_TEMPORARY_PASSWORD = "12345678";
 
 const sanitizeStaffUser = (user) => ({
   id: user._id,
@@ -92,6 +95,7 @@ const sanitizeUser = (user) => ({
   specialization: user.specialization,
   lastLoginAt: user.lastLoginAt,
   lastPasswordChangedAt: user.lastPasswordChangedAt,
+  requiresPasswordSetup: Boolean(user.requiresPasswordSetup),
   loginHistory: sanitizeLoginHistory(user.loginHistory || []),
   failedLoginAttempts: user.failedLoginAttempts || 0,
   totalLogins: user.totalLogins || 0,
@@ -511,12 +515,16 @@ router.patch(
     }
 
     user.passwordHash = await hashPasswordScrypt(newPassword);
+    user.requiresPasswordSetup = false;
     user.lastPasswordChangedAt = new Date();
     await user.save();
 
     await auditSelfProfileAction(req, user, "Changed Password");
 
-    res.json({ message: "Password updated successfully." });
+    res.json({
+      message: "Password updated successfully.",
+      user: sanitizeUser(user),
+    });
   }),
 );
 
@@ -688,6 +696,7 @@ router.patch(
       }
 
       user.passwordHash = await hashPasswordScrypt(newPassword);
+      user.requiresPasswordSetup = false;
       user.lastPasswordChangedAt = new Date();
     }
 
@@ -847,17 +856,11 @@ router.post(
   authenticate,
   authorize("admin"),
   asyncHandler(async (req, res) => {
-    const { firstName, lastName, email, password, contactNumber, adminPassword } = req.body;
+    const { firstName, lastName, email, contactNumber, adminPassword } = req.body;
 
-    if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !password || !adminPassword) {
+    if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !adminPassword) {
       return res.status(400).json({
-        message: "First name, last name, email, temporary password, and admin password are required.",
-      });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({
-        message: "Password must be at least 8 characters long.",
+        message: "First name, last name, email, and admin password are required.",
       });
     }
 
@@ -885,7 +888,8 @@ router.post(
       });
     }
 
-    const passwordHash = await hashPasswordScrypt(password);
+    const staffName = [firstName, lastName].filter(Boolean).join(" ").trim();
+    const passwordHash = await hashPasswordScrypt(DEFAULT_STAFF_TEMPORARY_PASSWORD);
 
     const user = await User.create({
       firstName: firstName.trim(),
@@ -893,6 +897,7 @@ router.post(
       email: normalizedEmail,
       contactNumber: normalizeMobileNumber(contactNumber),
       passwordHash,
+      requiresPasswordSetup: true,
       role: "staff",
       accountStatus: "active_staff",
       status: "active",
@@ -906,8 +911,24 @@ router.post(
       staffUser: user,
     });
 
+    const mailResult = { sent: false };
+
+    try {
+      await sendStaffWelcomeEmail({
+        to: normalizedEmail,
+        staffName,
+        temporaryPassword: DEFAULT_STAFF_TEMPORARY_PASSWORD,
+      });
+      mailResult.sent = true;
+    } catch (mailError) {
+      mailResult.error = mailError.message;
+    }
+
     res.status(201).json({
-      message: "Staff account created successfully.",
+      message: mailResult.sent
+        ? "Staff account created successfully. A welcome email was sent with the default password."
+        : "Staff account created successfully, but the welcome email could not be sent. Check the mail API configuration.",
+      mail: mailResult,
       user: sanitizeStaffUser(user),
     });
   }),

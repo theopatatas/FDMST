@@ -106,7 +106,9 @@ function SignInPage() {
       })
 
       toast.success(response.message || 'Login successful.')
-      const redirectPath = location.state?.from || getRoleHomePath(response.user.role)
+      const redirectPath = response.user?.requiresPasswordSetup
+        ? '/force-password-change'
+        : location.state?.from || getRoleHomePath(response.user.role)
       navigate(redirectPath, { replace: true })
     } catch (err) {
       toast.error(err.message || 'Invalid email or password.')

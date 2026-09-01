@@ -14,6 +14,10 @@ function ProtectedRoute({ allowedRoles, children }) {
   const userRole = String(user.role || '').toLowerCase()
   const normalizedAllowedRoles = allowedRoles.map((role) => String(role).toLowerCase())
 
+  if (user.requiresPasswordSetup && location.pathname !== '/force-password-change') {
+    return <Navigate to="/force-password-change" replace />
+  }
+
   if (!normalizedAllowedRoles.includes(userRole)) {
     return <Navigate to={getRoleHomePath(user.role)} replace />
   }
@@ -23,6 +27,10 @@ function ProtectedRoute({ allowedRoles, children }) {
 
 function GuestRoute({ children }) {
   const user = authStorage.getUser()
+
+  if (user?.requiresPasswordSetup) {
+    return <Navigate to="/force-password-change" replace />
+  }
 
   if (user) {
     return <Navigate to={getRoleHomePath(user.role)} replace />

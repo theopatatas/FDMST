@@ -601,6 +601,43 @@ function AppointmentsPage({ allowApproval = false }) {
     setDeclineError('')
   }
 
+  const getWorkflowActions = (appointment) => {
+    if (!appointment) return []
+
+    const scheduledDate = appointment.appointmentDate ? new Date(appointment.appointmentDate) : null
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (scheduledDate && !Number.isNaN(scheduledDate.getTime())) scheduledDate.setHours(0, 0, 0, 0)
+    const isFutureDate = scheduledDate && scheduledDate > today
+
+    const actionsByStatus = {
+      confirmed: [
+        ['checked_in', 'Check In', 'primary'],
+        ['no_show', 'No Show', 'danger'],
+        ['rescheduled', 'Skip', 'warning'],
+      ],
+      follow_up: [
+        ['checked_in', 'Check In', 'primary'],
+        ['no_show', 'No Show', 'danger'],
+        ['rescheduled', 'Skip', 'warning'],
+      ],
+      checked_in: [
+        ['in_consultation', 'Start Consultation', 'primary'],
+        ['no_show', 'No Show', 'danger'],
+        ['rescheduled', 'Skip', 'warning'],
+      ],
+      in_consultation: [
+        ['completed', 'Complete Treatment', 'success'],
+        ['rescheduled', 'Skip', 'warning'],
+      ],
+    }
+
+    return (actionsByStatus[appointment.status] || []).filter(([nextStatus]) => {
+      if (isFutureDate && ['checked_in', 'no_show', 'rescheduled'].includes(nextStatus)) return false
+      return true
+    })
+  }
+
   const confirmDecline = async () => {
     const reason = declineReason.trim()
 
@@ -772,7 +809,7 @@ function AppointmentsPage({ allowApproval = false }) {
       )}
 
       {selectedCalendarDay ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl shadow-sky-950/20">
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
               <div>
@@ -784,8 +821,8 @@ function AppointmentsPage({ allowApproval = false }) {
                   {selectedCalendarDay.appointments.length} appointment{selectedCalendarDay.appointments.length === 1 ? '' : 's'} scheduled
                 </p>
               </div>
-              <button type="button" onClick={() => setSelectedCalendarDay(null)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close day appointments">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={() => setSelectedCalendarDay(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close day appointments">
+                <FaTimes />
               </button>
             </div>
             <div className="p-5">
@@ -862,7 +899,7 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {selectedAppointment ? (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-[70]">
           <button type="button" className="absolute inset-0 bg-slate-950/40" onClick={closeAppointmentDetails} aria-label="Close appointment details" />
           <aside className="absolute right-0 top-0 flex h-full w-full max-w-2xl min-w-0 flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
@@ -876,8 +913,8 @@ function AppointmentsPage({ allowApproval = false }) {
                   </span>
                 ) : null}
               </div>
-              <button type="button" onClick={closeAppointmentDetails} className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close drawer">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={closeAppointmentDetails} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close drawer">
+                <FaTimes />
               </button>
             </div>
 
@@ -975,6 +1012,33 @@ function AppointmentsPage({ allowApproval = false }) {
                     </div>
                   </section>
                 ) : null}
+                {allowApproval && getWorkflowActions(selectedAppointment).length ? (
+                  <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm md:order-9 md:col-span-2">
+                    <h3 className="font-semibold text-sky-950">Workflow Actions</h3>
+                    <p className="mt-1 text-sm text-slate-500">Update this appointment based on the patient visit progress.</p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      {getWorkflowActions(selectedAppointment).map(([nextStatus, label, tone]) => (
+                        <button
+                          type="button"
+                          key={nextStatus}
+                          onClick={() => handleUpdateStatus(selectedAppointment.id, nextStatus)}
+                          disabled={updatingId === selectedAppointment.id}
+                          className={`inline-flex h-11 items-center justify-center rounded-xl px-5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            tone === 'success'
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              : tone === 'danger'
+                                ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                                : tone === 'warning'
+                                  ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                  : 'bg-sky-950 text-white hover:bg-slate-900'
+                          }`}
+                        >
+                          {updatingId === selectedAppointment.id ? 'Saving...' : label}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
               </div>
             </div>
           </aside>
@@ -982,15 +1046,15 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {quickActionModal ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl shadow-sky-950/20">
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Appointment Data</p>
                 <h2 className="mt-1 text-xl font-semibold text-sky-950">{quickActionModal.title}</h2>
               </div>
-              <button type="button" onClick={() => setQuickActionModal(null)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Close quick action modal">
-                <FaTimes className="h-5 w-5" />
+              <button type="button" onClick={() => setQuickActionModal(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Close quick action modal">
+                <FaTimes />
               </button>
             </div>
             <div className="max-h-[72vh] overflow-y-auto p-5">
@@ -1093,7 +1157,7 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {declineTarget ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-2xl shadow-sky-950/20">
             <div>
               <h2 className="text-xl font-semibold text-sky-950">Decline Appointment</h2>
@@ -1140,7 +1204,7 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {outcomeTarget ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="w-full max-w-lg rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-2xl shadow-sky-950/20">
             <h2 className="text-xl font-semibold text-sky-950">
               {outcomeTarget.status === 'completed' ? 'Confirm Appointment Completion' : 'Confirm No-Show Status'}
@@ -1200,7 +1264,7 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {documentationPrompt ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-sky-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-2xl shadow-sky-950/20">
             <div className="flex items-start gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
@@ -1224,7 +1288,7 @@ function AppointmentsPage({ allowApproval = false }) {
       ) : null}
 
       {clinicalNoteModal ? (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={closeClinicalNoteModal}>
+        <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={closeClinicalNoteModal}>
           <section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[1.5rem] bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5">
               <div>

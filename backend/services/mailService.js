@@ -2,6 +2,14 @@ const DEFAULT_FROM_NAME = "Flores-Dizon Dental Clinic";
 
 const isMailConfigured = () => Boolean(process.env.MAIL_API_URL && process.env.MAIL_API_KEY);
 
+const escapeHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 const sendMail = async ({ to, subject, message, html, attachments = [] }) => {
   if (!isMailConfigured()) {
     const error = new Error("Mail API is not configured.");
@@ -68,7 +76,28 @@ const sendOtpEmail = ({ to, otp, purpose }) => {
   return sendMail({ to, subject, message, html });
 };
 
+const sendStaffWelcomeEmail = ({ to, staffName, temporaryPassword }) => {
+  const displayName = String(staffName || "Clinic Team Member").trim();
+  const safeDisplayName = escapeHtml(displayName);
+  const safeTemporaryPassword = escapeHtml(temporaryPassword);
+  const subject = "Welcome to Flores-Dizon Dental Clinic";
+  const message = `Hello ${displayName}, welcome as an employee of Flores-Dizon Dental Clinic. Your staff account has been created. Your temporary password is ${temporaryPassword}. Please sign in and change your password on your first login.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.6;">
+      <h2 style="color:#082f49;">Welcome to Flores-Dizon Dental Clinic</h2>
+      <p>Hello ${safeDisplayName},</p>
+      <p>Your employee account for the Flores-Dizon Dental Clinic system has been created.</p>
+      <p>Your temporary password is:</p>
+      <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px; color: #0c4a6e;">${safeTemporaryPassword}</p>
+      <p>Please sign in with your email address and change your password on your first login.</p>
+    </div>
+  `;
+
+  return sendMail({ to, subject, message, html });
+};
+
 module.exports = {
   sendMail,
   sendOtpEmail,
+  sendStaffWelcomeEmail,
 };
