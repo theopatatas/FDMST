@@ -628,7 +628,6 @@ function RegisterPage() {
               <span className="relative">
                 <input
                   className={`${inputClass} w-full pr-14`}
-                  minLength={8}
                   name="password"
                   onChange={handleChange}
                   placeholder="••••••••"
@@ -655,7 +654,6 @@ function RegisterPage() {
               <span className="relative">
                 <input
                   className={`${inputClass} w-full pr-14`}
-                  minLength={8}
                   name="confirmPassword"
                   onChange={handleChange}
                   placeholder="••••••••"

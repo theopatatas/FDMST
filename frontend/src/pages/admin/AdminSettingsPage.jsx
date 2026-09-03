@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   FaCalendarAlt,
-  FaCog,
   FaEdit,
   FaFileExcel,
   FaFilePdf,
@@ -102,7 +101,6 @@ const navItems = [
   { id: 'clinic', label: 'Clinic Information', icon: FaTooth },
   { id: 'services', label: 'Services & Pricing', icon: FaStethoscope },
   { id: 'appointments', label: 'Appointment Settings', icon: FaCalendarAlt },
-  { id: 'preferences', label: 'System Preferences', icon: FaCog },
   { id: 'audit', label: 'Audit Logs', icon: FaHistory },
 ]
 
@@ -165,6 +163,22 @@ function formatWithPreferences(value, preferences = {}, includeTime = false) {
   }).format(date)
 
   return `${pref.dateFormat === 'yyyy-MM-dd' ? formattedDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$1-$2') : formattedDate} ${formattedTime}`
+}
+
+function dateInputValueInTimeZone(value, timeZone) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const datePart = (type) => parts.find((part) => part.type === type)?.value || ''
+
+  return `${datePart('year')}-${datePart('month')}-${datePart('day')}`
 }
 
 function mergeSettings(settings) {
@@ -331,17 +345,6 @@ function AdminSettingsPage() {
     }
   }
 
-  const saveSystemPreferences = () => {
-    const normalizedPreferences = normalizeSystemPreferences(settings.systemPreferences)
-    const nextSettings = {
-      ...settings,
-      systemPreferences: normalizedPreferences,
-    }
-    setSettings(nextSettings)
-    applySystemPreferences(normalizedPreferences)
-    saveSettings(nextSettings, 'preferences', 'System Preferences Updated')
-  }
-
   const updateSettings = (path, value) => {
     setSettings((current) => {
       if (path.length === 1) return { ...current, [path[0]]: value }
@@ -456,9 +459,10 @@ function AdminSettingsPage() {
   const filteredAuditLogs = useMemo(() => auditLogs.filter((log) => {
     const text = [log.performedByEmail, log.entityType, log.action, log.status].filter(Boolean).join(' ').toLowerCase()
     const matchesQuery = !auditQuery || text.includes(auditQuery.toLowerCase())
-    const matchesDate = !auditDate || log.createdAt?.slice(0, 10) === auditDate
+    const timeZone = normalizeSystemPreferences(settings.systemPreferences).timeZone
+    const matchesDate = !auditDate || dateInputValueInTimeZone(log.createdAt, timeZone) === auditDate
     return matchesQuery && matchesDate
-  }), [auditDate, auditLogs, auditQuery])
+  }), [auditDate, auditLogs, auditQuery, settings.systemPreferences])
 
   const exportRows = (filename, rows) => {
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')
@@ -564,26 +568,6 @@ function AdminSettingsPage() {
             <PrimaryButton loading={savingSection === 'appointments'} onClick={() => saveSettings(settings, 'appointments')} type="button"><FaSave /> Save Settings</PrimaryButton>
             <button type="button" onClick={handleAppointmentReset} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"><FaUndo className="mr-2 inline" />Reset</button>
           </div>
-        </SettingsCard>
-      )
-    }
-
-    if (activeSection === 'preferences') {
-      const pref = settings.systemPreferences
-      const now = new Date()
-      return (
-        <SettingsCard title="System Preferences" description="Set application display, locale, and time formatting defaults.">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Time Zone"><select className={inputClass} value={pref.timeZone} onChange={(event) => updateSettings(['systemPreferences', 'timeZone'], event.target.value)}>{supportedTimeZones.map((timeZone) => <option key={timeZone} value={timeZone}>{timeZone}</option>)}</select></Field>
-            <Field label="Date Format"><select className={inputClass} value={pref.dateFormat} onChange={(event) => updateSettings(['systemPreferences', 'dateFormat'], event.target.value)}>{supportedDateFormats.map((format) => <option key={format} value={format}>{format}</option>)}</select></Field>
-            <Field label="Time Format"><select className={inputClass} value={pref.timeFormat} onChange={(event) => updateSettings(['systemPreferences', 'timeFormat'], event.target.value)}><option value="12">12 Hour</option><option value="24">24 Hour</option></select></Field>
-            <div className="rounded-xl bg-slate-50 p-4 md:col-span-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Preview</p>
-              <p className="mt-2 text-sm font-semibold text-sky-950">{formatWithPreferences(now, pref, true)}</p>
-              <p className="mt-1 text-xs text-slate-500">Date, time, and timezone settings are saved as clinic-wide defaults.</p>
-            </div>
-          </div>
-          <PrimaryButton className="mt-6" loading={savingSection === 'preferences'} onClick={saveSystemPreferences} type="button"><FaSave /> Save Preferences</PrimaryButton>
         </SettingsCard>
       )
     }

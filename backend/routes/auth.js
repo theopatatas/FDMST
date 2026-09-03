@@ -259,13 +259,6 @@ const validateRegistrationPayload = async (body) => {
     throw error;
   }
 
-  if (password.length < 8) {
-    const error = new Error("Password must be at least 8 characters long.");
-    error.status = 400;
-    error.errors = { password: "Password must be at least 8 characters long." };
-    throw error;
-  }
-
   const normalizedEmail = normalizeEmail(email);
   const normalizedUsername = username?.trim();
   const normalizedContactNumber = normalizeMobileNumber(contactNumber);
@@ -475,13 +468,6 @@ router.post(
 
     if (newPassword !== confirmPassword) {
       return res.status(400).json({ message: "New password and confirmation do not match.", errors: { confirmPassword: "Passwords do not match." } });
-    }
-
-    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-      return res.status(400).json({
-        message: "Password must be at least 8 characters and include uppercase, lowercase, and number.",
-        errors: { newPassword: "Password must be at least 8 characters and include uppercase, lowercase, and number." },
-      });
     }
 
     const payload = await verifyOtpToken({
