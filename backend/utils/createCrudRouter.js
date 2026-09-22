@@ -10,7 +10,9 @@ const createCrudRouter = (Model, options = {}) => {
   const beforeCreate = options.beforeCreate;
   const afterCreate = options.afterCreate;
   const beforeUpdate = options.beforeUpdate;
+  const afterUpdate = options.afterUpdate;
   const beforeDelete = options.beforeDelete;
+  const afterDelete = options.afterDelete;
 
   router.get(
     "/",
@@ -73,6 +75,7 @@ const createCrudRouter = (Model, options = {}) => {
       }
 
       const updateBody = beforeUpdate ? await beforeUpdate(req.body, req) : req.body;
+      const previous = afterUpdate ? await Model.findById(req.params.id).select(hiddenFields) : null;
       const item = await Model.findByIdAndUpdate(req.params.id, updateBody, {
         new: true,
         runValidators: true,
@@ -82,6 +85,9 @@ const createCrudRouter = (Model, options = {}) => {
         return res.status(404).json({ message: "Record not found" });
       }
 
+      if (afterUpdate) {
+        await afterUpdate(item, previous, req);
+      }
       res.json(item);
     }),
   );
@@ -103,6 +109,9 @@ const createCrudRouter = (Model, options = {}) => {
         return res.status(404).json({ message: "Record not found" });
       }
 
+      if (afterDelete) {
+        await afterDelete(item, req);
+      }
       res.json({ message: "Record deleted" });
     }),
   );

@@ -4,12 +4,16 @@ const Appointment = require("../models/Appointment");
 const DentalRecord = require("../models/DentalRecord");
 const Feedback = require("../models/Feedback");
 const Inventory = require("../models/Inventory");
+const ClinicSettings = require("../models/ClinicSettings");
 const Notification = require("../models/Notification");
 const Patient = require("../models/Patient");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const asyncHandler = require("../utils/asyncHandler");
 const { authenticate, authorize } = require("../middleware/auth");
+const { buildAppointmentForecast, generateForecastInsight } = require("../services/analyticsPredictionService");
+const { addDays, clinicDateKey, clinicDayStart, parseDateKey } = require("../utils/clinicDate");
+const { getAnalyticsDateRange, getKpiComparisonRange } = require("../utils/analyticsDateRange");
 
 const router = express.Router();
 
@@ -79,7 +83,7 @@ const fullName = (value) => [value?.firstName, value?.lastName].filter(Boolean).
 const getMonthKey = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return clinicDateKey(date).slice(0, 7);
 };
 
 const getMonthLabel = (monthKey) => {
@@ -91,18 +95,15 @@ const getMonthLabel = (monthKey) => {
 const getDateKey = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toISOString().slice(0, 10);
+  return clinicDateKey(date);
 };
 
 const getWeekKey = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  const day = date.getDay();
-  const difference = date.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(date);
-  monday.setDate(difference);
-  monday.setHours(0, 0, 0, 0);
-  return monday.toISOString().slice(0, 10);
+  const key = clinicDateKey(date);
+  const day = parseDateKey(key).getUTCDay();
+  return addDays(key, day === 0 ? -6 : 1 - day);
 };
 
 const getHourKey = (timeValue) => {
@@ -204,11 +205,12 @@ const asSeries = (map, { limit, labels } = {}) => {
   return typeof limit === "number" ? sortedRows.slice(0, limit) : sortedRows;
 };
 
-const lastMonthKeys = (count = 12) => {
-  const now = new Date();
+const lastMonthKeys = (count = 12, referenceDate = clinicDateKey()) => {
+  const currentMonth = `${referenceDate.slice(0, 7)}-01`;
   return Array.from({ length: count }, (_, index) => {
-    const value = new Date(now.getFullYear(), now.getMonth() - (count - index - 1), 1);
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+    const value = parseDateKey(currentMonth);
+    value.setUTCMonth(value.getUTCMonth() - (count - index - 1));
+    return value.toISOString().slice(0, 7);
   });
 };
 
@@ -244,13 +246,11 @@ const calculateChange = (current, previous) => {
   };
 };
 
-const getAnalyticsFilters = (query = {}) => {
+const getAnalyticsFilters = (query = {}, dateRange = null) => {
   const appointmentQuery = {};
 
-  if (query.startDate || query.endDate) {
-    appointmentQuery.appointmentDate = {};
-    if (query.startDate) appointmentQuery.appointmentDate.$gte = startOfDay(query.startDate);
-    if (query.endDate) appointmentQuery.appointmentDate.$lte = endOfDay(query.endDate);
+  if (dateRange) {
+    appointmentQuery.appointmentDate = { $gte: dateRange.currentStart, $lte: dateRange.currentEnd };
   }
 
   if (query.dentist) appointmentQuery.dentistName = query.dentist;
@@ -268,24 +268,18 @@ const getAnalyticsBaseFilters = (query = {}) => {
   return baseQuery;
 };
 
-const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null) => {
-  const todayStart = startOfDay(new Date());
-  const todayEnd = endOfDay(new Date());
+const appointmentPatientKey = (appointment) => appointment.patient
+  ? `patient:${appointment.patient}`
+  : `legacy:${String(appointment.email || "").trim().toLowerCase()}:${String(appointment.patientName || "").trim().toLowerCase()}`;
+
+const buildKpiStats = (appointments, monthlyAppointments, comparisonRange) => {
   const now = new Date();
-  const currentMonthStart = comparisonRange?.currentStart || new Date(now.getFullYear(), now.getMonth(), 1);
-  const currentMonthEnd = comparisonRange?.currentEnd || new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const previousMonthStart = comparisonRange?.previousStart || new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const previousMonthEnd = comparisonRange?.previousEnd || new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-  const previousTodayDay = Math.min(now.getDate(), previousMonthEnd.getDate());
-  const previousTodayStart = new Date(now.getFullYear(), now.getMonth() - 1, previousTodayDay);
-  previousTodayStart.setHours(0, 0, 0, 0);
-  const previousTodayEnd = endOfDay(previousTodayStart);
-  const getCounts = (items, { todayRange, upcomingReference = now } = {}) => ({
+  const getCounts = (items, { focusStart = comparisonRange.focusStart, focusEnd = comparisonRange.focusEnd, upcomingReference = now } = {}) => ({
     totalAppointments: items.length,
+    currentPatients: new Set(items.map(appointmentPatientKey)).size,
     todaysAppointments: items.filter((item) => {
       const date = new Date(item.appointmentDate);
-      const range = todayRange || { start: todayStart, end: todayEnd };
-      return date >= range.start && date <= range.end && !["cancelled", "declined"].includes(item.status);
+      return date >= focusStart && date <= focusEnd && !["cancelled", "declined"].includes(item.status);
     }).length,
     upcomingAppointments: items.filter((item) => (
       new Date(item.appointmentDate) > upcomingReference && ["pending", "confirmed"].includes(item.status)
@@ -298,19 +292,17 @@ const buildKpiStats = (appointments, monthlyAppointments, comparisonRange = null
 
   const currentPeriodAppointments = monthlyAppointments.filter((item) => {
     const date = new Date(item.appointmentDate || item.createdAt);
-    return date >= currentMonthStart && date <= currentMonthEnd;
+    return date >= comparisonRange.currentStart && date <= comparisonRange.currentEnd;
   });
   const previousPeriodAppointments = monthlyAppointments.filter((item) => {
     const date = new Date(item.appointmentDate || item.createdAt);
-    return date >= previousMonthStart && date <= previousMonthEnd;
+    return date >= comparisonRange.previousStart && date <= comparisonRange.previousEnd;
   });
-  const currentCounts = getCounts(currentPeriodAppointments, {
-    todayRange: { start: todayStart, end: todayEnd },
-    upcomingReference: now,
-  });
+  const currentCounts = getCounts(currentPeriodAppointments);
   const previousCounts = getCounts(previousPeriodAppointments, {
-    todayRange: { start: previousTodayStart, end: previousTodayEnd },
-    upcomingReference: previousTodayEnd,
+    focusStart: comparisonRange.previousFocusStart,
+    focusEnd: comparisonRange.previousFocusEnd,
+    upcomingReference: comparisonRange.previousEnd,
   });
   const totalCounts = getCounts(appointments);
 
@@ -327,7 +319,7 @@ const countPatientsRegisteredInRange = (patients = [], start, end) => patients.f
   return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt <= end;
 }).length;
 
-const buildServiceAnalytics = (appointments) => {
+const buildServiceAnalytics = (appointments, dateRange = null) => {
   const serviceCounts = new Map(OFFICIAL_SERVICES.map((service) => [service, 0]));
   const monthlyCounts = new Map();
   const serviceMonthCounts = new Map();
@@ -358,7 +350,7 @@ const buildServiceAnalytics = (appointments) => {
     return { label: service, value: current - previous, current, previous };
   });
 
-  const monthKeys = lastMonthKeys();
+  const monthKeys = lastMonthKeys(12, dateRange?.endDate);
 
   return {
     officialServices: OFFICIAL_SERVICES,
@@ -374,7 +366,7 @@ const buildServiceAnalytics = (appointments) => {
   };
 };
 
-const buildAppointmentAnalytics = (appointments) => {
+const buildAppointmentAnalytics = (appointments, dateRange = null) => {
   const statusCounts = new Map();
   const monthlyCounts = new Map();
   const weeklyCounts = new Map();
@@ -392,14 +384,19 @@ const buildAppointmentAnalytics = (appointments) => {
     increment(weeklyCounts, getWeekKey(appointment.appointmentDate || appointment.createdAt));
     increment(dailyCounts, getDateKey(appointment.appointmentDate || appointment.createdAt));
     increment(hourCounts, getHourKey(appointment.appointmentTime));
-    if (!Number.isNaN(date.getTime())) increment(weekdayCounts, WEEKDAYS[date.getDay()]);
+    if (!Number.isNaN(date.getTime())) increment(weekdayCounts, WEEKDAYS[parseDateKey(clinicDateKey(date)).getUTCDay()]);
   });
 
-  const monthKeys = lastMonthKeys();
-  const dailyTrend = [...dailyCounts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .slice(-14)
-    .map(([label, value]) => ({ label, value }));
+  const monthKeys = lastMonthKeys(12, dateRange?.endDate);
+  const trendEnd = dateRange?.endDate || clinicDateKey();
+  const trendStart = dateRange?.startDate && dateRange.startDate > addDays(trendEnd, -29)
+    ? dateRange.startDate
+    : addDays(trendEnd, -29);
+  const trendDays = Math.round((parseDateKey(trendEnd) - parseDateKey(trendStart)) / 86400000) + 1;
+  const dailyTrend = Array.from({ length: trendDays }, (_, index) => {
+    const label = addDays(trendStart, index);
+    return { label, value: dailyCounts.get(label) || 0 };
+  });
   const weeklyTrend = [...weeklyCounts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .slice(-12)
@@ -418,17 +415,26 @@ const buildAppointmentAnalytics = (appointments) => {
   };
 };
 
-const buildPatientAnalytics = (patients, appointments) => {
+const buildPatientAnalytics = (patients, appointments, dateRange = null) => {
   const ageCounts = new Map(["0-12", "13-19", "20-35", "36-50", "51-64", "65+", "Unknown"].map((label) => [label, 0]));
   const genderCounts = new Map();
   const registrationCounts = new Map();
   const appointmentCounts = new Map();
   const followUpCounts = new Map();
+  const appointmentPatientKeys = new Set(appointments.map(appointmentPatientKey));
+  const demographicPatients = dateRange
+    ? patients.filter((patient) => appointmentPatientKeys.has(`patient:${patient._id}`)
+      || appointmentPatientKeys.has(appointmentPatientKey({ email: patient.email, patientName: fullName(patient) })))
+    : patients;
 
-  patients.forEach((patient) => {
+  demographicPatients.forEach((patient) => {
     increment(ageCounts, ageGroup(getAge(patient.dateOfBirth)));
     increment(genderCounts, patient.gender || "Not specified");
-    increment(registrationCounts, getMonthKey(patient.createdAt));
+  });
+  patients.forEach((patient) => {
+    if (!dateRange || (patient.createdAt >= dateRange.currentStart && patient.createdAt <= dateRange.currentEnd)) {
+      increment(registrationCounts, getMonthKey(patient.createdAt));
+    }
   });
 
   appointments.forEach((appointment) => {
@@ -440,15 +446,15 @@ const buildPatientAnalytics = (patients, appointments) => {
   });
 
   const returningPatients = [...appointmentCounts.values()].filter((count) => count > 1).length;
-  const newPatients = Math.max(patients.length - returningPatients, 0);
-  const monthKeys = lastMonthKeys();
+  const newPatients = Math.max(appointmentCounts.size - returningPatients, 0);
+  const monthKeys = lastMonthKeys(12, dateRange?.endDate);
 
   return {
     newVsReturning: [
       { label: "New", value: newPatients },
       { label: "Returning", value: returningPatients },
     ],
-    activePatients: patients.filter((patient) => patient.status === "active").length,
+    activePatients: demographicPatients.filter((patient) => patient.status === "active").length,
     ageDistribution: asSeries(ageCounts, { labels: ["0-12", "13-19", "20-35", "36-50", "51-64", "65+", "Unknown"] }),
     genderDistribution: asSeries(genderCounts),
     followUps: [...followUpCounts.values()].reduce((total, count) => total + count, 0),
@@ -624,35 +630,6 @@ const getScheduledDateTime = (appointment) => {
   return value;
 };
 
-const getKpiComparisonRange = (query = {}) => {
-  const now = new Date();
-
-  if (query.startDate || query.endDate) {
-    const currentStart = startOfDay(query.startDate || query.endDate);
-    const currentEnd = endOfDay(query.endDate || query.startDate);
-
-    if (!Number.isNaN(currentStart.getTime()) && !Number.isNaN(currentEnd.getTime()) && currentEnd >= currentStart) {
-      const periodLengthMs = currentEnd.getTime() - currentStart.getTime() + 1;
-      const previousEnd = new Date(currentStart.getTime() - 1);
-      const previousStart = new Date(previousEnd.getTime() - periodLengthMs + 1);
-
-      return {
-        currentStart,
-        currentEnd,
-        previousStart,
-        previousEnd,
-      };
-    }
-  }
-
-  return {
-    currentStart: new Date(now.getFullYear(), now.getMonth(), 1),
-    currentEnd: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
-    previousStart: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-    previousEnd: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999),
-  };
-};
-
 const sanitizeAppointment = (appointment) => ({
   id: appointment._id,
   appointmentId: `APT-${String(appointment._id).slice(-6).toUpperCase()}`,
@@ -695,10 +672,8 @@ router.get(
       totalDentists,
       totalAppointments,
       completedAppointments,
-      pendingAppointmentRecords,
       cancelledAppointments,
       noShowAppointments,
-      todaysAppointments,
       upcomingAppointments,
       todaysSchedule,
       upcomingList,
@@ -713,19 +688,12 @@ router.get(
       User.countDocuments({ role: "admin", status: "active" }),
       Appointment.countDocuments({}),
       Appointment.countDocuments({ status: "completed" }),
-      Appointment.find({ status: "pending" })
-        .select("appointmentDate appointmentTime status")
-        .lean(),
       Appointment.countDocuments({ status: "cancelled" }),
       Appointment.countDocuments({
         $or: [
           { status: "no_show" },
           { notes: { $regex: /no[-\s]?show/i } },
         ],
-      }),
-      Appointment.countDocuments({
-        appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $nin: ["cancelled", "declined"] },
       }),
       Appointment.countDocuments({
         appointmentDate: { $gt: now },
@@ -735,7 +703,6 @@ router.get(
         .where("appointmentDate").gte(todayStart).lte(todayEnd)
         .where("status").ne("declined")
         .sort({ appointmentTime: 1, appointmentDate: 1 })
-        .limit(100)
         .lean(),
       Appointment.find({
         appointmentDate: { $gt: todayEnd },
@@ -753,6 +720,7 @@ router.get(
         .limit(8)
         .lean(),
       AuditLog.find({
+        createdAt: { $gte: todayStart, $lte: todayEnd },
         action: {
           $regex: /Appointment|Clinical Note|Treatment Record|Patient|Staff|Login/i,
         },
@@ -771,9 +739,6 @@ router.get(
         .limit(8)
         .lean(),
     ]);
-    const pendingAppointments = pendingAppointmentRecords
-      .filter((appointment) => getScheduledDateTime(appointment) >= todayStart)
-      .length;
     const statusCounts = ["pending", "confirmed", "checked_in", "in_consultation", "completed", "cancelled", "no_show"].reduce((counts, status) => ({
       ...counts,
       [status]: todaysSchedule.filter((appointment) => appointment.status === status).length,
@@ -783,10 +748,10 @@ router.get(
     res.json({
       stats: {
         totalAppointments,
-        todaysAppointments,
+        todaysAppointments: todaysSchedule.length,
         upcomingAppointments,
         completedAppointments,
-        pendingAppointments,
+        pendingAppointments: statusCounts.pending,
         cancelledAppointments,
         noShowAppointments,
         totalPatients,
@@ -800,7 +765,7 @@ router.get(
       staffActivity,
       recentActivity,
       pendingActions: {
-        pendingAppointments,
+        pendingAppointments: statusCounts.pending,
         pendingStaffRequests,
         inactivePatients,
       },
@@ -810,20 +775,51 @@ router.get(
 );
 
 router.get(
+  "/admin/analytics/prediction",
+  authenticate,
+  authorize("admin"),
+  asyncHandler(async (req, res) => {
+    const targetDate = String(req.query.date || "");
+    const today = clinicDateKey();
+    if (!parseDateKey(targetDate) || targetDate < today || targetDate > addDays(today, 30)) {
+      return res.status(400).json({ message: "Choose a date within the next 30 days." });
+    }
+
+    const service = String(req.query.service || "").trim();
+    if (service.length > 120) return res.status(400).json({ message: "Invalid service filter." });
+
+    const [appointments, clinicSettings] = await Promise.all([
+      Appointment.find({
+        appointmentDate: { $gte: clinicDayStart(addDays(today, -84)), $lt: clinicDayStart(addDays(targetDate, 7)) },
+        ...(service ? { service } : {}),
+      }).select("appointmentDate status").lean(),
+      ClinicSettings.findOne({}).select("appointmentSettings.workingDays").lean(),
+    ]);
+    const forecast = buildAppointmentForecast({
+      targetDate,
+      appointments,
+      workingDays: clinicSettings?.appointmentSettings?.workingDays,
+      today,
+    });
+    const ai = await generateForecastInsight(forecast, service);
+    return res.json({ ...forecast, service, ai });
+  }),
+);
+
+router.get(
   "/admin/analytics",
   authenticate,
   authorize("admin"),
   asyncHandler(async (req, res) => {
-    const todayStart = startOfDay(new Date());
-    const todayEnd = endOfDay(new Date());
-    const appointmentQuery = getAnalyticsFilters(req.query);
+    const dateRange = getAnalyticsDateRange(req.query);
+    if (dateRange?.error) return res.status(400).json({ message: dateRange.error });
+    const appointmentQuery = getAnalyticsFilters(req.query, dateRange);
     const monthlyBaseQuery = getAnalyticsBaseFilters(req.query);
-    const kpiComparisonRange = getKpiComparisonRange(req.query);
+    const kpiComparisonRange = getKpiComparisonRange(dateRange);
 
     const [
       totalStaff,
       totalDentists,
-      todaysAppointments,
       inventoryAlerts,
       totalTreatments,
       recentAppointments,
@@ -841,10 +837,6 @@ router.get(
     ] = await Promise.all([
       User.countDocuments({ role: "staff", status: "active" }),
       User.countDocuments({ role: "admin", status: "active" }),
-      Appointment.countDocuments({
-        appointmentDate: { $gte: todayStart, $lte: todayEnd },
-        status: { $nin: ["cancelled", "declined"] },
-      }),
       Inventory.countDocuments({ status: { $in: ["low_stock", "out_of_stock"] } }),
       DentalRecord.countDocuments({}),
       Appointment.find({})
@@ -859,12 +851,12 @@ router.get(
         ...monthlyBaseQuery,
         appointmentDate: { $gte: kpiComparisonRange.previousStart, $lte: kpiComparisonRange.currentEnd },
       })
-        .select("appointmentDate status notes createdAt")
+        .select("appointmentDate status notes createdAt patient email patientName")
         .lean(),
       Patient.find({})
         .select("firstName lastName email dateOfBirth gender registrationStatus status createdAt")
         .lean(),
-      DentalRecord.find({})
+      DentalRecord.find(dateRange ? { visitDate: { $gte: dateRange.currentStart, $lte: dateRange.currentEnd } } : {})
         .select("patient appointment patientName visitDate diagnosis treatment procedure dentistName createdAt")
         .lean(),
       User.find({})
@@ -883,9 +875,9 @@ router.get(
     const completedAppointments = kpiStats.completedAppointments;
     const completedRevenueAppointments = appointments.filter((appointment) => appointment.status === "completed");
     const estimatedRevenue = completedRevenueAppointments.reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0);
-    const appointmentAnalytics = buildAppointmentAnalytics(appointments);
-    const serviceAnalytics = buildServiceAnalytics(appointments);
-    const patientAnalytics = buildPatientAnalytics(patients, appointments);
+    const appointmentAnalytics = buildAppointmentAnalytics(appointments, dateRange);
+    const serviceAnalytics = buildServiceAnalytics(appointments, dateRange);
+    const patientAnalytics = buildPatientAnalytics(patients, appointments, dateRange);
     const treatmentAnalytics = buildTreatmentAnalytics(dentalRecords, appointments);
     const dentistPerformance = buildDentistAnalytics(appointments, dentalRecords);
     const adminAnalytics = buildAdminAnalytics(patients, users, appointments, auditLogs, feedback);
@@ -899,11 +891,12 @@ router.get(
         totalServices: OFFICIAL_SERVICES.length,
         newPatients,
         totalAppointments: kpiStats.totalAppointments,
+        currentPatients: kpiStats.currentPatients,
         completedAppointments,
         pendingAppointments: kpiStats.pendingAppointments,
         cancelledAppointments: kpiStats.cancelledAppointments,
         noShowAppointments: kpiStats.noShowAppointments,
-        todaysAppointments,
+        todaysAppointments: kpiStats.todaysAppointments,
         inventoryAlerts,
         totalTreatments,
         upcomingAppointments: kpiStats.upcomingAppointments,
@@ -977,7 +970,7 @@ router.get(
         status: { $ne: "declined" },
       })
         .sort({ appointmentTime: 1 })
-        .limit(100),
+        .lean(),
       Appointment.find({
         ...appointmentScope,
         appointmentDate: { $gt: todayEnd },
@@ -989,6 +982,7 @@ router.get(
         .sort({ createdAt: -1 })
         .limit(8),
       AuditLog.find({
+        createdAt: { $gte: todayStart, $lte: todayEnd },
         action: { $regex: /Appointment confirmed|Appointment checked_in|Appointment in_consultation|Appointment completed|Appointment rescheduled|Appointment cancelled|Clinical Note|Treatment Record/i },
       })
         .sort({ createdAt: -1 })

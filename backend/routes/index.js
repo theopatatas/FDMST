@@ -21,6 +21,7 @@ const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
 const { sendMail } = require("../services/mailService");
+const { deleteManagedPromotionImage, getManagedPromotionImagePath } = require("../services/supabaseStorageService");
 const { validateAppointmentSlot } = require("../utils/appointmentAvailability");
 const { preparePatientCreateBody, preparePatientUpdateBody } = require("../utils/patientRecords");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
@@ -29,21 +30,18 @@ const { expirePromotions } = require("../utils/promotionExpiry");
 const router = express.Router();
 const DEFAULT_PATIENT_TEMPORARY_PASSWORD = "12345678";
 
-const validatePromotionImage = (value) => {
+const validatePromotionImage = (value, previousUrl = "") => {
   const imageValue = value?.trim() || "";
   if (!imageValue) return "";
 
-  const isImageData = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(imageValue);
-  const isImageUrl = /^https?:\/\/.+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(imageValue);
-
-  if (!isImageData && !isImageUrl) {
-    const error = new Error("Promotion banner must be a valid image file or image URL.");
+  if (imageValue !== previousUrl && !getManagedPromotionImagePath(imageValue)) {
+    const error = new Error("Upload the promotion image to clinic storage before saving.");
     error.status = 400;
-    error.errors = { imageUrl: "Promotion banner must be a valid image file or image URL." };
+    error.errors = { imageUrl: error.message };
     throw error;
   }
 
-  if (imageValue.length > 1000000) {
+  if (imageValue !== previousUrl && imageValue.length > 2048) {
     const error = new Error("Promotion banner image is too large.");
     error.status = 400;
     error.errors = { imageUrl: "Promotion banner image is too large." };
@@ -178,6 +176,10 @@ const normalizePromotionBody = async (body = {}, req) => {
     throw error;
   }
 
+  const previousPromotion = req.params?.id
+    ? await Promotion.findById(req.params.id).select("imageUrl createdBy")
+    : null;
+
   const now = new Date();
   const requestedStatus = body.status || "active";
   const status = requestedStatus === "expired" && (!endDate || endDate > now)
@@ -188,19 +190,19 @@ const normalizePromotionBody = async (body = {}, req) => {
   return {
     title,
     description: body.description?.trim() || "",
-    imageUrl: validatePromotionImage(body.imageUrl),
+    imageUrl: validatePromotionImage(body.imageUrl, previousPromotion?.imageUrl),
     serviceType: applicableServices.includes("All Services") ? "All Services" : applicableServices[0],
     applicableServices,
     promoCode,
     discountType,
     discountValue,
     discountLabel: body.discountLabel?.trim() || (discountType === "percentage" ? `${discountValue}% off` : `₱${discountValue} off`),
-    maxRedemptions,
+    maxRedemptions: maxRedemptions ?? null,
     audience: body.audience || "all",
     status,
-    startDate,
-    endDate,
-    createdBy: body.createdBy || req.user.id,
+    startDate: startDate ?? null,
+    endDate: endDate ?? null,
+    createdBy: previousPromotion?.createdBy || req.user.id,
   };
 };
 
@@ -2156,6 +2158,16 @@ router.get("/promotions", authorize("admin", "staff", "patient"), async (req, re
     next(error);
   }
 });
+const removeUnusedPromotionImage = async (imageUrl, promotionId) => {
+  if (!imageUrl) return;
+  try {
+    const stillUsed = await Promotion.exists({ imageUrl, _id: { $ne: promotionId } });
+    if (!stillUsed) await deleteManagedPromotionImage(imageUrl);
+  } catch (error) {
+    console.error("Unable to clean up a previous promotion image:", error);
+  }
+};
+
 router.use(
   "/promotions",
   authorize("admin"),
@@ -2163,6 +2175,11 @@ router.use(
     beforeCreate: normalizePromotionBody,
     beforeUpdate: normalizePromotionBody,
     afterCreate: notifyUsersOfPromotion,
+    afterUpdate: (promotion, previous) => {
+      if (!previous?.imageUrl || previous.imageUrl === promotion.imageUrl) return;
+      return removeUnusedPromotionImage(previous.imageUrl, promotion._id);
+    },
+    afterDelete: (promotion) => removeUnusedPromotionImage(promotion.imageUrl, promotion._id),
   }),
 );
 router.use("/notifications", authorize("admin", "staff", "patient"), createCrudRouter(Notification));

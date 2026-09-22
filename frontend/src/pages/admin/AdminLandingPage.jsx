@@ -14,6 +14,7 @@ import {
   FaCheckCircle,
   FaClock,
   FaFileAlt,
+  FaHistory,
   FaSyncAlt,
   FaTimesCircle,
   FaUserClock,
@@ -168,7 +169,7 @@ function AdminLandingPage() {
   const todayStatusCounts = stats.statusCounts || {}
   const cards = useMemo(() => [
     ['all', "Today's Appointments", stats.todaysAppointments || 0, 'Scheduled today', FaCalendarDay, 'amber'],
-    ['pending', 'Pending Appointments', stats.pendingAppointments || 0, 'Awaiting clinic action', FaClock, 'amber'],
+    ['pending', 'Pending Today', stats.pendingAppointments || 0, 'Awaiting clinic action', FaClock, 'amber'],
     ['confirmed', 'Confirmed Today', todayStatusCounts.confirmed || 0, 'Ready for visit', FaCalendarCheck, 'blue'],
     ['checked_in', 'Checked In Today', todayStatusCounts.checked_in || 0, 'Patients already arrived', FaUserClock, 'emerald'],
     ['in_consultation', 'In Consultation Today', todayStatusCounts.in_consultation || 0, 'Currently being treated', FaUserMd, 'violet'],
@@ -232,10 +233,16 @@ function AdminLandingPage() {
             <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">Clinic Overview</p>
             <h1 className="mt-2 text-3xl font-semibold text-sky-950">{getGreeting()}, {getDisplayName(user)}</h1>
             <p className="mt-2 text-slate-500">{currentTime.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} • {currentTime.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}</p>
+            <p className="mt-3 text-sm text-slate-600">{stats.todaysAppointments || 0} appointments today · {stats.pendingAppointments || 0} awaiting confirmation</p>
           </div>
-          <button type="button" onClick={() => loadDashboard()} disabled={isRefreshing} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-60">
-            <FaSyncAlt className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh Dashboard
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => navigate('/admin/appointments?period=past')} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-sky-950 transition hover:bg-slate-50">
+              <FaHistory className="h-4 w-4" /> Appointment Records
+            </button>
+            <button type="button" onClick={() => loadDashboard()} disabled={isRefreshing} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-60">
+              <FaSyncAlt className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh Dashboard
+            </button>
+          </div>
         </div>
       </section>
 
@@ -320,7 +327,7 @@ function AdminLandingPage() {
       </section>
 
       <section className="grid gap-6">
-        <Panel title="Recent Activity" subtitle="Latest clinic workflow events.">
+        <Panel title="Today's Updates" subtitle="Clinic workflow events recorded today.">
           <div className="grid max-h-80 gap-3 overflow-y-auto pr-1">
             {dashboard?.recentActivity?.length ? dashboard.recentActivity.map((item) => (
               <div key={item._id} className="flex gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm">
@@ -330,7 +337,7 @@ function AdminLandingPage() {
                   <p className="mt-1 text-xs text-slate-500">{formatTime(item.createdAt)} • {item.performedByEmail || 'System'}</p>
                 </div>
               </div>
-            )) : <EmptyState message="No recent clinic activity." />}
+            )) : <EmptyState message="No clinic updates today." />}
           </div>
         </Panel>
       </section>

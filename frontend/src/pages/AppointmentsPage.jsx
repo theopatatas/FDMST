@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   FaCalendarAlt,
   FaCheckCircle,
@@ -176,6 +177,8 @@ function SummaryCard({ icon: Icon, label, value, tone = 'sky' }) {
 
 function AppointmentsPage({ allowApproval = false }) {
   const toast = useToast()
+  const location = useLocation()
+  const requestedPeriod = new URLSearchParams(location.search).get('period')
   const currentUser = authStorage.getUser()
   const isAdmin = currentUser?.role === 'admin'
   const isStaff = currentUser?.role === 'staff'
@@ -192,7 +195,7 @@ function AppointmentsPage({ allowApproval = false }) {
     patient: '',
     search: '',
     service: 'all',
-    period: 'default',
+    period: requestedPeriod === 'past' ? 'past' : 'default',
     startDate: '',
     endDate: '',
   })

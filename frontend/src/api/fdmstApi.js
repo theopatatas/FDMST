@@ -140,6 +140,11 @@ export const fdmstApi = {
     const query = params.toString()
     return request(`/dashboard/admin/analytics${query ? `?${query}` : ''}`)
   },
+  getAdminAnalyticsPrediction: ({ date, service = '' }) => {
+    const params = new URLSearchParams({ date })
+    if (service) params.set('service', service)
+    return request(`/dashboard/admin/analytics/prediction?${params}`)
+  },
   getStaffDashboard: () => request('/dashboard/staff'),
   getProfile: () => request('/users/me'),
   getUserSettings: () => request('/users/me/settings'),

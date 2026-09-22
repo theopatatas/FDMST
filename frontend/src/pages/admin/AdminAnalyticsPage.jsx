@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArcElement,
   BarElement,
@@ -17,14 +17,17 @@ import {
   FaCalendarCheck,
   FaCalendarDay,
   FaCalendarPlus,
+  FaChartLine,
   FaChevronDown,
   FaCheckCircle,
   FaClock,
   FaDownload,
+  FaMagic,
   FaTimes,
   FaTimesCircle,
   FaUserClock,
   FaUserPlus,
+  FaUsers,
 } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -69,6 +72,7 @@ const officialServices = [
 const statusOptions = ['pending', 'confirmed', 'completed', 'no_show', 'cancelled', 'declined']
 const kpiMeta = [
   { key: 'totalAppointments', label: 'Total Appointments', icon: FaCalendarCheck, tone: 'blue' },
+  { key: 'currentPatients', label: 'Unique Patients', icon: FaUsers, tone: 'violet' },
   { key: 'newPatients', label: 'New Patients', icon: FaUserPlus, tone: 'blue' },
   { key: 'todaysAppointments', label: "Today's Appointments", icon: FaCalendarDay, tone: 'green' },
   { key: 'upcomingAppointments', label: 'Upcoming Appointments', icon: FaCalendarPlus, tone: 'violet' },
@@ -209,7 +213,7 @@ function KpiCard({ item, value, change = 0 }) {
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-xs font-semibold text-slate-500">{item.label}</p>
+          <p className="min-h-8 text-xs font-semibold leading-4 text-slate-500">{item.label}</p>
           <p className="mt-1 text-2xl font-semibold leading-tight text-sky-950">{value || 0}</p>
         </div>
       </div>
@@ -435,11 +439,19 @@ function CompactTable({ columns, rows, emptyMessage }) {
 
 function FilterToolbar({ filters, options, onChange, onExport }) {
   const [exportOpen, setExportOpen] = useState(false)
-  const update = (key, value) => onChange((current) => ({ ...current, [key]: value }))
+  const update = (key, value) => onChange((current) => {
+    const next = { ...current, [key]: value }
+    if (key === 'startDate' && value && next.endDate && next.endDate < value) next.endDate = ''
+    return next
+  })
   const formatDate = (value) => value
     ? new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
     : 'Any'
-  const dateLabel = filters.startDate || filters.endDate ? `${formatDate(filters.startDate)} - ${formatDate(filters.endDate)}` : 'All dates'
+  const dateLabel = filters.startDate && filters.endDate && filters.startDate !== filters.endDate
+    ? `${formatDate(filters.startDate)} - ${formatDate(filters.endDate)}`
+    : filters.startDate || filters.endDate
+      ? formatDate(filters.startDate || filters.endDate)
+      : 'All dates'
   const controlClass = 'h-12 min-w-0 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-sky-900 focus:ring-4 focus:ring-sky-100'
   const clearFilters = () => onChange({ startDate: '', endDate: '', dentist: '', service: '', status: '' })
 
@@ -461,7 +473,7 @@ function FilterToolbar({ filters, options, onChange, onExport }) {
             </label>
             <label className="grid gap-2 text-xs font-semibold text-slate-500">
               End Date
-              <input aria-label={`End date. Current range: ${dateLabel}`} className={controlClass} type="date" value={filters.endDate} onChange={(event) => update('endDate', event.target.value)} />
+              <input aria-label={`End date. Current range: ${dateLabel}`} className={controlClass} min={filters.startDate || undefined} type="date" value={filters.endDate} onChange={(event) => update('endDate', event.target.value)} />
             </label>
           </div>
         </details>
@@ -509,35 +521,176 @@ function FilterToolbar({ filters, options, onChange, onExport }) {
   )
 }
 
+function clinicDateKey(offset = 0) {
+  const date = new Date(Date.now() + offset * 86400000)
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function PredictionPanel({ service, onFocusDate }) {
+  const [date, setDate] = useState(() => clinicDateKey(1))
+  const [prediction, setPrediction] = useState(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [error, setError] = useState('')
+  const visible = prediction?.selected?.date === date && prediction?.service === service ? prediction : null
+  const selected = visible?.selected
+  const maxValue = Math.max(1, ...(visible?.days || []).map((day) => day.forecast ?? day.booked))
+  const formatDate = (value) => new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' })
+
+  const generate = async () => {
+    onFocusDate(date)
+    setIsGenerating(true)
+    setError('')
+    try {
+      setPrediction(await fdmstApi.getAdminAnalyticsPrediction({ date, service }))
+    } catch (requestError) {
+      setPrediction(null)
+      setError(requestError.message || 'Could not load the prediction.')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  return (
+    <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-label="Appointment prediction">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600"><FaMagic aria-hidden="true" /></span>
+          <div>
+            <h2 className="text-lg font-semibold text-sky-950">AI-assisted appointment forecast</h2>
+            <p className="mt-1 text-sm text-slate-500">{service || 'All services'} · Recent 12-week appointment history</p>
+          </div>
+        </div>
+        <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+          <label className="grid min-w-0 w-full gap-1 text-xs font-semibold text-slate-600 sm:w-auto">
+            Forecast date
+            <input
+              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-sky-800 focus:ring-2 focus:ring-sky-100 sm:w-44"
+              min={clinicDateKey()}
+              max={clinicDateKey(30)}
+              onChange={(event) => {
+                setDate(event.target.value)
+                if (event.target.value) onFocusDate(event.target.value)
+              }}
+              type="date"
+              value={date}
+            />
+          </label>
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+            disabled={isGenerating || !date}
+            onClick={generate}
+            type="button"
+          >
+            <FaChartLine aria-hidden="true" /> {isGenerating ? 'Generating...' : 'Generate forecast'}
+          </button>
+        </div>
+      </div>
+
+      {isGenerating ? (
+        <div className="mt-6 grid animate-pulse gap-4 border-t border-slate-100 pt-5 sm:grid-cols-3" aria-live="polite">
+          {[1, 2, 3].map((item) => <div className="h-20 rounded-lg bg-slate-100" key={item} />)}
+        </div>
+      ) : error ? (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5 text-sm text-red-700" role="alert">
+          <span>{error}</span>
+          <button className="rounded-lg border border-red-200 px-3 py-2 font-semibold hover:bg-red-50" onClick={generate} type="button">Retry</button>
+        </div>
+      ) : visible ? (
+        <div className="mt-6 border-t border-slate-100 pt-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div><p className="text-xs font-semibold uppercase text-slate-500">Expected appointments</p><p className="mt-1 text-3xl font-semibold text-sky-950">{selected.forecast ?? '—'}</p></div>
+            <div><p className="text-xs font-semibold uppercase text-slate-500">Already scheduled</p><p className="mt-1 text-3xl font-semibold text-sky-950">{selected.booked}</p></div>
+            <div><p className="text-xs font-semibold uppercase text-slate-500">Indicative range</p><p className="mt-1 text-3xl font-semibold text-sky-950">{selected.low === null ? '—' : `${selected.low}–${selected.high}`}</p></div>
+          </div>
+          {!selected.isWorkingDay ? <p className="mt-4 text-sm text-amber-700">This is not a configured clinic working day.</p> : null}
+          {selected.isWorkingDay && selected.forecast === null ? <p className="mt-4 text-sm text-slate-600">Not enough appointment history for a reliable estimate. Existing bookings are shown above.</p> : null}
+          <div className="mt-6 grid grid-cols-2 gap-3 border-t border-slate-100 pt-5 sm:grid-cols-4 xl:grid-cols-7">
+            {visible.days.map((day) => (
+              <div className="min-w-0" key={day.date}>
+                <p className="text-xs font-semibold text-slate-600">{formatDate(day.date)}</p>
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-sky-700" style={{ width: `${((day.forecast ?? day.booked) / maxValue) * 100}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{day.forecast === null ? `${day.booked} booked` : `${day.forecast} expected`}</p>
+              </div>
+            ))}
+          </div>
+          {visible.ai?.status === 'ready' ? (
+            <div className="mt-5 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700">
+              <p>{visible.ai.insight}</p>
+              <p className="mt-1 font-medium text-sky-950">{visible.ai.action}</p>
+            </div>
+          ) : visible.ai?.status === 'unavailable' || visible.ai?.status === 'not_configured' ? (
+            <p className="mt-5 border-t border-slate-100 pt-4 text-sm text-slate-500">AI explanation is unavailable; appointment estimates are based on clinic history.</p>
+          ) : null}
+          <p className="mt-4 text-xs text-slate-500">Forecasts are estimates, not confirmed bookings. Based on {visible.historyAppointments} appointments across {visible.historyDays} clinic working days; {selected.comparableDays} comparable weekdays.</p>
+        </div>
+      ) : (
+        <p className="mt-6 border-t border-slate-100 pt-5 text-sm text-slate-500">Choose a date to view expected appointment volume.</p>
+      )}
+    </section>
+  )
+}
+
 function AdminAnalyticsPage() {
   const toast = useToast()
+  const requestIdRef = useRef(0)
   const [dashboard, setDashboard] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [filters, setFilters] = useState({ startDate: '', endDate: '', dentist: '', service: '', status: '' })
+  const focusForecastDate = useCallback((date) => {
+    setFilters((current) => current.startDate === date && current.endDate === date
+      ? current
+      : { ...current, startDate: date, endDate: date })
+  }, [])
 
   const loadAnalytics = useCallback(async ({ silent = false } = {}) => {
+    const requestId = ++requestIdRef.current
+    if (!silent) {
+      setIsLoading(true)
+      setDashboard(null)
+    }
+    setLoadError('')
     try {
       const data = await fdmstApi.getAdminAnalytics(filters)
+      if (requestId !== requestIdRef.current) return
       setDashboard(data)
       setLoadError('')
     } catch (loadError) {
+      if (requestId !== requestIdRef.current) return
       const message = loadError.message && loadError.message !== 'Something went wrong. Please try again.'
         ? loadError.message
         : 'No analytics data available.'
       setLoadError(message)
       if (!silent) toast.error(message)
     } finally {
-      setIsLoading(false)
+      if (requestId === requestIdRef.current) setIsLoading(false)
     }
   }, [filters, toast])
 
   useEffect(() => {
-    setIsLoading(true)
-    Promise.resolve().then(loadAnalytics)
+    let active = true
+    Promise.resolve().then(() => { if (active) loadAnalytics() })
+    return () => {
+      active = false
+      requestIdRef.current += 1
+    }
   }, [loadAnalytics])
 
   const stats = dashboard?.stats || {}
+  const hasDateFilter = Boolean(filters.startDate || filters.endDate)
+  const isDateRange = Boolean(filters.startDate && filters.endDate && filters.startDate !== filters.endDate)
+  const selectedDayLabel = hasDateFilter
+    ? new Date(`${filters.endDate || filters.startDate}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
+    : ''
+  const displayKpis = kpiMeta.map((item) => item.key === 'todaysAppointments' && hasDateFilter
+    ? { ...item, label: `Appointments on ${selectedDayLabel}` }
+    : item)
   const analytics = dashboard?.analytics || {}
   const appointmentAnalytics = analytics.appointments || {}
   const serviceAnalytics = analytics.services || {}
@@ -560,7 +713,7 @@ function AdminAnalyticsPage() {
   const exportAnalytics = () => {
     exportCsv('fdmst-analytics-summary.csv', [
       ['Metric', 'Value'],
-      ...kpiMeta.map((item) => [item.label, stats[item.key] || 0]),
+      ...displayKpis.map((item) => [item.label, stats[item.key] || 0]),
       ['Completion Rate', `${appointmentAnalytics.completionRate || 0}%`],
       ['Cancellation Rate', `${appointmentAnalytics.cancellationRate || 0}%`],
       ['No-Show Rate', `${appointmentAnalytics.noShowRate || 0}%`],
@@ -571,11 +724,12 @@ function AdminAnalyticsPage() {
   return (
     <main className="bg-slate-50/60 px-4 py-5 sm:px-6 lg:px-8">
       <FilterToolbar filters={filters} options={dashboard?.filters || {}} onChange={setFilters} onExport={exportAnalytics} />
+      <PredictionPanel service={filters.service} onFocusDate={focusForecastDate} />
 
       {isLoading ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
-            {kpiMeta.map((item) => <SkeletonCard key={item.key} />)}
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {displayKpis.map((item) => <SkeletonCard key={item.key} />)}
           </section>
           <SkeletonSection />
           <SkeletonSection />
@@ -589,14 +743,14 @@ function AdminAnalyticsPage() {
         </section>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
-            {kpiMeta.map((item) => (
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {displayKpis.map((item) => (
               <KpiCard change={stats.monthlyChange?.[item.key] || 0} item={item} key={item.key} value={stats[item.key]} />
             ))}
           </section>
 
           <AnalyticsSection title="Appointment Analytics">
-            <ChartCard title="Daily Appointment Trend" subtitle="Last 30 days">
+            <ChartCard title="Daily Appointment Trend" subtitle={hasDateFilter ? (isDateRange ? 'Last 30 days of selected range' : 'Selected date') : 'Last 30 days'}>
               <AnalyticsChart type="line" series={appointmentAnalytics.dailyTrend} label="Appointments" emptyMessage="No daily appointment trend data yet." />
             </ChartCard>
             <ChartCard title="Appointment Status Distribution" subtitle={`Total: ${stats.totalAppointments || 0} appointments`}>

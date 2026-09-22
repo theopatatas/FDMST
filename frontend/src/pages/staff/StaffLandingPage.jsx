@@ -13,6 +13,7 @@ import {
   FaCheckCircle,
   FaClock,
   FaEye,
+  FaHistory,
   FaPlay,
   FaSearch,
   FaSyncAlt,
@@ -260,10 +261,15 @@ function StaffLandingPage() {
               You have <span className="font-bold text-sky-950">{dashboard?.stats?.todaysAppointments || 0}</span> appointments scheduled today.
             </p>
           </div>
-          <button type="button" onClick={handleRefresh} disabled={isRefreshing} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-60">
-            <FaSyncAlt className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh Dashboard
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link to={`${appointmentsPath}?period=past`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-sky-950 transition hover:bg-slate-50">
+              <FaHistory className="h-4 w-4" /> Appointment Records
+            </Link>
+            <button type="button" onClick={handleRefresh} disabled={isRefreshing} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-60">
+              <FaSyncAlt className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh Dashboard
+            </button>
+          </div>
         </div>
       </section>
 
@@ -428,8 +434,8 @@ function StaffLandingPage() {
               <FaUsers />
             </span>
             <div>
-              <h2 className="text-xl font-semibold text-sky-950">Recent Activity Timeline</h2>
-              <p className="mt-1 text-sm text-slate-500">Latest workflow events.</p>
+              <h2 className="text-xl font-semibold text-sky-950">Today's Updates</h2>
+              <p className="mt-1 text-sm text-slate-500">Workflow events recorded today.</p>
             </div>
           </div>
           <div className="mt-5 grid max-h-80 gap-3 overflow-y-auto pr-1">
@@ -441,7 +447,7 @@ function StaffLandingPage() {
                   <p className="mt-1 text-xs text-slate-500">{formatTime(activity.createdAt)} • {activity.performedByEmail || 'System'}</p>
                 </div>
               </div>
-            )) : <EmptyState message="No recent activity yet." />}
+            )) : <EmptyState message="No workflow updates today." />}
           </div>
         </article>
 

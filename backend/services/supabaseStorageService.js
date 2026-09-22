@@ -186,6 +186,40 @@ const uploadImageToSupabase = async ({ imageData, folder, fileName, maxSizeBytes
   };
 };
 
+const getManagedPromotionImagePath = (imageUrl, config = getSupabaseConfig()) => {
+  if (!config.url || !imageUrl) return null;
+
+  try {
+    const base = new URL(config.url);
+    const image = new URL(imageUrl);
+    const prefix = `${base.pathname.replace(/\/$/, "")}/storage/v1/object/public/${encodeURIComponent(config.bucket)}/promotions/`;
+    if (image.origin !== base.origin || !image.pathname.startsWith(prefix) || image.search || image.hash) return null;
+
+    const fileName = decodeURIComponent(image.pathname.slice(prefix.length));
+    if (!/^\d{13}-[a-f0-9]{16}-[a-z0-9_-]+\.(?:jpg|png|webp|gif)$/.test(fileName)) return null;
+    return `promotions/${fileName}`;
+  } catch {
+    return null;
+  }
+};
+
+const deleteManagedPromotionImage = async (imageUrl) => {
+  const config = getSupabaseConfig();
+  const storagePath = getManagedPromotionImagePath(imageUrl, config);
+  if (!storagePath) return false;
+  if (!config.key) throw new Error("Supabase storage is not configured.");
+
+  const response = await fetch(`${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/${encodeStoragePath(storagePath)}`, {
+    method: "DELETE",
+    headers: getSupabaseHeaders(config),
+  });
+  if (response.ok || response.status === 404) return true;
+
+  throw new Error(`Unable to remove the previous promotion image (HTTP ${response.status}).`);
+};
+
 module.exports = {
   uploadImageToSupabase,
+  deleteManagedPromotionImage,
+  getManagedPromotionImagePath,
 };

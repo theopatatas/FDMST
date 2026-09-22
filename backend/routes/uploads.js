@@ -14,6 +14,9 @@ router.post(
     const folder = allowedFolders.has(String(req.body.folder || "").trim())
       ? String(req.body.folder).trim()
       : "general";
+    if (folder === "promotions" && req.user.role !== "admin") {
+      return res.status(403).json({ message: "Only administrators can upload promotion images." });
+    }
     const maxSizeBytes = Math.min(Number(req.body.maxSizeBytes) || 1024 * 1024, 2 * 1024 * 1024);
     const result = await uploadImageToSupabase({
       imageData: req.body.imageData,
