@@ -7,11 +7,17 @@ const Inventory = require("../models/Inventory");
 const ClinicSettings = require("../models/ClinicSettings");
 const Notification = require("../models/Notification");
 const Patient = require("../models/Patient");
+const Promotion = require("../models/Promotion");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const asyncHandler = require("../utils/asyncHandler");
 const { authenticate, authorize } = require("../middleware/auth");
-const { buildAppointmentForecast, generateForecastInsight } = require("../services/analyticsPredictionService");
+const {
+  buildAppointmentForecast,
+  buildPromotionRecommendations,
+  buildServiceDemandForecasts,
+  generateForecastInsight,
+} = require("../services/analyticsPredictionService");
 const { addDays, clinicDateKey, clinicDayStart, parseDateKey } = require("../utils/clinicDate");
 const { getAnalyticsDateRange, getKpiComparisonRange } = require("../utils/analyticsDateRange");
 
@@ -785,24 +791,82 @@ router.get(
       return res.status(400).json({ message: "Choose a date within the next 30 days." });
     }
 
-    const service = String(req.query.service || "").trim();
-    if (service.length > 120) return res.status(400).json({ message: "Invalid service filter." });
+    const serviceFilter = String(req.query.service || "").trim();
+    if (serviceFilter.length > 120) return res.status(400).json({ message: "Invalid service filter." });
+    const service = serviceFilter ? normalizeService(serviceFilter) : "";
+    const targetEndDate = addDays(targetDate, 6);
 
-    const [appointments, clinicSettings] = await Promise.all([
+    const [appointments, clinicSettings, overlappingPromotions] = await Promise.all([
       Appointment.find({
-        appointmentDate: { $gte: clinicDayStart(addDays(today, -84)), $lt: clinicDayStart(addDays(targetDate, 7)) },
-        ...(service ? { service } : {}),
-      }).select("appointmentDate status").lean(),
-      ClinicSettings.findOne({}).select("appointmentSettings.workingDays").lean(),
+        appointmentDate: { $gte: clinicDayStart(addDays(today, -84)), $lt: clinicDayStart(addDays(targetEndDate, 1)) },
+      }).select("appointmentDate status service").lean(),
+      ClinicSettings.findOne({}).select("appointmentSettings.workingDays services").lean(),
+      Promotion.find({
+        status: "active",
+        $and: [
+          { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lt: clinicDayStart(addDays(targetEndDate, 1)) } }] },
+          { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gte: clinicDayStart(targetDate) } }] },
+        ],
+      }).select("applicableServices serviceType").lean(),
     ]);
+    const normalizedAppointments = appointments.map((appointment) => ({
+      ...appointment,
+      service: normalizeService(appointment.service),
+    }));
+    const activeConfiguredServices = (clinicSettings?.services || [])
+      .filter((configuredService) => configuredService.status !== "inactive")
+      .map((configuredService) => normalizeService(configuredService.serviceName))
+      .filter(Boolean);
+    const services = service
+      ? [service]
+      : activeConfiguredServices.length ? [...new Set(activeConfiguredServices)] : OFFICIAL_SERVICES;
+    const workingDays = clinicSettings?.appointmentSettings?.workingDays;
+    const forecastAppointments = service
+      ? normalizedAppointments.filter((appointment) => appointment.service === service)
+      : normalizedAppointments;
     const forecast = buildAppointmentForecast({
       targetDate,
-      appointments,
-      workingDays: clinicSettings?.appointmentSettings?.workingDays,
+      appointments: forecastAppointments,
+      workingDays,
       today,
     });
-    const ai = await generateForecastInsight(forecast, service);
-    return res.json({ ...forecast, service, ai });
+    const serviceForecasts = buildServiceDemandForecasts({
+      targetDate,
+      appointments: normalizedAppointments,
+      services,
+      workingDays,
+      today,
+    });
+    const blockedServices = new Set();
+    let allServicesBlocked = false;
+    overlappingPromotions.forEach((promotion) => {
+      const promotionServices = promotion.applicableServices?.length
+        ? promotion.applicableServices
+        : [promotion.serviceType || "All Services"];
+      promotionServices.forEach((promotionService) => {
+        if (String(promotionService).trim().toLowerCase() === "all services") allServicesBlocked = true;
+        else blockedServices.add(normalizeService(promotionService));
+      });
+    });
+    const recommendationCandidates = buildPromotionRecommendations({
+      serviceForecasts,
+      blockedServices,
+      allServicesBlocked,
+    });
+    const ai = await generateForecastInsight(forecast, service, recommendationCandidates);
+    return res.json({
+      ...forecast,
+      service,
+      ai: {
+        status: ai.status,
+        insight: ai.insight,
+        action: ai.action,
+      },
+      recommendations: ai.recommendations,
+      recommendationSource: ai.recommendationSource,
+      serviceForecasts,
+      excludedPromotionServices: allServicesBlocked ? ["All Services"] : [...blockedServices],
+    });
   }),
 );
 

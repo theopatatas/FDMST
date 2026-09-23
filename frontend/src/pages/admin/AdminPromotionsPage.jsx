@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   FaBullhorn,
   FaCalendarAlt,
@@ -101,6 +102,8 @@ function getPromotionDiscountText(promotion) {
 
 function AdminPromotionsPage() {
   const toast = useToast()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [promotions, setPromotions] = useState([])
   const [form, setForm] = useState(initialForm)
   const [editingId, setEditingId] = useState('')
@@ -232,6 +235,35 @@ function AdminPromotionsPage() {
     resetForm()
     setIsCreateOpen(true)
   }
+
+  const openPromotionDraft = useCallback((draft) => {
+    setEditingId('')
+    setForm({
+      ...initialForm,
+      ...draft,
+      status: 'inactive',
+      applicableServices: draft.applicableServices?.length
+        ? draft.applicableServices
+        : [draft.serviceType || 'All Services'],
+    })
+    setFieldErrors({})
+    setSubmitError('')
+    setServiceSearch('')
+    setIsServicePickerOpen(false)
+    setServicePickerAbove(false)
+    setImageFile(null)
+    setImagePreview('')
+    setUploadedImageUrl('')
+    setIsDraggingImage(false)
+    setIsCreateOpen(true)
+  }, [])
+
+  useEffect(() => {
+    const draft = location.state?.promotionDraft
+    if (!draft) return
+    openPromotionDraft(draft)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, location.state, navigate, openPromotionDraft])
 
   const handleChange = (event) => {
     const { name, value } = event.target

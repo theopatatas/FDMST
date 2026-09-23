@@ -12,7 +12,9 @@ import {
   Tooltip,
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
+import { useNavigate } from 'react-router-dom'
 import {
+  FaBullhorn,
   FaCalendarAlt,
   FaCalendarCheck,
   FaCalendarDay,
@@ -531,6 +533,7 @@ function clinicDateKey(offset = 0) {
 }
 
 function PredictionPanel({ service, onFocusDate }) {
+  const navigate = useNavigate()
   const [date, setDate] = useState(() => clinicDateKey(1))
   const [prediction, setPrediction] = useState(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -552,6 +555,26 @@ function PredictionPanel({ service, onFocusDate }) {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const createPromotion = (recommendation) => {
+    navigate('/admin/promotions', {
+      state: {
+        promotionDraft: {
+          title: recommendation.suggestedPromotion,
+          description: `${recommendation.reason} ${recommendation.predictedImpact}`.trim(),
+          discountLabel: recommendation.suggestedPromotion,
+          discountType: recommendation.discountType,
+          discountValue: recommendation.discountValue,
+          serviceType: recommendation.service,
+          applicableServices: [recommendation.service],
+          promoCode: recommendation.promoCode,
+          startDate: recommendation.startDate,
+          endDate: recommendation.endDate,
+          status: 'inactive',
+        },
+      },
+    })
   }
 
   return (
@@ -627,6 +650,43 @@ function PredictionPanel({ service, onFocusDate }) {
           ) : visible.ai?.status === 'unavailable' || visible.ai?.status === 'not_configured' ? (
             <p className="mt-5 border-t border-slate-100 pt-4 text-sm text-slate-500">AI explanation is unavailable; appointment estimates are based on clinic history.</p>
           ) : null}
+          <section className="mt-5 border-t border-slate-100 pt-5" aria-labelledby="promotion-recommendations-title">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="promotion-recommendations-title" className="font-semibold text-sky-950">Promotion recommendations</h3>
+                <p className="mt-1 text-sm text-slate-500">Suggested from predicted service demand and existing promotion coverage.</p>
+              </div>
+              {visible.recommendationSource === 'ai' ? <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 ring-1 ring-violet-100">AI assisted</span> : null}
+            </div>
+            {visible.recommendations?.length ? (
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                {visible.recommendations.map((recommendation) => (
+                  <article className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-4" key={`${recommendation.service}-${recommendation.startDate}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase text-slate-500">{recommendation.service}</p>
+                        <h4 className="mt-1 break-words text-base font-semibold text-sky-950">{recommendation.suggestedPromotion}</h4>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${recommendation.confidenceLevel === 'High' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : recommendation.confidenceLevel === 'Medium' ? 'bg-amber-50 text-amber-700 ring-amber-100' : 'bg-slate-100 text-slate-600 ring-slate-200'}`}>{recommendation.confidenceLevel} confidence</span>
+                    </div>
+                    <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                      <div><dt className="text-xs font-semibold uppercase text-slate-500">Forecast</dt><dd className="mt-1 text-slate-700">{recommendation.forecast}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-500">Recommended offer</dt><dd className="mt-1 font-medium text-sky-950">{recommendation.recommendedOffer}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-500">Target period</dt><dd className="mt-1 text-slate-700">{formatDate(recommendation.startDate)}{recommendation.endDate !== recommendation.startDate ? ` - ${formatDate(recommendation.endDate)}` : ''}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase text-slate-500">Expected impact</dt><dd className="mt-1 text-slate-700">{recommendation.predictedImpact}</dd></div>
+                    </dl>
+                    <div className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600"><span className="font-semibold text-sky-950">Reason: </span>{recommendation.reason}</div>
+                    <button type="button" onClick={() => createPromotion(recommendation)} className="mt-4 inline-flex h-11 items-center justify-center gap-2 self-start rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-900">
+                      <FaBullhorn aria-hidden="true" /> Create Promotion
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No new promotion is recommended for this forecast. Demand is not sufficiently low, data is limited, or an overlapping promotion already covers the service.</p>
+            )}
+            <p className="mt-3 text-xs text-slate-500">Recommendations are drafts only. Promotions remain inactive until reviewed and explicitly activated by an admin.</p>
+          </section>
           <p className="mt-4 text-xs text-slate-500">Forecasts are estimates, not confirmed bookings. Based on {visible.historyAppointments} appointments across {visible.historyDays} clinic working days; {selected.comparableDays} comparable weekdays.</p>
         </div>
       ) : (
