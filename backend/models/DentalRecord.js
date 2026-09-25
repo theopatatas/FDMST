@@ -85,6 +85,46 @@ const dentalRecordSchema = new mongoose.Schema(
         trim: true,
       },
     },
+    attachments: [{
+      name: {
+        type: String,
+        trim: true,
+        maxlength: 180,
+      },
+      path: {
+        type: String,
+        trim: true,
+        required: true,
+      },
+      bucket: {
+        type: String,
+        trim: true,
+        required: true,
+      },
+      mimeType: {
+        type: String,
+        enum: ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"],
+        required: true,
+      },
+      size: {
+        type: Number,
+        min: 1,
+        max: 5 * 1024 * 1024,
+      },
+      category: {
+        type: String,
+        enum: ["xray", "file"],
+        default: "file",
+      },
+      uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      uploadedAt: {
+        type: Date,
+        default: Date.now,
+      },
+    }],
     clinicalFollowUp: {
       enabled: {
         type: Boolean,

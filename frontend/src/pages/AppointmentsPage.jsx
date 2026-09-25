@@ -249,9 +249,10 @@ function AppointmentsPage({ allowApproval = false }) {
 
   useEffect(() => {
     const followUp = clinicalNoteForm.followUp || {}
-    const appointment = clinicalNoteModal?.appointment
+    const service = clinicalNoteModal?.appointment?.service
+    const dentistName = clinicalNoteModal?.appointment?.dentistName
 
-    if (!followUp.enabled || !followUp.date || !appointment?.service) {
+    if (!followUp.enabled || !followUp.date || !service) {
       setFollowUpSlots([])
       setFollowUpAvailabilityMessage('')
       setIsLoadingFollowUpSlots(false)
@@ -266,8 +267,8 @@ function AppointmentsPage({ allowApproval = false }) {
       try {
         const response = await fdmstApi.getAppointmentAvailability({
           date: followUp.date,
-          dentistName: appointment.dentistName,
-          service: appointment.service,
+          dentistName,
+          service,
         })
         if (!isMounted) return
 
@@ -298,8 +299,7 @@ function AppointmentsPage({ allowApproval = false }) {
       window.clearTimeout(timer)
     }
   }, [
-    clinicalNoteForm.followUp?.date,
-    clinicalNoteForm.followUp?.enabled,
+    clinicalNoteForm.followUp,
     clinicalNoteModal?.appointment?.dentistName,
     clinicalNoteModal?.appointment?.service,
   ])

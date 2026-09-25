@@ -21,7 +21,13 @@ const userRoutes = require("./users");
 const createCrudRouter = require("../utils/createCrudRouter");
 const { authenticate, authorize } = require("../middleware/auth");
 const { sendMail } = require("../services/mailService");
-const { deleteManagedPromotionImage, getManagedPromotionImagePath } = require("../services/supabaseStorageService");
+const {
+  createClinicalFileSignedUrl,
+  deleteClinicalFile,
+  deleteManagedPromotionImage,
+  getManagedPromotionImagePath,
+  isManagedClinicalFile,
+} = require("../services/supabaseStorageService");
 const { validateAppointmentSlot } = require("../utils/appointmentAvailability");
 const { preparePatientCreateBody, preparePatientUpdateBody } = require("../utils/patientRecords");
 const { hashPasswordScrypt, verifyPassword } = require("../utils/password");
@@ -910,8 +916,51 @@ const enrichRecordsWithPatientInfo = async (records = []) => {
   });
 };
 
-const sanitizeClinicalNote = (record) => {
+const normalizeClinicalAttachments = (attachments, user) => {
+  if (!Array.isArray(attachments)) return [];
+  if (user.role !== "admin" && attachments.length) {
+    const error = new Error("Only administrators can add clinical note attachments.");
+    error.status = 403;
+    throw error;
+  }
+  if (attachments.length > 8) {
+    const error = new Error("A clinical note can contain up to 8 attachments.");
+    error.status = 400;
+    throw error;
+  }
+
+  return attachments.map((attachment) => {
+    if (!isManagedClinicalFile(attachment)) {
+      const error = new Error("Upload each clinical attachment to secure clinic storage before saving.");
+      error.status = 400;
+      throw error;
+    }
+    return {
+      name: String(attachment.name || "Clinical attachment").trim().slice(0, 180),
+      path: String(attachment.path),
+      bucket: String(attachment.bucket),
+      mimeType: String(attachment.mimeType),
+      size: Number(attachment.size) || undefined,
+      category: attachment.category === "xray" ? "xray" : "file",
+      uploadedBy: user.id,
+      uploadedAt: attachment.uploadedAt || new Date(),
+    };
+  });
+};
+
+const sanitizeClinicalNote = async (record) => {
   const value = record.toObject ? record.toObject() : { ...record };
+  const attachments = await Promise.all((value.attachments || []).map(async (attachment) => ({
+    id: attachment._id,
+    name: attachment.name,
+    path: attachment.path,
+    bucket: attachment.bucket,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    category: attachment.category,
+    uploadedAt: attachment.uploadedAt,
+    url: await createClinicalFileSignedUrl(attachment).catch(() => ""),
+  })));
   return {
     id: value._id,
     recordType: value.recordType || "clinical_note",
@@ -930,6 +979,7 @@ const sanitizeClinicalNote = (record) => {
     noteType: value.noteType || "Clinical Note",
     visitDate: value.visitDate,
     clinicalNotes: value.clinicalNotes || {},
+    attachments,
     clinicalFollowUp: value.clinicalFollowUp || null,
     createdBy: value.createdBy,
     createdByName: value.createdByName,
@@ -1587,7 +1637,7 @@ router.get("/dentalrecords/clinical-notes", authorize("admin", "staff"), async (
     ]);
 
     res.json({
-      data: records.map(sanitizeClinicalNote),
+      data: await Promise.all(records.map(sanitizeClinicalNote)),
       pagination: {
         page,
         limit,
@@ -1605,6 +1655,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff"), async 
     const notes = req.body.clinicalNotes || {};
     const appointmentId = String(req.body.appointment || "").trim();
     const followUp = req.body.followUp || {};
+    const attachments = normalizeClinicalAttachments(req.body.attachments, req.user);
 
     if (!patientName) {
       return res.status(400).json({ message: "Patient name is required.", errors: { patientName: "Patient name is required." } });
@@ -1646,6 +1697,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff"), async 
       visitDate: req.body.visitDate ? parseReportDate(req.body.visitDate) || new Date() : new Date(),
       noteType: String(req.body.noteType || "Clinical Note").trim() || "Clinical Note",
       clinicalNotes,
+      attachments,
       dentistName: appointment?.dentistName || (req.user.role === "admin" ? provider : ""),
       servicePerformed: appointment?.service || "",
       procedure: appointment?.service || "",
@@ -1769,7 +1821,7 @@ router.post("/dentalrecords/clinical-notes", authorize("admin", "staff"), async 
       message: followUpAppointment
         ? "Clinical note created and follow-up appointment scheduled."
         : "Clinical note created successfully.",
-      data: sanitizeClinicalNote(record),
+      data: await sanitizeClinicalNote(record),
       followUpAppointment,
       warning: followUpWarning,
     });
@@ -1791,7 +1843,7 @@ router.get("/dentalrecords/clinical-notes/:id", authorize("admin", "staff"), asy
     }
 
     await auditClinicalNoteAction(req, record, "Clinical Note Viewed");
-    res.json({ data: sanitizeClinicalNote(record) });
+    res.json({ data: await sanitizeClinicalNote(record) });
   } catch (error) {
     next(error);
   }
@@ -1825,14 +1877,22 @@ router.patch("/dentalrecords/clinical-notes/:id", authorize("admin", "staff"), a
     }
 
     record.clinicalNotes = clinicalNotes;
+    let removedAttachments = [];
+    if (Object.prototype.hasOwnProperty.call(req.body, "attachments")) {
+      const nextAttachments = normalizeClinicalAttachments(req.body.attachments, req.user);
+      const retainedPaths = new Set(nextAttachments.map((attachment) => attachment.path));
+      removedAttachments = (record.attachments || []).filter((attachment) => !retainedPaths.has(attachment.path));
+      record.attachments = nextAttachments;
+    }
     record.visitDate = req.body.visitDate ? parseReportDate(req.body.visitDate) || record.visitDate : record.visitDate;
     record.noteType = String(req.body.noteType || record.noteType || "Clinical Note").trim();
     await record.save();
+    await Promise.allSettled(removedAttachments.map((attachment) => deleteClinicalFile(attachment)));
 
     await auditClinicalNoteAction(req, record, "Clinical Note Updated");
     res.json({
       message: "Clinical note updated successfully.",
-      data: sanitizeClinicalNote(record),
+      data: await sanitizeClinicalNote(record),
     });
   } catch (error) {
     next(error);

@@ -37,7 +37,14 @@ const startPromotionExpiryMonitor = () => {
   return intervalId;
 };
 
+const stopPromotionExpiryMonitor = () => {
+  if (!intervalId) return;
+  clearInterval(intervalId);
+  intervalId = null;
+};
+
 module.exports = {
   expirePromotions,
   startPromotionExpiryMonitor,
+  stopPromotionExpiryMonitor,
 };

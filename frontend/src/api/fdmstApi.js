@@ -1,5 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5050/api'
-export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '')
+const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '')
+const API_BASE_URL = configuredApiUrl || (import.meta.env.DEV ? 'http://127.0.0.1:5050/api' : '/api')
+export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '') || window.location.origin
 const AUTH_TOKEN_KEY = 'fdmst_auth_token'
 const AUTH_USER_KEY = 'fdmst_auth_user'
 export const AUTH_CHANGED_EVENT = 'fdmst-auth-changed'
@@ -167,6 +168,10 @@ export const fdmstApi = {
     request(`/users/me/notifications/${id}/read`, {
       method: 'PATCH',
     }),
+  clearNotifications: () =>
+    request('/users/me/notifications', {
+      method: 'DELETE',
+    }),
   getMessageRecipients: () => request('/messages/recipients'),
   getConversations: (filters = {}) => {
     const params = new URLSearchParams()
@@ -191,9 +196,38 @@ export const fdmstApi = {
     request(`/messages/conversations/${id}/read`, {
       method: 'PATCH',
     }),
+  deleteConversationMessage: (conversationId, messageId) =>
+    request(`/messages/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'DELETE',
+    }),
+  archiveConversation: (id, archived = true) =>
+    request(`/messages/conversations/${id}/archive`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived }),
+    }),
   uploadImage: (payload) =>
     request('/uploads/image', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  uploadClinicalFile: (payload) =>
+    request('/uploads/clinical-file', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteClinicalFile: (payload) =>
+    request('/uploads/clinical-file', {
+      method: 'DELETE',
+      body: JSON.stringify(payload),
+    }),
+  uploadChatFile: (payload) =>
+    request('/uploads/chat-file', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteChatFile: (payload) =>
+    request('/uploads/chat-file', {
+      method: 'DELETE',
       body: JSON.stringify(payload),
     }),
   updateProfile: async (payload) => {

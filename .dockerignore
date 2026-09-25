@@ -1,0 +1,11 @@
+.git
+.gitignore
+.DS_Store
+**/.DS_Store
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+frontend/dist
+*.log
+npm-debug.log*

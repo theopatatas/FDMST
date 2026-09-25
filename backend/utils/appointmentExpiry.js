@@ -348,9 +348,16 @@ const startAppointmentExpiryMonitor = () => {
   return intervalId;
 };
 
+const stopAppointmentExpiryMonitor = () => {
+  if (!intervalId) return;
+  clearInterval(intervalId);
+  intervalId = null;
+};
+
 module.exports = {
   AUTO_DECLINE_REASON,
   AUTO_NO_SHOW_REASON,
   runAppointmentExpiryCheck,
   startAppointmentExpiryMonitor,
+  stopAppointmentExpiryMonitor,
 };

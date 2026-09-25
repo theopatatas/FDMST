@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FaCheckDouble, FaCircle, FaComments, FaMinus, FaPaperclip, FaPaperPlane, FaSearch, FaTimes, FaUserMd } from 'react-icons/fa'
+import { FaArchive, FaCheckDouble, FaCircle, FaComments, FaFileAlt, FaMinus, FaPaperclip, FaPaperPlane, FaSearch, FaTimes, FaTrash, FaUndo, FaUserMd } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../api/fdmstApi.js'
 import { useToast } from '../context/ToastContext.jsx'
 import { getChatSocket } from '../utils/chatSocket.js'
+import { uploadChatFile } from '../utils/imageUpload.js'
 
 function initials(user) {
   return [user?.firstName, user?.lastName].filter(Boolean).map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'FD'
@@ -68,19 +69,34 @@ function ConversationButton({ conversation, active, onClick }) {
   )
 }
 
-function MessageBubble({ message, previousMessage, currentUserId }) {
+function MessageBubble({ message, previousMessage, currentUserId, onDelete }) {
   const mine = String(message.sender) === String(currentUserId)
   const grouped = previousMessage && String(previousMessage.sender) === String(message.sender)
+  const isImage = String(message.attachment?.type || '').startsWith('image/')
 
   return (
-    <div className={`flex ${mine ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-1' : 'mt-4'}`}>
+    <div className={`group flex items-center gap-2 ${mine ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-1' : 'mt-4'}`}>
+      {mine ? <button type="button" onClick={() => onDelete(message)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-300 opacity-60 transition hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100" title="Delete message" aria-label="Delete message"><FaTrash className="h-3.5 w-3.5" /></button> : null}
       <div className={`max-w-[82%] rounded-2xl px-4 py-2 shadow-sm ${mine ? 'rounded-br-md bg-sky-950 text-white' : 'rounded-bl-md bg-white text-slate-700 ring-1 ring-slate-100'}`}>
-        <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p>
+        {message.attachment ? (
+          isImage && message.attachment.url ? (
+            <a href={message.attachment.url} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-xl">
+              <img src={message.attachment.url} alt={message.attachment.filename || 'Message attachment'} className="max-h-52 w-full object-cover" />
+            </a>
+          ) : (
+            <a href={message.attachment.url || undefined} target="_blank" rel="noreferrer" className={`mb-2 flex min-w-0 items-center gap-3 rounded-xl p-3 ${mine ? 'bg-white/10' : 'bg-slate-50'}`}>
+              <FaFileAlt className="shrink-0" />
+              <span className="min-w-0 truncate text-xs font-bold">{message.attachment.filename || 'Attachment'}</span>
+            </a>
+          )
+        ) : null}
+        {message.content ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p> : null}
         <div className={`mt-1 flex items-center justify-end gap-1 text-[11px] ${mine ? 'text-sky-100' : 'text-slate-400'}`}>
           <span>{formatTime(message.createdAt)}</span>
           {mine ? <FaCheckDouble className={message.deliveryStatus === 'read' ? 'text-emerald-300' : 'text-sky-200'} /> : null}
         </div>
       </div>
+      {!mine ? <button type="button" onClick={() => onDelete(message)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-300 opacity-60 transition hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100" title="Delete message" aria-label="Delete message"><FaTrash className="h-3.5 w-3.5" /></button> : null}
     </div>
   )
 }
@@ -92,7 +108,7 @@ function MessageToast({ toastData, onOpen, onClose }) {
     <button
       type="button"
       onClick={onOpen}
-      className="fixed bottom-24 right-5 z-50 flex w-[min(22rem,calc(100vw-2rem))] items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-2xl shadow-slate-900/15 transition hover:-translate-y-0.5 hover:shadow-slate-900/20"
+      className="fixed bottom-24 right-5 z-[45] flex w-[min(22rem,calc(100vw-2rem))] items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-2xl shadow-slate-900/15 transition hover:-translate-y-0.5 hover:shadow-slate-900/20"
     >
       <Avatar user={toastData.sender} size="sm" />
       <div className="min-w-0 flex-1">
@@ -131,8 +147,11 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   const [composer, setComposer] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
+  const [isArchiving, setIsArchiving] = useState(false)
+  const [pendingAttachment, setPendingAttachment] = useState(null)
   const [messageToast, setMessageToast] = useState(null)
   const messagesEndRef = useRef(null)
+  const attachmentInputRef = useRef(null)
   const selectedConversationIdRef = useRef('')
   const isOpenRef = useRef(isOpen)
 
@@ -159,7 +178,9 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
 
       if (requestedConversation) {
         setSelectedConversation(requestedConversation)
-      } else if (!preserveSelection || !selectedConversationIdRef.current) {
+      } else if (!preserveSelection) {
+        setSelectedConversation(nextConversations[0] || null)
+      } else if (!selectedConversationIdRef.current) {
         setSelectedConversation((current) => current || nextConversations[0] || null)
       } else {
         setSelectedConversation((current) => nextConversations.find((item) => item.id === current?.id) || current || nextConversations[0] || null)
@@ -278,7 +299,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
         conversation.id === normalizedConversationId
           ? (knownConversation = conversation, {
               ...conversation,
-              lastMessage: message.content,
+              lastMessage: message.content || (message.attachment ? 'Attachment' : ''),
               lastMessageAt: message.createdAt,
               unreadCount: isSelected && isOpenRef.current
                 ? 0
@@ -302,7 +323,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
         setMessageToast({
           conversationId: normalizedConversationId,
           sender: sender || knownConversation?.otherUser,
-          preview: message.content,
+          preview: message.content || message.attachment?.filename || 'Attachment',
         })
         window.clearTimeout(window.__fdmstMessageToastTimer)
         window.__fdmstMessageToastTimer = window.setTimeout(() => setMessageToast(null), 5000)
@@ -317,14 +338,29 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       )))
     }
 
+    const handleDeletedMessage = ({ conversationId, messageId }) => {
+      if (selectedConversationIdRef.current === String(conversationId)) {
+        setMessages((current) => current.filter((message) => String(message.id) !== String(messageId)))
+      }
+    }
+
+    const handleArchivedConversation = ({ conversationId }) => {
+      if (selectedConversationIdRef.current === String(conversationId)) setSelectedConversation(null)
+      loadConversations({ preserveSelection: false }).catch(() => {})
+    }
+
     socket.on('message:new', handleNewMessage)
     socket.on('message:notification', handleNewMessage)
     socket.on('presence:update', handlePresence)
+    socket.on('message:deleted', handleDeletedMessage)
+    socket.on('conversation:archived', handleArchivedConversation)
 
     return () => {
       socket.off('message:new', handleNewMessage)
       socket.off('message:notification', handleNewMessage)
       socket.off('presence:update', handlePresence)
+      socket.off('message:deleted', handleDeletedMessage)
+      socket.off('conversation:archived', handleArchivedConversation)
     }
   }, [currentUser?.id, loadConversations])
 
@@ -357,21 +393,77 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
 
   const sendMessage = async () => {
     const content = composer.trim()
-    if (!content || !selectedConversation?.id || isSending) return
+    if ((!content && !pendingAttachment) || !selectedConversation?.id || isSending) return
     if (!authStorage.isAuthenticated()) return
 
     setComposer('')
     setIsSending(true)
+    let uploadedAttachment = null
     try {
-      const response = await fdmstApi.sendConversationMessage(selectedConversation.id, { content })
+      uploadedAttachment = pendingAttachment ? await uploadChatFile(pendingAttachment.file) : null
+      const response = await fdmstApi.sendConversationMessage(selectedConversation.id, { content, attachment: uploadedAttachment })
       setMessages((current) => current.some((item) => item.id === response.message.id) ? current : [...current, response.message])
+      if (pendingAttachment?.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl)
+      setPendingAttachment(null)
       await loadConversations({ preserveSelection: true })
     } catch (error) {
+      if (uploadedAttachment) await fdmstApi.deleteChatFile(uploadedAttachment).catch(() => {})
       setComposer(content)
       if (isAuthError(error)) return
       toast.error(error.message || 'Unable to send message.')
     } finally {
       setIsSending(false)
+    }
+  }
+
+  const selectAttachment = (file) => {
+    if (!file) return
+    const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+    if (!acceptedTypes.has(file.type)) {
+      toast.error('Choose a JPG, PNG, WebP, or PDF file.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Chat attachments must be 5 MB or smaller.')
+      return
+    }
+    if (pendingAttachment?.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl)
+    setPendingAttachment({
+      file,
+      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+    })
+  }
+
+  const removePendingAttachment = () => {
+    if (pendingAttachment?.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl)
+    setPendingAttachment(null)
+  }
+
+  const deleteMessage = async (message) => {
+    if (!selectedConversation?.id || !window.confirm('Delete this message for you?')) return
+    try {
+      await fdmstApi.deleteConversationMessage(selectedConversation.id, message.id)
+      setMessages((current) => current.filter((item) => item.id !== message.id))
+      await loadConversations({ preserveSelection: true })
+      toast.success('Message deleted.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to delete message.')
+    }
+  }
+
+  const toggleArchive = async () => {
+    if (!selectedConversation?.id || isArchiving) return
+    const shouldArchive = !selectedConversation.isArchived
+    setIsArchiving(true)
+    try {
+      const response = await fdmstApi.archiveConversation(selectedConversation.id, shouldArchive)
+      toast.success(response.message || (shouldArchive ? 'Conversation archived.' : 'Conversation restored.'))
+      setSelectedConversation(null)
+      await loadConversations({ preserveSelection: false })
+    } catch (error) {
+      toast.error(error.message || 'Unable to update the conversation.')
+    } finally {
+      setIsArchiving(false)
     }
   }
 
@@ -396,7 +488,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       <MessageToast toastData={messageToast} onOpen={openToastConversation} onClose={() => setMessageToast(null)} />
 
       {isOpen ? (
-        <section className="fixed bottom-5 right-5 z-50 flex h-[min(42rem,calc(100vh-2rem))] w-[min(58rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 transition sm:bottom-6 sm:right-6 lg:grid lg:grid-cols-[20rem_1fr]">
+        <section className="fixed bottom-5 right-5 z-[45] flex h-[min(42rem,calc(100vh-2rem))] w-[min(58rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-2xl shadow-slate-900/20 transition sm:bottom-6 sm:right-6 lg:grid lg:grid-cols-[20rem_1fr]">
           <aside className="hidden min-h-0 flex-col border-r border-slate-200 bg-white lg:flex">
             <div className="border-b border-slate-100 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -404,9 +496,6 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
                   <p className="text-lg font-bold text-sky-950">Messages</p>
                   <p className="text-xs font-medium text-slate-500">Secure clinic chat</p>
                 </div>
-                <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Minimize chat">
-                  <FaMinus />
-                </button>
               </div>
               <div className="relative mt-4">
                 <FaSearch className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -474,6 +563,11 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
                 <span className="hidden items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-950 sm:inline-flex">
                   <FaUserMd /> Secure chat
                 </span>
+                {!isPatient && selectedConversation ? (
+                  <button type="button" onClick={toggleArchive} disabled={isArchiving} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-sky-50 hover:text-sky-900 disabled:opacity-50" aria-label={selectedConversation.isArchived ? 'Restore conversation' : 'Archive conversation'} title={selectedConversation.isArchived ? 'Restore conversation' : 'Archive conversation'}>
+                    {selectedConversation.isArchived ? <FaUndo /> : <FaArchive />}
+                  </button>
+                ) : null}
                 <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Minimize chat">
                   <FaMinus />
                 </button>
@@ -505,7 +599,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
               <>
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
                   {messages.length ? messages.map((message, index) => (
-                    <MessageBubble key={message.id} message={message} previousMessage={messages[index - 1]} currentUserId={currentUser?.id} />
+                    <MessageBubble key={message.id} message={message} previousMessage={messages[index - 1]} currentUserId={currentUser?.id} onDelete={deleteMessage} />
                   )) : (
                     <div className="flex h-full items-center justify-center">
                       <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-center shadow-sm">
@@ -517,12 +611,23 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
                   <div ref={messagesEndRef} />
                 </div>
                 <footer className="border-t border-slate-200 bg-white p-3">
-                  <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 focus-within:border-sky-300 focus-within:ring-4 focus-within:ring-sky-100">
-                    <button type="button" className="mb-1 flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white hover:text-sky-950" aria-label="Attach file">
+                  {pendingAttachment ? (
+                    <div className="mb-2 flex items-center gap-3 rounded-xl border border-sky-100 bg-sky-50 p-2.5">
+                      {pendingAttachment.previewUrl ? <img src={pendingAttachment.previewUrl} alt="Attachment preview" className="h-12 w-12 rounded-lg object-cover" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-white text-sky-800"><FaFileAlt /></span>}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-bold text-sky-950">{pendingAttachment.file.name}</p>
+                        <p className="mt-1 text-[11px] font-semibold text-slate-500">Ready to send</p>
+                      </div>
+                      <button type="button" onClick={removePendingAttachment} className="grid h-8 w-8 place-items-center rounded-lg text-rose-600 hover:bg-rose-50" aria-label="Remove attachment"><FaTimes /></button>
+                    </div>
+                  ) : null}
+                  <input ref={attachmentInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => { selectAttachment(event.target.files?.[0]); event.target.value = '' }} />
+                  <div className="flex min-h-14 items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-2 py-1.5 focus-within:border-sky-300 focus-within:ring-4 focus-within:ring-sky-100">
+                    <button type="button" onClick={() => attachmentInputRef.current?.click()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white hover:text-sky-950" aria-label="Attach photo or file" title="Attach photo or file">
                       <FaPaperclip />
                     </button>
                     <textarea
-                      className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-sm font-medium text-slate-700 outline-none"
+                      className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-sm font-medium leading-5 text-slate-700 outline-none"
                       value={composer}
                       onChange={(event) => setComposer(event.target.value)}
                       onKeyDown={handleComposerKeyDown}
@@ -531,8 +636,8 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
                     <button
                       type="button"
                       onClick={sendMessage}
-                      disabled={!composer.trim() || isSending}
-                      className="mb-1 flex h-10 w-10 items-center justify-center rounded-xl bg-sky-950 text-white shadow-sm transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={(!composer.trim() && !pendingAttachment) || isSending}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-950 text-white shadow-sm transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label="Send message"
                     >
                       <FaPaperPlane />
@@ -556,7 +661,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
         <button
           type="button"
           onClick={onOpen}
-          className="fixed bottom-5 right-5 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-sky-950 text-2xl text-amber-400 shadow-2xl shadow-sky-950/30 transition hover:-translate-y-1 hover:bg-sky-900 focus:outline-none focus:ring-4 focus:ring-sky-200 sm:bottom-6 sm:right-6"
+          className="fixed bottom-5 right-5 z-[45] flex h-16 w-16 items-center justify-center rounded-full bg-sky-950 text-2xl text-amber-400 shadow-2xl shadow-sky-950/30 transition hover:-translate-y-1 hover:bg-sky-900 focus:outline-none focus:ring-4 focus:ring-sky-200 sm:bottom-6 sm:right-6"
           aria-label="Open messages"
         >
           <FaComments />

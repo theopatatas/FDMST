@@ -230,7 +230,7 @@ function StaffTreatmentRecordsPage() {
     recommendations: record.recommendations || record.nextVisitRecommendation || '',
   })
 
-  const openView = async (record) => {
+  const openView = useCallback(async (record) => {
     try {
       await fdmstApi.viewTreatmentRecord(record.id, { scope: isAdmin && filters.scope === 'all' ? 'all' : 'mine' })
     } catch {
@@ -238,7 +238,7 @@ function StaffTreatmentRecordsPage() {
     }
     setForm(toForm(record))
     setModal({ mode: 'view', record })
-  }
+  }, [filters.scope, isAdmin])
 
   useEffect(() => {
     if (!appointmentRecordId || appointmentOpenRef.current === appointmentRecordId) return
@@ -274,7 +274,7 @@ function StaffTreatmentRecordsPage() {
     return () => {
       isMounted = false
     }
-  }, [appointmentRecordId, isAdmin, toast])
+  }, [appointmentRecordId, isAdmin, openView, toast])
 
   const openEdit = (record) => {
     setForm(toForm(record))

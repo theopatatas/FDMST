@@ -159,24 +159,34 @@ const testimonials = [
 
 const faqs = [
   {
-    question: 'Can I book an appointment from this page?',
+    question: 'How do I book a dental appointment?',
     answer:
-      'Yes. The Book Appointment buttons route to /book-appointment, where the appointment flow can be added later.',
+      'Create or sign in to your patient account, select a dental service, choose an available date and time, and review the details before submitting your request.',
   },
   {
-    question: 'Does this landing page connect to the backend?',
+    question: 'What happens after I submit an appointment request?',
     answer:
-      'No. This landing page is frontend-only and does not make backend or API requests.',
+      'Your request starts as Pending while the clinic reviews it. You can follow its status from your patient dashboard and receive a notification when it is confirmed, rescheduled, or cancelled.',
   },
   {
-    question: 'Are payment or billing features included?',
+    question: 'Can I cancel or reschedule my appointment?',
     answer:
-      'No. Billing, payments, insurance, PhilHealth integration, SMS or email, telehealth, and multi-branch features are not included.',
+      'You may cancel or request a new schedule while the appointment is still pending. Once it has been confirmed, please contact the clinic so the staff can assist you.',
   },
   {
-    question: 'Is this designed for Flores-Dizon Dental Clinic?',
+    question: 'Where can I view my appointment and treatment history?',
     answer:
-      'Yes. The page is branded for Flores-Dizon Dental Clinic and the FDMST system.',
+      'Sign in to your patient portal to view appointment progress, completed treatments, provider recommendations, and upcoming follow-up visits.',
+  },
+  {
+    question: 'How do clinic promotions work?',
+    answer:
+      'Available promotions are shown in the patient portal. When a promotion applies to your selected service, you can enter its promo code during booking and review the discount before confirming your request.',
+  },
+  {
+    question: 'Can a patient under 18 create an account?',
+    answer:
+      'Yes. A minor’s account remains under the patient’s name, but parent or guardian information is required so the clinic has an authorized primary contact for appointments and important communications.',
   },
 ]
 

@@ -19,6 +19,7 @@ import {
   FaNotesMedical,
   FaSignOutAlt,
   FaTimes,
+  FaTrash,
   FaTooth,
   FaUser,
   FaUserMd,
@@ -443,6 +444,17 @@ function DashboardLayout({ portalLabel, navItems }) {
     navigate(getNotificationsPath(user?.role))
   }
 
+  const handleClearNotifications = async () => {
+    if (!notifications.length || !window.confirm('Clear all notifications? This cannot be undone.')) return
+    try {
+      await fdmstApi.clearNotifications()
+      setNotifications([])
+      setUnreadCount(0)
+    } catch {
+      // Keep notifications visible when clearing fails.
+    }
+  }
+
   const profilePath = getProfilePath(user?.role)
   const isAdminPortal = user?.role === 'admin' || portalLabel === 'Admin Portal'
   const isPatientPortal = user?.role === 'patient' || portalLabel === 'Patient Portal'
@@ -626,13 +638,26 @@ function DashboardLayout({ portalLabel, navItems }) {
                         <p className="text-sm font-semibold text-sky-950">Notifications</p>
                         <p className="text-xs text-slate-500">{unreadCount} unread update{unreadCount === 1 ? '' : 's'}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleMarkNotificationsRead}
-                        className="rounded-xl bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-950 transition hover:bg-sky-100"
-                      >
-                        Mark all as read
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleMarkNotificationsRead}
+                          disabled={!notifications.length || !unreadCount}
+                          className="rounded-xl bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-950 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Mark all read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearNotifications}
+                          disabled={!notifications.length}
+                          className="grid h-8 w-8 place-items-center rounded-xl text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Clear notifications"
+                          aria-label="Clear notifications"
+                        >
+                          <FaTrash className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="max-h-80 overflow-y-auto py-2">
@@ -640,14 +665,13 @@ function DashboardLayout({ portalLabel, navItems }) {
                         const Icon = getNotificationIcon(notification)
 
                         return (
-                          <button
+                          <div
                             key={notification.id}
-                            type="button"
-                            onClick={() => handleOpenNotification(notification)}
-                            className={`mx-2 flex w-[calc(100%-1rem)] gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-slate-50 ${
+                            className={`relative mx-2 w-[calc(100%-1rem)] rounded-2xl transition hover:bg-slate-50 ${
                               notification.isRead ? 'bg-white' : 'bg-sky-50'
                             }`}
                           >
+                            <button type="button" onClick={() => handleOpenNotification(notification)} className="flex w-full gap-3 px-3 py-3 text-left">
                             {notification.metadata?.promotionImageUrl ? (
                               <img
                                 src={notification.metadata.promotionImageUrl}
@@ -666,7 +690,8 @@ function DashboardLayout({ portalLabel, navItems }) {
                               <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{notification.message}</p>
                               <p className="mt-1 text-xs font-medium text-slate-400">{formatRelativeTime(notification.createdAt || notification.scheduledFor)}</p>
                             </div>
-                          </button>
+                            </button>
+                          </div>
                         )
                       }) : (
                         <div className="px-5 py-8 text-center">

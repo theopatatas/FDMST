@@ -168,7 +168,7 @@ function StaffLandingPage() {
     }
   }
 
-  const todayAppointments = dashboard?.todaysAppointments || []
+  const todayAppointments = useMemo(() => dashboard?.todaysAppointments || [], [dashboard?.todaysAppointments])
   const filteredAppointments = useMemo(() => {
     const query = search.trim().toLowerCase()
     return todayAppointments
@@ -187,7 +187,7 @@ function StaffLandingPage() {
   }, [activeStatus, search, todayAppointments])
   const totalPages = Math.max(Math.ceil(filteredAppointments.length / rowsPerPage), 1)
   const visibleAppointments = filteredAppointments.slice((page - 1) * rowsPerPage, page * rowsPerPage)
-  const statusCounts = dashboard?.stats?.statusCounts || {}
+  const statusCounts = useMemo(() => dashboard?.stats?.statusCounts || {}, [dashboard?.stats?.statusCounts])
   const statusChartData = useMemo(() => {
     const labels = dashboardStatuses.map((status) => formatStatus(status))
     const values = dashboardStatuses.map((status) => statusCounts[status] || 0)

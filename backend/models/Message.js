@@ -10,6 +10,14 @@ const attachmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    path: {
+      type: String,
+      trim: true,
+    },
+    bucket: {
+      type: String,
+      trim: true,
+    },
     type: {
       type: String,
       trim: true,

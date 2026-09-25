@@ -7,6 +7,7 @@ import {
   FaCheckCircle,
   FaClock,
   FaExclamationCircle,
+  FaTrash,
   FaTimes,
 } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../../api/fdmstApi.js'
@@ -102,7 +103,10 @@ function AdminNotificationsPage() {
   }, [])
 
   useEffect(() => {
-    const cleanup = loadNotifications()
+    let cleanup
+    queueMicrotask(() => {
+      cleanup = loadNotifications()
+    })
     return () => cleanup?.()
   }, [loadNotifications])
 
@@ -142,6 +146,18 @@ function AdminNotificationsPage() {
     if (destination) navigate(destination)
   }
 
+  const handleClearNotifications = async () => {
+    if (!notifications.length || !window.confirm('Clear all notifications? This cannot be undone.')) return
+    try {
+      await fdmstApi.clearNotifications()
+      setNotifications([])
+      setUnreadCount(0)
+      toast.success('Notifications cleared.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to clear notifications.')
+    }
+  }
+
   return (
     <main className="px-4 py-6 text-slate-700 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -179,6 +195,15 @@ function AdminNotificationsPage() {
                 <FaCheckCircle className="h-4 w-4" aria-hidden="true" />
                 Mark All as Read
               </button>
+              <button
+                type="button"
+                onClick={handleClearNotifications}
+                disabled={!notifications.length}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-white px-5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FaTrash className="h-4 w-4" aria-hidden="true" />
+                Clear Notifications
+              </button>
             </div>
           </div>
 
@@ -196,16 +221,15 @@ function AdminNotificationsPage() {
                 const Icon = getNotificationIcon(notification)
 
                 return (
-                  <button
+                  <div
                     key={notification.id}
-                    type="button"
-                    onClick={() => handleOpenNotification(notification)}
-                    className={`w-full rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${
+                    className={`relative w-full rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-sm ${
                       notification.isRead
                         ? 'border-slate-200 bg-white'
                         : 'border-sky-100 bg-sky-50'
                     }`}
                   >
+                    <button type="button" onClick={() => handleOpenNotification(notification)} className="w-full p-4 text-left">
                     <div className="flex gap-4">
                       {notification.metadata?.promotionImageUrl ? (
                         <img
@@ -236,7 +260,8 @@ function AdminNotificationsPage() {
                         </div>
                       </div>
                     </div>
-                  </button>
+                    </button>
+                  </div>
                 )
               })}
             </div>

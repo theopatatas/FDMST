@@ -6,6 +6,7 @@ import {
   FaCalendarCheck,
   FaCheckCircle,
   FaClock,
+  FaTrash,
   FaTimes,
 } from 'react-icons/fa'
 import { fdmstApi } from '../../api/fdmstApi.js'
@@ -127,6 +128,18 @@ function PatientNotificationsPage() {
     }
   }
 
+  const handleClearNotifications = async () => {
+    if (!notifications.length || !window.confirm('Clear all notifications? This cannot be undone.')) return
+    try {
+      await fdmstApi.clearNotifications()
+      setNotifications([])
+      setUnreadCount(0)
+      toast.success('Notifications cleared.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to clear notifications.')
+    }
+  }
+
   return (
     <main className="px-4 py-6 text-slate-700 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
@@ -151,15 +164,26 @@ function PatientNotificationsPage() {
               <h2 className="text-xl font-semibold text-sky-950">Latest Updates</h2>
               <p className="mt-1 text-sm text-slate-500">{unreadCount} unread notification{unreadCount === 1 ? '' : 's'}</p>
             </div>
-            <button
-              type="button"
-              onClick={handleMarkAllRead}
-              disabled={!notifications.length || !unreadCount}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <FaCheckCircle className="h-4 w-4" aria-hidden="true" />
-              Mark All as Read
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleMarkAllRead}
+                disabled={!notifications.length || !unreadCount}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-950 px-4 text-sm font-semibold text-white transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FaCheckCircle className="h-4 w-4" aria-hidden="true" />
+                Mark All as Read
+              </button>
+              <button
+                type="button"
+                onClick={handleClearNotifications}
+                disabled={!notifications.length}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FaTrash className="h-4 w-4" aria-hidden="true" />
+                Clear Notifications
+              </button>
+            </div>
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
@@ -220,16 +244,15 @@ function PatientNotificationsPage() {
                 const Icon = getNotificationIcon(notification)
 
                 return (
-                  <button
+                  <div
                     key={notification.id}
-                    type="button"
-                    onClick={() => handleOpenNotification(notification)}
-                    className={`w-full rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${
+                    className={`relative w-full rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-sm ${
                       notification.isRead
                         ? 'border-slate-200 bg-white'
                         : 'border-sky-100 bg-sky-50'
                     }`}
                   >
+                    <button type="button" onClick={() => handleOpenNotification(notification)} className="w-full p-4 text-left">
                     <div className="flex gap-4">
                       {notification.metadata?.promotionImageUrl ? (
                         <img
@@ -257,7 +280,8 @@ function PatientNotificationsPage() {
                         <p className="mt-2 text-sm leading-6 text-slate-500">{notification.message || 'No additional details.'}</p>
                       </div>
                     </div>
-                  </button>
+                    </button>
+                  </div>
                 )
               })}
             </div>

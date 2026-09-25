@@ -166,7 +166,7 @@ function AdminLandingPage() {
   }, [loadDashboard])
 
   const stats = useMemo(() => dashboard?.stats || {}, [dashboard?.stats])
-  const todayStatusCounts = stats.statusCounts || {}
+  const todayStatusCounts = useMemo(() => stats.statusCounts || {}, [stats.statusCounts])
   const cards = useMemo(() => [
     ['all', "Today's Appointments", stats.todaysAppointments || 0, 'Scheduled today', FaCalendarDay, 'amber'],
     ['pending', 'Pending Today', stats.pendingAppointments || 0, 'Awaiting clinic action', FaClock, 'amber'],
@@ -185,16 +185,15 @@ function AdminLandingPage() {
   const filteredSchedule = useMemo(() => (
     statusFilter === 'all' ? todayAppointments : todayAppointments.filter((appointment) => appointment.status === statusFilter)
   ), [statusFilter, todayAppointments])
-  const statusCounts = stats.statusCounts || {}
   const chartData = useMemo(() => ({
     labels: statusOptions.map((status) => formatStatus(status)),
     datasets: [{
-      data: statusOptions.map((status) => statusCounts[status] || 0),
+      data: statusOptions.map((status) => todayStatusCounts[status] || 0),
       backgroundColor: statusOptions.map((status) => statusColors[status]),
       borderColor: '#ffffff',
       borderWidth: 3,
     }],
-  }), [statusCounts])
+  }), [todayStatusCounts])
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -298,6 +297,31 @@ function AdminLandingPage() {
         </div>
       </Panel>
 
+      <section className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Quick Actions" subtitle="Jump directly to common admin tasks.">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {quickActions.map(([label, Icon, path]) => (
+              <button key={label} type="button" onClick={() => navigate(path)} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-sky-950 transition hover:-translate-y-0.5 hover:bg-sky-50 hover:shadow-sm">
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="My Schedule Today" subtitle="Appointments assigned to the logged-in Admin.">
+          <div className="grid gap-3">
+            {dashboard?.mySchedule?.length ? dashboard.mySchedule.map((appointment) => (
+              <div key={appointment.id} className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><p className="font-bold text-sky-950">{appointment.appointmentTime} • {appointment.patientName}</p><p className="mt-1 text-sm text-slate-500">{appointment.service}</p></div>
+                  {statusBadge(appointment.status)}
+                </div>
+              </div>
+            )) : <EmptyState message="No appointments scheduled today." />}
+          </div>
+        </Panel>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Clinic Schedule Timeline" subtitle="Chronological view of today's clinic schedule.">
           <div className="grid max-h-96 gap-3 overflow-y-auto pr-1">
@@ -366,30 +390,6 @@ function AdminLandingPage() {
         </Panel>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <Panel title="Quick Actions" subtitle="Jump directly to common admin tasks.">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {quickActions.map(([label, Icon, path]) => (
-              <button key={label} type="button" onClick={() => navigate(path)} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-sky-950 transition hover:-translate-y-0.5 hover:bg-sky-50 hover:shadow-sm">
-                <Icon className="h-4 w-4" /> {label}
-              </button>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="My Schedule Today" subtitle="Appointments assigned to the logged-in Admin.">
-          <div className="grid gap-3">
-            {dashboard?.mySchedule?.length ? dashboard.mySchedule.map((appointment) => (
-              <div key={appointment.id} className="rounded-2xl border border-slate-200 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div><p className="font-bold text-sky-950">{appointment.appointmentTime} • {appointment.patientName}</p><p className="mt-1 text-sm text-slate-500">{appointment.service}</p></div>
-                  {statusBadge(appointment.status)}
-                </div>
-              </div>
-            )) : <EmptyState message="No appointments scheduled today." />}
-          </div>
-        </Panel>
-      </section>
     </main>
   )
 }

@@ -1,7 +1,10 @@
 const guardedInputTypes = new Set(['', 'text', 'search', 'email', 'tel', 'url'])
 
-const disallowedFieldCharacters = /[\u0000-\u001F\u007F()[\]{}<>;,:\|\\/"'`~!#$%^&*+=?@]/g
-const disallowedEmailCharacters = /[\u0000-\u001F\u007F()[\]{}<>;,:\|\\/"'`~!#$%^&*+=?]/g
+// Control characters are intentionally excluded from every free-text field.
+// eslint-disable-next-line no-control-regex
+const disallowedFieldCharacters = /[\u0000-\u001F\u007F()[\]{}<>;,|:\\/"'`~!#$%^&*+=?@]/g
+// eslint-disable-next-line no-control-regex
+const disallowedEmailCharacters = /[\u0000-\u001F\u007F()[\]{}<>;,|:\\/"'`~!#$%^&*+=?]/g
 
 export function sanitizeSearchInput(value, element = null) {
   const pattern = element instanceof HTMLInputElement && element.type === 'email'

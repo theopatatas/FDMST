@@ -3,19 +3,25 @@ import { useLocation } from 'react-router-dom'
 import {
   FaCalendarAlt,
   FaChevronDown,
+  FaCloudUploadAlt,
   FaClock,
   FaEdit,
   FaEye,
+  FaFileAlt,
   FaFileExport,
+  FaImage,
   FaNotesMedical,
+  FaPaperclip,
   FaPlus,
   FaSearch,
+  FaTrash,
   FaTimes,
 } from 'react-icons/fa'
 import { authStorage, fdmstApi } from '../../api/fdmstApi.js'
 import DateRangeFilter from '../../components/DateRangeFilter.jsx'
 import { useToast } from '../../context/ToastContext.jsx'
 import { formatDate } from '../../utils/auth.js'
+import { uploadClinicalFile } from '../../utils/imageUpload.js'
 
 const inputClass = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
 const textareaClass = 'min-h-24 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100'
@@ -33,6 +39,7 @@ const emptyForm = {
     recommendations: '',
     additionalNotes: '',
   },
+  attachments: [],
   followUp: {
     enabled: false,
     date: '',
@@ -73,6 +80,13 @@ const addDaysKey = (days) => {
   return toDateKey(date)
 }
 
+const normalizePatientName = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+const appointmentTimestamp = (appointment) => {
+  const parsed = new Date(appointment?.appointmentDate || appointment?.createdAt || 0)
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime()
+}
+
 function NoteModal({
   mode,
   note,
@@ -85,6 +99,13 @@ function NoteModal({
   followUpSlots = [],
   isLoadingFollowUpSlots = false,
   followUpAvailabilityMessage = '',
+  isAdmin = false,
+  pendingAttachments = [],
+  onAddAttachments,
+  onRemovePendingAttachment,
+  isFindingAppointment = false,
+  appointmentLookupMessage = '',
+  onPatientNameChange,
 }) {
   const isReadonly = mode === 'view' || !canEdit
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
@@ -95,6 +116,12 @@ function NoteModal({
   const updateFollowUp = (key, value) => setForm((current) => ({
     ...current,
     followUp: { ...(current.followUp || emptyForm.followUp), [key]: value },
+  }))
+  const xrayInputRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const removeStoredAttachment = (attachmentId) => setForm((current) => ({
+    ...current,
+    attachments: (current.attachments || []).filter((attachment) => String(attachment.id || attachment._id) !== String(attachmentId)),
   }))
 
   return (
@@ -114,11 +141,12 @@ function NoteModal({
         <div className="grid gap-5 p-6 lg:grid-cols-3">
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Patient Name
-            <input className={inputClass} value={form.patientName} disabled={mode !== 'create'} onChange={(event) => update('patientName', event.target.value)} placeholder="Enter patient name" />
+            <input className={inputClass} value={form.patientName} disabled={mode !== 'create'} onChange={(event) => onPatientNameChange(event.target.value)} placeholder="Enter patient name" />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Appointment ID
-            <input className={inputClass} value={form.appointmentDisplay || formatAppointmentId(form.appointment)} disabled={isReadonly || mode === 'edit'} onChange={(event) => update('appointment', event.target.value)} placeholder="Optional appointment ID" />
+            <input className={inputClass} value={form.appointmentDisplay || formatAppointmentId(form.appointment)} disabled placeholder={isFindingAppointment ? 'Finding appointment...' : 'Auto-filled from patient record'} />
+            {mode === 'create' && appointmentLookupMessage ? <span className={`text-xs font-semibold ${form.appointment ? 'text-emerald-600' : 'text-slate-400'}`}>{appointmentLookupMessage}</span> : null}
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-600">
             Date
@@ -233,13 +261,69 @@ function NoteModal({
             Additional Notes
             <textarea className={textareaClass} value={form.clinicalNotes.additionalNotes} disabled={isReadonly} onChange={(event) => updateNote('additionalNotes', event.target.value)} placeholder="Internal reminders or supporting context..." />
           </label>
+
+          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:col-span-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold text-sky-950">
+                  <FaPaperclip className="text-sky-700" /> X-rays and Files
+                </div>
+                <p className="mt-1 text-xs font-semibold text-slate-500">Secure clinical attachments. JPG, PNG, WebP, or PDF, up to 5 MB each.</p>
+              </div>
+              {!isReadonly && isAdmin ? (
+                <div className="flex flex-wrap gap-2">
+                  <input ref={xrayInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { onAddAttachments(event.target.files, 'xray'); event.target.value = '' }} />
+                  <input ref={fileInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple onChange={(event) => { onAddAttachments(event.target.files, 'file'); event.target.value = '' }} />
+                  <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl border border-sky-200 bg-white px-4 text-xs font-bold text-sky-800 hover:bg-sky-50" onClick={() => xrayInputRef.current?.click()}>
+                    <FaImage /> Add X-ray Photo
+                  </button>
+                  <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl bg-sky-950 px-4 text-xs font-bold text-white hover:bg-sky-900" onClick={() => fileInputRef.current?.click()}>
+                    <FaCloudUploadAlt /> Add File
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            {(form.attachments || []).length || pendingAttachments.length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {(form.attachments || []).map((attachment) => {
+                  const attachmentId = attachment.id || attachment._id
+                  const isImage = String(attachment.mimeType || '').startsWith('image/')
+                  return (
+                    <article key={attachmentId || attachment.path} className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                      {isImage && attachment.url ? <img className="h-12 w-12 shrink-0 rounded-lg object-cover" src={attachment.url} alt="Clinical attachment" /> : <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-sky-50 text-sky-700"><FaFileAlt /></span>}
+                      <div className="min-w-0 flex-1">
+                        {attachment.url ? <a className="block truncate text-xs font-bold text-sky-900 hover:underline" href={attachment.url} target="_blank" rel="noreferrer">{attachment.name || 'Clinical attachment'}</a> : <p className="truncate text-xs font-bold text-slate-700">{attachment.name || 'Clinical attachment'}</p>}
+                        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{attachment.category === 'xray' ? 'X-ray photo' : 'File'}</p>
+                      </div>
+                      {!isReadonly && isAdmin ? <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-rose-600 hover:bg-rose-50" title="Remove attachment" onClick={() => removeStoredAttachment(attachmentId)}><FaTrash /></button> : null}
+                    </article>
+                  )
+                })}
+                {pendingAttachments.map((attachment) => (
+                  <article key={attachment.localId} className="flex min-w-0 items-center gap-3 rounded-xl border border-dashed border-sky-200 bg-sky-50/60 p-3">
+                    {attachment.previewUrl ? <img className="h-12 w-12 shrink-0 rounded-lg object-cover" src={attachment.previewUrl} alt="Selected X-ray preview" /> : <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white text-sky-700"><FaFileAlt /></span>}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-sky-950">{attachment.file.name}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-sky-700">Ready to upload</p>
+                    </div>
+                    <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-rose-600 hover:bg-rose-50" title="Remove selected file" onClick={() => onRemovePendingAttachment(attachment.localId)}><FaTrash /></button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-400">
+                {isAdmin && !isReadonly ? 'No files selected.' : 'No X-rays or files attached.'}
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:justify-end">
           <button type="button" className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-600 hover:bg-slate-50" onClick={onClose}>Cancel</button>
           {mode !== 'view' && canEdit ? (
-            <button type="button" className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60" disabled={isSaving} onClick={onSubmit}>
-              {isSaving ? 'Saving...' : mode === 'create' ? 'Create Clinical Note' : 'Save Changes'}
+            <button type="button" className="h-11 rounded-xl bg-sky-950 px-5 text-sm font-bold text-white hover:bg-sky-900 disabled:opacity-60" disabled={isSaving || (mode === 'create' && isFindingAppointment)} onClick={onSubmit}>
+              {isSaving ? 'Saving...' : mode === 'create' && isFindingAppointment ? 'Finding Appointment...' : mode === 'create' ? 'Create Clinical Note' : 'Save Changes'}
             </button>
           ) : null}
         </div>
@@ -253,7 +337,6 @@ function StaffClinicalNotesPage() {
   const location = useLocation()
   const currentUser = authStorage.getUser()
   const isAdmin = currentUser?.role === 'admin'
-  const isStaff = currentUser?.role === 'staff'
   const currentUserName = currentUser?.name || [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ').trim()
   const appointmentPrefillRef = useRef('')
   const [notes, setNotes] = useState([])
@@ -263,10 +346,13 @@ function StaffClinicalNotesPage() {
   const [exportOpen, setExportOpen] = useState(false)
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
+  const [pendingAttachments, setPendingAttachments] = useState([])
   const [providerOptions, setProviderOptions] = useState([])
   const [followUpSlots, setFollowUpSlots] = useState([])
   const [followUpAvailabilityMessage, setFollowUpAvailabilityMessage] = useState('')
   const [isLoadingFollowUpSlots, setIsLoadingFollowUpSlots] = useState(false)
+  const [isFindingAppointment, setIsFindingAppointment] = useState(false)
+  const [appointmentLookupMessage, setAppointmentLookupMessage] = useState('')
   const [filters, setFilters] = useState({
     scope: 'mine',
     search: '',
@@ -276,6 +362,8 @@ function StaffClinicalNotesPage() {
     endDate: '',
     page: 1,
   })
+  const followUpEnabled = Boolean(form.followUp?.enabled)
+  const followUpDate = form.followUp?.date || ''
   const appointmentPrefillId = useMemo(() => {
     const params = new URLSearchParams(location.search)
     return params.get('appointment') || ''
@@ -300,27 +388,25 @@ function StaffClinicalNotesPage() {
   }, [filters, isAdmin, toast])
 
   useEffect(() => {
-    loadNotes()
+    const timer = window.setTimeout(loadNotes, 0)
+    return () => window.clearTimeout(timer)
   }, [loadNotes])
 
   useEffect(() => {
-    const followUp = form.followUp || {}
-
-    if (!followUp.enabled || !followUp.date || !form.service) {
-      setFollowUpSlots([])
-      setFollowUpAvailabilityMessage('')
-      setIsLoadingFollowUpSlots(false)
-      return
-    }
-
     let isMounted = true
-    setIsLoadingFollowUpSlots(true)
-    setFollowUpAvailabilityMessage('Loading available appointments...')
-
     const timer = window.setTimeout(async () => {
+      if (!followUpEnabled || !followUpDate || !form.service) {
+        setFollowUpSlots([])
+        setFollowUpAvailabilityMessage('')
+        setIsLoadingFollowUpSlots(false)
+        return
+      }
+
+      setIsLoadingFollowUpSlots(true)
+      setFollowUpAvailabilityMessage('Loading available appointments...')
       try {
         const response = await fdmstApi.getAppointmentAvailability({
-          date: followUp.date,
+          date: followUpDate,
           dentistName: form.dentistName,
           service: form.service,
         })
@@ -346,13 +432,66 @@ function StaffClinicalNotesPage() {
       } finally {
         if (isMounted) setIsLoadingFollowUpSlots(false)
       }
-    }, 180)
+    }, followUpEnabled && followUpDate && form.service ? 180 : 0)
 
     return () => {
       isMounted = false
       window.clearTimeout(timer)
     }
-  }, [form.dentistName, form.followUp?.date, form.followUp?.enabled, form.service])
+  }, [followUpDate, followUpEnabled, form.dentistName, form.service])
+
+  useEffect(() => {
+    if (modal?.mode !== 'create' || form.appointment) return
+
+    const patientName = form.patientName.trim()
+    let isMounted = true
+    const timer = window.setTimeout(async () => {
+      if (patientName.length < 2) {
+        setIsFindingAppointment(false)
+        setAppointmentLookupMessage(patientName ? 'Enter the full patient name to find an appointment.' : '')
+        return
+      }
+
+      setIsFindingAppointment(true)
+      setAppointmentLookupMessage('Finding the patient appointment...')
+      try {
+        const response = await fdmstApi.getAppointments({ period: 'all', search: patientName, limit: 100 })
+        if (!isMounted) return
+        const normalizedName = normalizePatientName(patientName)
+        const exactMatches = (response.data || [])
+          .filter((appointment) => normalizePatientName(appointment.patientName) === normalizedName)
+          .sort((left, right) => appointmentTimestamp(right) - appointmentTimestamp(left))
+        const appointment = exactMatches.find((item) => item.status === 'completed') || exactMatches[0]
+
+        if (!appointment) {
+          setAppointmentLookupMessage('No appointment record found for this exact patient name.')
+          return
+        }
+
+        setForm((current) => {
+          if (normalizePatientName(current.patientName) !== normalizedName || current.appointment) return current
+          return {
+            ...current,
+            appointment: appointment.id,
+            appointmentDisplay: appointment.appointmentId || formatAppointmentId(appointment.id),
+            service: appointment.service || '',
+            dentistName: appointment.dentistName || '',
+            visitDate: toDateKey(appointment.appointmentDate) || current.visitDate,
+          }
+        })
+        setAppointmentLookupMessage(`${appointment.appointmentId || formatAppointmentId(appointment.id)} linked automatically.`)
+      } catch (error) {
+        if (isMounted) setAppointmentLookupMessage(error.message || 'Unable to find an appointment for this patient.')
+      } finally {
+        if (isMounted) setIsFindingAppointment(false)
+      }
+    }, 450)
+
+    return () => {
+      isMounted = false
+      window.clearTimeout(timer)
+    }
+  }, [form.appointment, form.patientName, modal?.mode])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -400,6 +539,7 @@ function StaffClinicalNotesPage() {
           visitDate: new Date().toISOString().slice(0, 10),
           noteType: 'Clinical Note',
         })
+        setAppointmentLookupMessage(`${appointment.appointmentId || formatAppointmentId(appointment.id || appointmentPrefillId)} linked automatically.`)
         setModal({ mode: 'create', note: null })
       } catch (error) {
         if (!isMounted) return
@@ -420,30 +560,105 @@ function StaffClinicalNotesPage() {
       .sort((left, right) => left.localeCompare(right))
   ), [notes, providerOptions])
 
+  const clearPendingAttachments = useCallback(() => {
+    setPendingAttachments((current) => {
+      current.forEach((attachment) => {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl)
+      })
+      return []
+    })
+  }, [])
+
+  const closeModal = () => {
+    clearPendingAttachments()
+    setModal(null)
+  }
+
+  const changePatientName = (value) => {
+    const shouldFindAppointment = value.trim().length >= 2
+    setIsFindingAppointment(shouldFindAppointment)
+    setAppointmentLookupMessage(shouldFindAppointment ? 'Finding the patient appointment...' : '')
+    setForm((current) => ({
+      ...current,
+      patientName: value,
+      appointment: '',
+      appointmentDisplay: '',
+      service: '',
+      dentistName: '',
+    }))
+  }
+
+  const addAttachments = (fileList, category) => {
+    if (!isAdmin) return
+    const files = Array.from(fileList || [])
+    const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+    const availableSlots = Math.max(8 - (form.attachments || []).length - pendingAttachments.length, 0)
+    if (!availableSlots) {
+      toast.error('A clinical note can contain up to 8 attachments.')
+      return
+    }
+
+    const validFiles = []
+    for (const file of files.slice(0, availableSlots)) {
+      if (!acceptedTypes.has(file.type)) {
+        toast.error(`${file.name} is not a supported JPG, PNG, WebP, or PDF file.`)
+        continue
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`${file.name} is larger than 5 MB.`)
+        continue
+      }
+      validFiles.push({
+        localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        category,
+        previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+      })
+    }
+
+    if (files.length > availableSlots) toast.error('Only the first available attachments were added. The maximum is 8.')
+    setPendingAttachments((current) => [...current, ...validFiles])
+  }
+
+  const removePendingAttachment = (localId) => {
+    setPendingAttachments((current) => current.filter((attachment) => {
+      if (attachment.localId !== localId) return true
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl)
+      return false
+    }))
+  }
+
   const openCreate = () => {
+    clearPendingAttachments()
+    setAppointmentLookupMessage('')
+    setIsFindingAppointment(false)
     setForm(emptyForm)
     setModal({ mode: 'create', note: null })
   }
 
   const openView = async (note) => {
+    let selectedNote = note
     try {
-      await fdmstApi.viewClinicalNote(note.id, { scope: isAdmin && filters.scope === 'all' ? 'all' : 'mine' })
+      const response = await fdmstApi.viewClinicalNote(note.id, { scope: isAdmin && filters.scope === 'all' ? 'all' : 'mine' })
+      selectedNote = response.data || note
     } catch {
       // Viewing should still work if audit logging fails.
     }
+    clearPendingAttachments()
     setForm({
       ...emptyForm,
-      ...note,
-      appointment: note.appointment || '',
-      appointmentDisplay: note.appointmentSnapshot?.appointmentId || formatAppointmentId(note.appointment),
-      visitDate: note.visitDate ? new Date(note.visitDate).toISOString().slice(0, 10) : emptyForm.visitDate,
-      clinicalNotes: { ...emptyForm.clinicalNotes, ...(note.clinicalNotes || {}) },
-      clinicalFollowUp: note.clinicalFollowUp || null,
+      ...selectedNote,
+      appointment: selectedNote.appointment || '',
+      appointmentDisplay: selectedNote.appointmentSnapshot?.appointmentId || formatAppointmentId(selectedNote.appointment),
+      visitDate: selectedNote.visitDate ? new Date(selectedNote.visitDate).toISOString().slice(0, 10) : emptyForm.visitDate,
+      clinicalNotes: { ...emptyForm.clinicalNotes, ...(selectedNote.clinicalNotes || {}) },
+      clinicalFollowUp: selectedNote.clinicalFollowUp || null,
     })
-    setModal({ mode: 'view', note })
+    setModal({ mode: 'view', note: selectedNote })
   }
 
   const openEdit = (note) => {
+    clearPendingAttachments()
     setForm({
       ...emptyForm,
       ...note,
@@ -457,13 +672,28 @@ function StaffClinicalNotesPage() {
   }
 
   const saveNote = async () => {
+    if (modal.mode === 'create' && isFindingAppointment) {
+      toast.error('Please wait while the patient appointment is being linked.')
+      return
+    }
     if (form.followUp?.enabled && (!form.followUp.date || !form.followUp.time)) {
       toast.error('Follow-up date and time are required.')
       return
     }
+    if (!Object.values(form.clinicalNotes || {}).some((value) => String(value || '').trim())) {
+      toast.error('Enter at least one clinical note field.')
+      return
+    }
 
     setIsSaving(true)
+    let uploadedAttachments = []
     try {
+      uploadedAttachments = isAdmin && pendingAttachments.length
+        ? await Promise.all(pendingAttachments.map(async (attachment) => ({
+            ...(await uploadClinicalFile(attachment.file)),
+            category: attachment.category,
+          })))
+        : []
       const payload = {
         patientName: form.patientName,
         appointment: form.appointment,
@@ -471,6 +701,7 @@ function StaffClinicalNotesPage() {
         noteType: form.noteType,
         clinicalNotes: form.clinicalNotes,
         followUp: form.followUp,
+        ...(isAdmin ? { attachments: [...(form.attachments || []), ...uploadedAttachments] } : {}),
       }
       if (modal.mode === 'create') {
         const response = await fdmstApi.createClinicalNote(payload)
@@ -480,9 +711,12 @@ function StaffClinicalNotesPage() {
         await fdmstApi.updateClinicalNote(modal.note.id, payload)
         toast.success('Clinical note updated.')
       }
-      setModal(null)
+      closeModal()
       await loadNotes()
     } catch (error) {
+      if (uploadedAttachments.length) {
+        await Promise.allSettled(uploadedAttachments.map((attachment) => fdmstApi.deleteClinicalFile(attachment)))
+      }
       toast.error(error.message || 'Unable to save clinical note.')
     } finally {
       setIsSaving(false)
@@ -652,13 +886,20 @@ function StaffClinicalNotesPage() {
         note={modal.note}
         form={form}
         setForm={setForm}
-          onClose={() => setModal(null)}
+        onClose={closeModal}
         onSubmit={saveNote}
         isSaving={isSaving}
         canEdit={modal.mode === 'create' || canEditNote(modal.note, currentUser)}
         followUpSlots={followUpSlots}
         isLoadingFollowUpSlots={isLoadingFollowUpSlots}
         followUpAvailabilityMessage={followUpAvailabilityMessage}
+        isAdmin={isAdmin}
+        pendingAttachments={pendingAttachments}
+        onAddAttachments={addAttachments}
+        onRemovePendingAttachment={removePendingAttachment}
+        isFindingAppointment={isFindingAppointment}
+        appointmentLookupMessage={appointmentLookupMessage}
+        onPatientNameChange={changePatientName}
       />
       ) : null}
     </main>

@@ -7,6 +7,7 @@ const Notification = require("../models/Notification");
 const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const { authenticate, authorize } = require("../middleware/auth");
+const { createChatFileSignedUrl, isManagedChatFile } = require("../services/supabaseStorageService");
 const { emitToConversation, emitToUser, isUserOnline } = require("../utils/messagingSocket");
 
 const router = express.Router();
@@ -32,17 +33,43 @@ const sanitizeUser = (user) => ({
   isOnline: isUserOnline(user?._id || user?.id),
 });
 
-const sanitizeMessage = (message) => ({
-  id: message._id,
-  conversationId: message.conversation,
-  sender: message.sender,
-  receiver: message.receiver,
-  content: message.content,
-  attachment: message.attachment || null,
-  deliveryStatus: message.deliveryStatus,
-  readBy: message.readBy || [],
-  createdAt: message.createdAt,
-});
+const sanitizeMessage = async (message) => {
+  const attachment = message.attachment?.path
+    ? {
+        filename: message.attachment.filename,
+        type: message.attachment.type,
+        size: message.attachment.size,
+        url: await createChatFileSignedUrl(message.attachment).catch(() => ""),
+      }
+    : message.attachment || null;
+  return {
+    id: message._id,
+    conversationId: message.conversation,
+    sender: message.sender,
+    receiver: message.receiver,
+    content: message.content,
+    attachment,
+    deliveryStatus: message.deliveryStatus,
+    readBy: message.readBy || [],
+    createdAt: message.createdAt,
+  };
+};
+
+const normalizeAttachment = (attachment) => {
+  if (!attachment) return undefined;
+  if (!isManagedChatFile(attachment)) {
+    const error = new Error("Upload the attachment to secure chat storage before sending it.");
+    error.status = 400;
+    throw error;
+  }
+  return {
+    filename: String(attachment.filename || "Attachment").trim().slice(0, 180),
+    path: attachment.path,
+    bucket: attachment.bucket,
+    type: String(attachment.type || "").trim(),
+    size: Number(attachment.size) || undefined,
+  };
+};
 
 const getOtherParticipant = (conversation, currentUserId) => {
   const participants = [conversation.patient, conversation.clinicUser].filter(Boolean);
@@ -116,12 +143,18 @@ const populateConversation = (query) => query
   .populate("lastMessageSender", "firstName lastName email role");
 
 const sanitizeConversation = async (conversation, currentUserId) => {
-  const unreadCount = await Message.countDocuments({
-    conversation: conversation._id,
-    receiver: currentUserId,
-    "readBy.user": { $ne: currentUserId },
-    deletedFor: { $ne: currentUserId },
-  });
+  const [unreadCount, latestVisibleMessage] = await Promise.all([
+    Message.countDocuments({
+      conversation: conversation._id,
+      receiver: currentUserId,
+      "readBy.user": { $ne: currentUserId },
+      deletedFor: { $ne: currentUserId },
+    }),
+    Message.findOne({
+      conversation: conversation._id,
+      deletedFor: { $ne: currentUserId },
+    }).sort({ createdAt: -1 }).select("content attachment createdAt sender").lean(),
+  ]);
   const otherUser = getOtherParticipant(conversation, currentUserId);
 
   return {
@@ -129,8 +162,10 @@ const sanitizeConversation = async (conversation, currentUserId) => {
     patient: sanitizeUser(conversation.patient),
     clinicUser: sanitizeUser(conversation.clinicUser),
     otherUser: sanitizeUser(otherUser),
-    lastMessage: conversation.lastMessage,
-    lastMessageAt: conversation.lastMessageAt,
+    lastMessage: latestVisibleMessage
+      ? cleanMessage(latestVisibleMessage.content).slice(0, PREVIEW_LIMIT) || "Attachment"
+      : "",
+    lastMessageAt: latestVisibleMessage?.createdAt || conversation.createdAt,
     lastMessageSender: conversation.lastMessageSender ? sanitizeUser(conversation.lastMessageSender) : null,
     unreadCount,
     isArchived: (conversation.archivedBy || []).some((userId) => String(userId) === String(currentUserId)),
@@ -218,7 +253,7 @@ router.get(
 
     res.json({
       conversation: await sanitizeConversation(conversation, req.user.id),
-      data: messages.reverse().map(sanitizeMessage),
+      data: await Promise.all(messages.reverse().map(sanitizeMessage)),
     });
   }),
 );
@@ -242,12 +277,13 @@ router.post(
     }
 
     const receiver = getOtherParticipant(conversation, req.user.id);
+    const attachment = normalizeAttachment(req.body.attachment);
     const message = await Message.create({
       conversation: conversation._id,
       sender: req.user.id,
       receiver: receiver._id,
       content,
-      attachment: req.body.attachment || undefined,
+      attachment,
       deliveryStatus: isUserOnline(receiver._id) ? "delivered" : "sent",
       readBy: [{ user: req.user.id, readAt: new Date() }],
     });
@@ -271,7 +307,7 @@ router.post(
 
     const payload = {
       conversationId: conversation._id,
-      message: sanitizeMessage(message.toObject()),
+      message: await sanitizeMessage(message.toObject()),
       sender: sanitizeUser(req.user),
       notification: {
         id: notification._id,
@@ -288,6 +324,54 @@ router.post(
     emitToUser(receiver._id, "message:notification", payload);
 
     res.status(201).json(payload);
+  }),
+);
+
+router.delete(
+  "/conversations/:id/messages/:messageId",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.messageId)) {
+      return res.status(400).json({ message: "Invalid message reference." });
+    }
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+    const message = await Message.findOne({ _id: req.params.messageId, conversation: conversation._id });
+    if (!message) return res.status(404).json({ message: "Message not found." });
+
+    await Message.updateOne({ _id: message._id }, { $addToSet: { deletedFor: req.user.id } });
+    emitToUser(req.user.id, "message:deleted", { conversationId: conversation._id, messageId: message._id });
+    res.json({ message: "Message deleted for you." });
+  }),
+);
+
+router.patch(
+  "/conversations/:id/archive",
+  authorize("admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid conversation ID." });
+    }
+    const conversation = await populateConversation(Conversation.findById(req.params.id));
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+
+    const shouldArchive = req.body.archived !== false;
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      shouldArchive
+        ? { $addToSet: { archivedBy: req.user.id } }
+        : { $pull: { archivedBy: req.user.id } },
+    );
+    const updated = await populateConversation(Conversation.findById(conversation._id));
+    emitToUser(req.user.id, "conversation:archived", { conversationId: conversation._id, archived: shouldArchive });
+    res.json({
+      message: shouldArchive ? "Conversation archived." : "Conversation restored.",
+      conversation: await sanitizeConversation(updated, req.user.id),
+    });
   }),
 );
 

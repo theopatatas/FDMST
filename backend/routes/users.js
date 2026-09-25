@@ -161,6 +161,14 @@ const sanitizeNotification = (notification) => ({
   createdAt: notification.createdAt,
 });
 
+const getNotificationOwnershipFilters = async (userId) => {
+  const patient = await Patient.findOne({ userId }).select("_id");
+  return [
+    { user: userId },
+    ...(patient ? [{ patient: patient._id }] : []),
+  ];
+};
+
 const isValidProfilePhoto = (profilePhoto) =>
   !profilePhoto ||
   /^https?:\/\/.+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(profilePhoto) ||
@@ -284,13 +292,7 @@ router.get(
   "/me/notifications",
   authenticate,
   asyncHandler(async (req, res) => {
-    const patient = await Patient.findOne({ userId: req.user.id }).select("_id");
-    const filters = [{ user: req.user.id }];
-
-    if (patient) {
-      filters.push({ patient: patient._id });
-    }
-
+    const filters = await getNotificationOwnershipFilters(req.user.id);
     const query = { $or: filters };
     const [notifications, unreadCount] = await Promise.all([
       Notification.find(query)
@@ -434,13 +436,7 @@ router.patch(
   "/me/notifications/read",
   authenticate,
   asyncHandler(async (req, res) => {
-    const patient = await Patient.findOne({ userId: req.user.id }).select("_id");
-    const filters = [{ user: req.user.id }];
-
-    if (patient) {
-      filters.push({ patient: patient._id });
-    }
-
+    const filters = await getNotificationOwnershipFilters(req.user.id);
     await Notification.updateMany({ $or: filters, isRead: false }, { isRead: true });
 
     res.json({ message: "Notifications marked as read." });
@@ -455,13 +451,7 @@ router.patch(
       return res.status(400).json({ message: "Invalid notification." });
     }
 
-    const patient = await Patient.findOne({ userId: req.user.id }).select("_id");
-    const filters = [{ user: req.user.id }];
-
-    if (patient) {
-      filters.push({ patient: patient._id });
-    }
-
+    const filters = await getNotificationOwnershipFilters(req.user.id);
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, $or: filters },
       { isRead: true },
@@ -473,6 +463,20 @@ router.patch(
     }
 
     res.json({ data: sanitizeNotification(notification) });
+  }),
+);
+
+router.delete(
+  "/me/notifications",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const filters = await getNotificationOwnershipFilters(req.user.id);
+    const result = await Notification.deleteMany({ $or: filters });
+
+    res.json({
+      message: "Notifications cleared.",
+      deletedCount: result.deletedCount || 0,
+    });
   }),
 );
 
