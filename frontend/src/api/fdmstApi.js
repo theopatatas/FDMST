@@ -200,6 +200,10 @@ export const fdmstApi = {
     request(`/messages/conversations/${conversationId}/messages/${messageId}`, {
       method: 'DELETE',
     }),
+  deleteConversation: (id) =>
+    request(`/messages/conversations/${id}`, {
+      method: 'DELETE',
+    }),
   archiveConversation: (id, archived = true) =>
     request(`/messages/conversations/${id}/archive`, {
       method: 'PATCH',

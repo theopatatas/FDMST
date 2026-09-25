@@ -192,6 +192,7 @@ router.get(
   authorize("patient", "admin", "staff"),
   asyncHandler(async (req, res) => {
     const query = getConversationQuery(req.user);
+    query.deletedBy = { $ne: req.user.id };
     if (req.query.status === "archived") query.archivedBy = req.user.id;
     if (req.query.status === "active") query.archivedBy = { $ne: req.user.id };
 
@@ -222,9 +223,12 @@ router.post(
   authorize("patient", "admin", "staff"),
   asyncHandler(async (req, res) => {
     const participants = await resolveConversationParticipants(req);
-    const conversation = await populateConversation(
-      Conversation.findById((await findOrCreateConversation(participants))._id),
+    const existingConversation = await findOrCreateConversation(participants);
+    await Conversation.updateOne(
+      { _id: existingConversation._id },
+      { $pull: { deletedBy: req.user.id } },
     );
+    const conversation = await populateConversation(Conversation.findById(existingConversation._id));
 
     res.status(201).json({ conversation: await sanitizeConversation(conversation, req.user.id) });
   }),
@@ -291,6 +295,7 @@ router.post(
     conversation.lastMessage = content.slice(0, PREVIEW_LIMIT) || "Attachment";
     conversation.lastMessageAt = message.createdAt;
     conversation.lastMessageSender = req.user.id;
+    conversation.deletedBy = [];
     await conversation.save();
 
     const notification = await Notification.create({
@@ -344,6 +349,38 @@ router.delete(
     await Message.updateOne({ _id: message._id }, { $addToSet: { deletedFor: req.user.id } });
     emitToUser(req.user.id, "message:deleted", { conversationId: conversation._id, messageId: message._id });
     res.json({ message: "Message deleted for you." });
+  }),
+);
+
+router.delete(
+  "/conversations/:id",
+  authorize("patient", "admin", "staff"),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid conversation ID." });
+    }
+
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation || !canAccessConversation(conversation, req.user)) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+
+    await Promise.all([
+      Conversation.updateOne(
+        { _id: conversation._id },
+        {
+          $addToSet: { deletedBy: req.user.id },
+          $pull: { archivedBy: req.user.id },
+        },
+      ),
+      Message.updateMany(
+        { conversation: conversation._id, deletedFor: { $ne: req.user.id } },
+        { $addToSet: { deletedFor: req.user.id } },
+      ),
+    ]);
+
+    emitToUser(req.user.id, "conversation:deleted", { conversationId: conversation._id });
+    res.json({ message: "Conversation and past messages deleted for you." });
   }),
 );
 

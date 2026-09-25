@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FaArchive, FaCheckDouble, FaCircle, FaPaperclip, FaPaperPlane, FaSearch, FaUserMd } from 'react-icons/fa'
+import { FaArchive, FaCheckDouble, FaCircle, FaPaperclip, FaPaperPlane, FaSearch, FaTrash, FaUserMd } from 'react-icons/fa'
 import { useLocation } from 'react-router-dom'
 import { authStorage, fdmstApi } from '../api/fdmstApi.js'
 import { useToast } from '../context/ToastContext.jsx'
@@ -98,6 +98,7 @@ function MessagesPage() {
   const [composer, setComposer] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false)
   const messagesEndRef = useRef(null)
   const selectedConversationIdRef = useRef('')
 
@@ -135,29 +136,13 @@ function MessagesPage() {
     }
   }, [])
 
-  const ensurePatientConversation = useCallback(async () => {
-    if (!isPatient) return
-    try {
-      const response = await fdmstApi.startConversation({})
-      setSelectedConversation(response.conversation || null)
-      await loadConversations({ preserveSelection: true })
-    } catch (error) {
-      toast.error(error.message || 'Unable to start a clinic conversation.')
-    }
-  }, [isPatient, loadConversations, toast])
-
   useEffect(() => {
-    let cancelled = false
     Promise.resolve()
       .then(async () => {
         await loadRecipients()
         await loadConversations({ preserveSelection: true })
-        if (!cancelled) await ensurePatientConversation()
       })
-    return () => {
-      cancelled = true
-    }
-  }, [ensurePatientConversation, loadConversations, loadRecipients])
+  }, [loadConversations, loadRecipients])
 
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversation?.id || ''
@@ -227,14 +212,24 @@ function MessagesPage() {
       )))
     }
 
+    const handleDeletedConversation = ({ conversationId }) => {
+      setConversations((current) => current.filter((conversation) => String(conversation.id) !== String(conversationId)))
+      if (selectedConversationIdRef.current === String(conversationId)) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    }
+
     socket.on('message:new', handleNewMessage)
     socket.on('message:notification', handleNewMessage)
     socket.on('presence:update', handlePresence)
+    socket.on('conversation:deleted', handleDeletedConversation)
 
     return () => {
       socket.off('message:new', handleNewMessage)
       socket.off('message:notification', handleNewMessage)
       socket.off('presence:update', handlePresence)
+      socket.off('conversation:deleted', handleDeletedConversation)
     }
   }, [])
 
@@ -276,6 +271,25 @@ function MessagesPage() {
       toast.error(error.message || 'Unable to send message.')
     } finally {
       setIsSending(false)
+    }
+  }
+
+  const deleteConversation = async () => {
+    if (!selectedConversation?.id || isDeletingConversation) return
+    if (!window.confirm('Delete this conversation and its past messages for you? The other participant will keep their copy.')) return
+
+    const conversationId = selectedConversation.id
+    setIsDeletingConversation(true)
+    try {
+      await fdmstApi.deleteConversation(conversationId)
+      setConversations((current) => current.filter((conversation) => conversation.id !== conversationId))
+      setSelectedConversation(null)
+      setMessages([])
+      toast.success('Conversation deleted.')
+    } catch (error) {
+      toast.error(error.message || 'Unable to delete conversation.')
+    } finally {
+      setIsDeletingConversation(false)
     }
   }
 
@@ -329,7 +343,7 @@ function MessagesPage() {
               </div>
             ) : null}
 
-            {!isPatient && filteredRecipients.length ? (
+            {filteredRecipients.length ? (
               <div className="mt-4 border-t border-slate-100 pt-4">
                 <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wide text-slate-400">Start Conversation</p>
                 {filteredRecipients.slice(0, 8).map((recipient) => (
@@ -357,9 +371,14 @@ function MessagesPage() {
                     </p>
                   </div>
                 </div>
-                <span className="hidden items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-950 sm:inline-flex">
-                  <FaUserMd /> Secure clinic chat
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="hidden items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-950 sm:inline-flex">
+                    <FaUserMd /> Secure clinic chat
+                  </span>
+                  <button type="button" onClick={deleteConversation} disabled={isDeletingConversation} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label="Delete conversation" title="Delete conversation">
+                    <FaTrash />
+                  </button>
+                </div>
               </header>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">

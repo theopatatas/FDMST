@@ -148,6 +148,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false)
   const [pendingAttachment, setPendingAttachment] = useState(null)
   const [messageToast, setMessageToast] = useState(null)
   const messagesEndRef = useRef(null)
@@ -211,18 +212,6 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
     }
   }, [])
 
-  const ensurePatientConversation = useCallback(async () => {
-    if (!isPatient || !authStorage.isAuthenticated()) return
-    try {
-      const response = await fdmstApi.startConversation({})
-      setSelectedConversation((current) => current || response.conversation || null)
-      await loadConversations({ preserveSelection: true })
-    } catch (error) {
-      if (isAuthError(error)) return
-      toast.error(error.message || 'Unable to start a clinic conversation.')
-    }
-  }, [isPatient, loadConversations, toast])
-
   useEffect(() => {
     isOpenRef.current = isOpen
   }, [isOpen])
@@ -236,17 +225,12 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
   }, [onUnreadChange, unreadTotal])
 
   useEffect(() => {
-    let cancelled = false
     Promise.resolve()
       .then(async () => {
         await loadRecipients()
         await loadConversations({ preserveSelection: true })
-        if (!cancelled) await ensurePatientConversation()
       })
-    return () => {
-      cancelled = true
-    }
-  }, [ensurePatientConversation, loadConversations, loadRecipients])
+  }, [loadConversations, loadRecipients])
 
   useEffect(() => {
     if (requestedConversationId) onOpen?.()
@@ -349,11 +333,20 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       loadConversations({ preserveSelection: false }).catch(() => {})
     }
 
+    const handleDeletedConversation = ({ conversationId }) => {
+      setConversations((current) => current.filter((conversation) => String(conversation.id) !== String(conversationId)))
+      if (selectedConversationIdRef.current === String(conversationId)) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    }
+
     socket.on('message:new', handleNewMessage)
     socket.on('message:notification', handleNewMessage)
     socket.on('presence:update', handlePresence)
     socket.on('message:deleted', handleDeletedMessage)
     socket.on('conversation:archived', handleArchivedConversation)
+    socket.on('conversation:deleted', handleDeletedConversation)
 
     return () => {
       socket.off('message:new', handleNewMessage)
@@ -361,6 +354,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
       socket.off('presence:update', handlePresence)
       socket.off('message:deleted', handleDeletedMessage)
       socket.off('conversation:archived', handleArchivedConversation)
+      socket.off('conversation:deleted', handleDeletedConversation)
     }
   }, [currentUser?.id, loadConversations])
 
@@ -467,6 +461,25 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
     }
   }
 
+  const deleteConversation = async () => {
+    if (!selectedConversation?.id || isDeletingConversation) return
+    if (!window.confirm('Delete this conversation and its past messages for you? The other participant will keep their copy.')) return
+
+    const conversationId = selectedConversation.id
+    setIsDeletingConversation(true)
+    try {
+      await fdmstApi.deleteConversation(conversationId)
+      setConversations((current) => current.filter((conversation) => conversation.id !== conversationId))
+      setSelectedConversation(null)
+      setMessages([])
+      toast.success('Conversation deleted.')
+    } catch (error) {
+      if (!isAuthError(error)) toast.error(error.message || 'Unable to delete conversation.')
+    } finally {
+      setIsDeletingConversation(false)
+    }
+  }
+
   const handleComposerKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -529,7 +542,7 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
               {!isLoading && !conversations.length ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500">No conversations yet.</div>
               ) : null}
-              {!isPatient && filteredRecipients.length ? (
+              {filteredRecipients.length ? (
                 <div className="mt-4 border-t border-slate-100 pt-4">
                   <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wide text-slate-400">Start Conversation</p>
                   {filteredRecipients.slice(0, 6).map((recipient) => (
@@ -566,6 +579,11 @@ function FloatingChatHead({ requestedConversationId = '', isOpen, onOpen, onClos
                 {!isPatient && selectedConversation ? (
                   <button type="button" onClick={toggleArchive} disabled={isArchiving} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-sky-50 hover:text-sky-900 disabled:opacity-50" aria-label={selectedConversation.isArchived ? 'Restore conversation' : 'Archive conversation'} title={selectedConversation.isArchived ? 'Restore conversation' : 'Archive conversation'}>
                     {selectedConversation.isArchived ? <FaUndo /> : <FaArchive />}
+                  </button>
+                ) : null}
+                {selectedConversation ? (
+                  <button type="button" onClick={deleteConversation} disabled={isDeletingConversation} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label="Delete conversation" title="Delete conversation">
+                    <FaTrash />
                   </button>
                 ) : null}
                 <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Minimize chat">

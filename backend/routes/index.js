@@ -1512,6 +1512,8 @@ router.use(
       const nextStatus = nextBody.status || existingPatient.status;
       const nextRegistrationStatus = nextBody.registrationStatus || existingPatient.registrationStatus;
       const statusChanged = nextStatus !== existingPatient.status || nextRegistrationStatus !== existingPatient.registrationStatus;
+      const isStatusOnlyUpdate = Object.keys(nextBody).every((key) => ["status", "registrationStatus"].includes(key));
+
       if (statusChanged) {
         nextBody.verificationHistory = [
           ...(existingPatient.verificationHistory || []),
@@ -1527,32 +1529,75 @@ router.use(
           nextBody.verifiedAt = new Date();
         }
       }
-      if (existingPatient.userId && statusChanged) {
-        await User.findByIdAndUpdate(existingPatient.userId, {
+
+      if (isStatusOnlyUpdate) {
+        return {
           status: nextStatus,
-          accountStatus: nextStatus === "inactive"
-            ? "inactive"
-            : nextRegistrationStatus === "verified"
-              ? "verified_patient"
-              : "unverified_user",
-        });
+          registrationStatus: nextRegistrationStatus,
+          ...(nextBody.verificationHistory ? { verificationHistory: nextBody.verificationHistory } : {}),
+          ...(nextBody.verifiedAt ? { verifiedAt: nextBody.verifiedAt } : {}),
+        };
       }
-      await AuditLog.create({
-        action: statusChanged ? "Patient Status Changed" : "Patient Updated",
-        entityType: "Patient",
-        entityId: existingPatient._id,
-        performedBy: req.user.id,
-        performedByEmail: req.user.email,
-        metadata: {
-          patientId: existingPatient.patientId,
-          previousStatus: existingPatient.status === "inactive" ? "Inactive" : existingPatient.registrationStatus === "verified" ? "Verified" : "New",
-          nextStatus: nextStatus === "inactive" ? "Inactive" : nextRegistrationStatus === "verified" ? "Verified" : "New",
-        },
-      });
+
       return preparePatientUpdateBody(
         { ...existingPatient, ...nextBody },
         { excludePatientId: req.params.id, excludeUserId: existingPatient?.userId },
       );
+    },
+    afterUpdate: async (patient, previousPatient, req) => {
+      const statusChanged = patient.status !== previousPatient?.status
+        || patient.registrationStatus !== previousPatient?.registrationStatus;
+
+      if (statusChanged) {
+        let linkedUser = patient.userId
+          ? await User.findById(patient.userId)
+          : null;
+
+        if (!linkedUser) {
+          const accountMatches = [];
+          if (patient.email) accountMatches.push({ email: patient.email });
+          if (patient.username) accountMatches.push({ username: patient.username });
+          if (patient.contactNumber) {
+            accountMatches.push({
+              contactNumber: patient.contactNumber,
+              firstName: patient.firstName,
+              lastName: patient.lastName,
+            });
+          }
+
+          if (accountMatches.length) {
+            linkedUser = await User.findOne({ role: "patient", $or: accountMatches });
+          }
+        }
+
+        if (linkedUser) {
+          linkedUser.status = patient.status;
+          linkedUser.accountStatus = patient.status === "inactive"
+            ? "inactive"
+            : patient.registrationStatus === "verified"
+              ? "verified_patient"
+              : "unverified_user";
+          await linkedUser.save();
+
+          if (!patient.userId) {
+            patient.userId = linkedUser._id;
+            await patient.save();
+          }
+        }
+      }
+
+      await AuditLog.create({
+        action: statusChanged ? "Patient Status Changed" : "Patient Updated",
+        entityType: "Patient",
+        entityId: patient._id,
+        performedBy: req.user.id,
+        performedByEmail: req.user.email,
+        metadata: {
+          patientId: patient.patientId,
+          previousStatus: previousPatient?.status === "inactive" ? "Inactive" : previousPatient?.registrationStatus === "verified" ? "Verified" : "New",
+          nextStatus: patient.status === "inactive" ? "Inactive" : patient.registrationStatus === "verified" ? "Verified" : "New",
+        },
+      });
     },
     beforeDelete: async (id, req) => {
       await verifyAdminPasswordForPatientAction(req);
