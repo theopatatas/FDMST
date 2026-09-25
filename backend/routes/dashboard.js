@@ -82,8 +82,6 @@ const normalizeService = (value) => {
   return officialMatch || SERVICE_ALIASES[lowerValue] || rawValue;
 };
 
-const normalizeDentist = (value) => String(value || "Unassigned").trim() || "Unassigned";
-
 const fullName = (value) => [value?.firstName, value?.lastName].filter(Boolean).join(" ").trim();
 
 const getMonthKey = (value) => {
@@ -113,9 +111,20 @@ const getWeekKey = (value) => {
 };
 
 const getHourKey = (timeValue) => {
-  const match = String(timeValue || "").match(/^(\d{1,2})/);
-  const hour = match ? Math.min(Math.max(Number(match[1]), 0), 23) : null;
-  if (hour === null || Number.isNaN(hour)) return "Unspecified";
+  const match = String(timeValue || "").trim().match(/^(\d{1,2})(?::\d{2})?\s*(AM|PM)?/i);
+  if (!match) return "Unspecified";
+
+  let hour = Number(match[1]);
+  const meridiem = match[2]?.toUpperCase();
+  if (Number.isNaN(hour) || (meridiem && (hour < 1 || hour > 12)) || (!meridiem && (hour < 0 || hour > 23))) {
+    return "Unspecified";
+  }
+
+  if (meridiem) {
+    hour %= 12;
+    if (meridiem === "PM") hour += 12;
+  }
+
   const suffix = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 || 12;
   return `${displayHour}:00 ${suffix}`;
@@ -477,15 +486,12 @@ const buildPatientAnalytics = (patients, appointments, dateRange = null) => {
 
 const buildTreatmentAnalytics = (records, appointments) => {
   const procedureCounts = new Map();
-  const dentistProcedureCounts = new Map();
   let preventive = 0;
   let corrective = 0;
 
   records.forEach((record) => {
     const procedure = String(record.procedure || record.treatment || record.diagnosis || "Unspecified").trim();
     increment(procedureCounts, procedure);
-    const dentist = normalizeDentist(record.dentistName);
-    dentistProcedureCounts.set(dentist, (dentistProcedureCounts.get(dentist) || 0) + 1);
   });
 
   appointments.forEach((appointment) => {
@@ -512,55 +518,6 @@ const buildTreatmentAnalytics = (records, appointments) => {
       { label: "Cancelled", value: cancelledAppointments },
     ],
   };
-};
-
-const buildDentistAnalytics = (appointments, records) => {
-  const dentistMap = new Map();
-
-  const ensureDentist = (name) => {
-    const dentist = normalizeDentist(name);
-    if (!dentistMap.has(dentist)) {
-      dentistMap.set(dentist, {
-        dentist,
-        patientsHandled: new Set(),
-        proceduresPerformed: 0,
-        appointments: 0,
-        completed: 0,
-        cancelled: 0,
-        procedureCounts: new Map(),
-        dailyCounts: new Map(),
-      });
-    }
-    return dentistMap.get(dentist);
-  };
-
-  appointments.forEach((appointment) => {
-    const row = ensureDentist(appointment.dentistName);
-    row.appointments += 1;
-    row.patientsHandled.add(String(appointment.patient || appointment.email || appointment.patientName || "Unknown"));
-    if (appointment.status === "completed") row.completed += 1;
-    if (appointment.status === "cancelled") row.cancelled += 1;
-    increment(row.dailyCounts, getDateKey(appointment.appointmentDate || appointment.createdAt));
-  });
-
-  records.forEach((record) => {
-    const row = ensureDentist(record.dentistName);
-    row.proceduresPerformed += 1;
-    increment(row.procedureCounts, record.procedure || record.treatment || "Unspecified");
-  });
-
-  return [...dentistMap.values()]
-    .map((row) => ({
-      dentist: row.dentist,
-      patientsHandled: row.patientsHandled.size,
-      proceduresPerformed: row.proceduresPerformed,
-      workload: row.appointments,
-      completed: row.completed,
-      cancelled: row.cancelled,
-      dailyAverage: row.dailyCounts.size ? Number((row.appointments / row.dailyCounts.size).toFixed(1)) : row.appointments,
-      topProcedures: asSeries(row.procedureCounts, { limit: 3 }),
-    }))
-    .sort((a, b) => b.workload - a.workload || a.dentist.localeCompare(b.dentist));
 };
 
 const buildAdminAnalytics = (patients, users, appointments, auditLogs, feedback) => {
@@ -943,7 +900,6 @@ router.get(
     const serviceAnalytics = buildServiceAnalytics(appointments, dateRange);
     const patientAnalytics = buildPatientAnalytics(patients, appointments, dateRange);
     const treatmentAnalytics = buildTreatmentAnalytics(dentalRecords, appointments);
-    const dentistPerformance = buildDentistAnalytics(appointments, dentalRecords);
     const adminAnalytics = buildAdminAnalytics(patients, users, appointments, auditLogs, feedback);
     const promotionAnalytics = buildPromotionAnalytics(appointments);
 
@@ -977,7 +933,6 @@ router.get(
       },
       analytics: {
         services: serviceAnalytics,
-        dentists: dentistPerformance,
         patients: patientAnalytics,
         appointments: appointmentAnalytics,
         treatments: treatmentAnalytics,
@@ -989,12 +944,6 @@ router.get(
             increment(map, normalizeService(appointment.service), getAppointmentRevenueEstimate(appointment));
             return map;
           }, new Map())),
-          byDentist: dentistPerformance.map((item) => ({
-            label: item.dentist,
-            value: completedRevenueAppointments
-              .filter((appointment) => normalizeDentist(appointment.dentistName) === item.dentist)
-              .reduce((total, appointment) => total + getAppointmentRevenueEstimate(appointment), 0),
-          })),
           byMonth: appointmentAnalytics.monthlyTrend.map((item) => ({
             label: item.label,
             value: completedRevenueAppointments

@@ -249,7 +249,7 @@ function AnalyticsSection({ title, children }) {
   )
 }
 
-function AnalyticsChart({ type = 'bar', series = [], label, horizontal = false, emptyMessage, compact = true }) {
+function AnalyticsChart({ type = 'bar', series = [], label, horizontal = false, emptyMessage, compact = true, showAllCategories = false }) {
   const safeSeries = Array.isArray(series) ? series : []
 
   if (!safeSeries.some((item) => Number(item.value) > 0)) return <EmptyState message={emptyMessage} />
@@ -265,22 +265,43 @@ function AnalyticsChart({ type = 'bar', series = [], label, horizontal = false, 
   const options = {
     indexAxis: horizontal ? 'y' : 'x',
     maintainAspectRatio: false,
+    interaction: type === 'doughnut'
+      ? { mode: 'nearest', intersect: true }
+      : { mode: 'nearest', axis: horizontal ? 'y' : 'x', intersect: false },
     plugins: {
       legend: {
         display: type === 'doughnut',
         position: 'bottom',
         labels: { boxWidth: 9, color: '#475569', font: { size: 11 }, padding: 12, usePointStyle: true },
       },
-      tooltip: { intersect: false, mode: 'index' },
+      tooltip: {
+        intersect: type === 'doughnut',
+        mode: 'nearest',
+        callbacks: {
+          title: (items) => items[0]?.label || 'Unspecified',
+          label: (context) => `${context.dataset.label}: ${Number(context.raw || 0)}`,
+        },
+      },
     },
-    scales: type === 'doughnut' ? undefined : {
-      x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
-      y: { beginAtZero: true, grid: { color: '#eef2f7' }, ticks: { color: '#64748b', font: { size: 10 }, precision: 0 } },
-    },
+    scales: type === 'doughnut'
+      ? undefined
+      : horizontal
+        ? {
+            x: { beginAtZero: true, grid: { color: '#eef2f7' }, ticks: { color: '#64748b', font: { size: 10 }, precision: 0 } },
+            y: { grid: { display: false }, ticks: { autoSkip: !showAllCategories, color: '#64748b', font: { size: 10 } } },
+          }
+        : {
+            x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
+            y: { beginAtZero: true, grid: { color: '#eef2f7' }, ticks: { color: '#64748b', font: { size: 10 }, precision: 0 } },
+          },
   }
 
+  const chartHeight = showAllCategories
+    ? Math.max(compact ? 208 : 240, safeSeries.length * 30)
+    : undefined
+
   return (
-    <div className={`${compact ? 'h-52' : 'h-60'} min-w-0`}>
+    <div className={`${chartHeight ? '' : compact ? 'h-52' : 'h-60'} min-w-0`} style={chartHeight ? { height: chartHeight } : undefined}>
       {type === 'doughnut' ? <Doughnut data={data} options={options} /> : null}
       {type === 'line' ? <Line data={data} options={options} /> : null}
       {type === 'bar' ? <Bar data={data} options={options} /> : null}
@@ -754,17 +775,9 @@ function AdminAnalyticsPage() {
   const analytics = dashboard?.analytics || {}
   const appointmentAnalytics = analytics.appointments || {}
   const serviceAnalytics = analytics.services || {}
-  const dentistAnalytics = analytics.dentists || []
   const patientAnalytics = analytics.patients || {}
   const treatmentAnalytics = analytics.treatments || {}
   const revenueAnalytics = analytics.revenue || {}
-  const dentistPatientSeries = dentistAnalytics.map((item) => ({ label: item.dentist, value: item.patientsHandled }))
-  const dentistProcedureSeries = dentistAnalytics.map((item) => ({ label: item.dentist, value: item.proceduresPerformed }))
-  const dentistWorkloadSeries = dentistAnalytics.map((item) => ({ label: item.dentist, value: item.workload }))
-  const dentistOutcomeSeries = dentistAnalytics.flatMap((item) => [
-    { label: `${item.dentist} completed`, value: item.completed },
-    { label: `${item.dentist} cancelled`, value: item.cancelled },
-  ]).slice(0, 10)
   const frequentPatientColumns = [
     { key: 'label', label: 'Patient', render: (row) => <span className="font-semibold text-sky-950">{row.label}</span> },
     { key: 'value', label: 'Appointments' },
@@ -817,10 +830,10 @@ function AdminAnalyticsPage() {
               <AnalyticsChart type="doughnut" series={appointmentAnalytics.statusDistribution} label="Appointments" emptyMessage="No appointment status data yet." />
             </ChartCard>
             <ChartCard title="Peak Clinic Hours" subtitle="Average appointments by hour">
-              <AnalyticsChart horizontal series={appointmentAnalytics.peakHours} label="Appointments" emptyMessage="No peak hour data yet." />
+              <AnalyticsChart horizontal showAllCategories series={appointmentAnalytics.peakHours} label="Appointments" emptyMessage="No peak hour data yet." />
             </ChartCard>
             <ChartCard title="Busiest Days of Week" subtitle="By total appointments">
-              <AnalyticsChart horizontal series={appointmentAnalytics.busiestDays} label="Appointments" emptyMessage="No busiest-day data yet." />
+              <AnalyticsChart horizontal showAllCategories series={appointmentAnalytics.busiestDays} label="Appointments" emptyMessage="No busiest-day data yet." />
             </ChartCard>
           </AnalyticsSection>
 
@@ -836,21 +849,6 @@ function AdminAnalyticsPage() {
             </ChartCard>
             <ChartCard title="Service Growth" subtitle="Compared to previous 30 days">
               <GrowthList declining={serviceAnalytics.fastestDeclining} growing={serviceAnalytics.fastestGrowing} />
-            </ChartCard>
-          </AnalyticsSection>
-
-          <AnalyticsSection title="Dentist Analytics">
-            <ChartCard title="Patients per Dentist" subtitle="Total patients handled">
-              <AnalyticsChart horizontal series={dentistPatientSeries} label="Patients" emptyMessage="No dentist patient data yet." />
-            </ChartCard>
-            <ChartCard title="Procedures per Dentist" subtitle="Total procedures performed">
-              <AnalyticsChart horizontal series={dentistProcedureSeries} label="Procedures" emptyMessage="No dentist procedure data yet." />
-            </ChartCard>
-            <ChartCard title="Completed vs Cancelled" subtitle="Appointments by dentist">
-              <AnalyticsChart horizontal series={dentistOutcomeSeries} label="Appointments" emptyMessage="No dentist outcome data yet." />
-            </ChartCard>
-            <ChartCard title="Dentist Workload Comparison" subtitle="Based on total appointments">
-              <AnalyticsChart horizontal series={dentistWorkloadSeries} label="Appointments" emptyMessage="No dentist workload data yet." />
             </ChartCard>
           </AnalyticsSection>
 
@@ -891,9 +889,6 @@ function AdminAnalyticsPage() {
               </ChartCard>
               <ChartCard title="Revenue by Service" subtitle="Service-level revenue">
                 <AnalyticsChart horizontal series={revenueAnalytics.byService} label="Revenue" emptyMessage="No service revenue yet." />
-              </ChartCard>
-              <ChartCard title="Revenue by Dentist" subtitle="Provider-level revenue">
-                <AnalyticsChart horizontal series={revenueAnalytics.byDentist} label="Revenue" emptyMessage="No dentist revenue yet." />
               </ChartCard>
               <ChartCard title="Payment Method Distribution" subtitle="Cash, GCash, Maya, and card payments">
                 <AnalyticsChart type="doughnut" series={revenueAnalytics.byPaymentMethod} label="Payments" emptyMessage="No payment method data yet." />
