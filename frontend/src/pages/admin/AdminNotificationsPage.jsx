@@ -7,6 +7,7 @@ import {
   FaCheckCircle,
   FaClock,
   FaExclamationCircle,
+  FaStar,
   FaTrash,
   FaTimes,
 } from 'react-icons/fa'
@@ -34,6 +35,7 @@ function getNotificationIcon(notification) {
   const text = `${notification?.type || ''} ${notification?.title || ''} ${notification?.message || ''}`.toLowerCase()
 
   if (text.includes('cancel')) return FaTimes
+  if (notification?.type === 'feedback' || text.includes('feedback')) return FaStar
   if (text.includes('confirm') || text.includes('completed')) return FaCheckCircle
   if (text.includes('appointment') || text.includes('reminder')) return FaCalendarCheck
   if (text.includes('inventory') || text.includes('alert')) return FaExclamationCircle
@@ -60,6 +62,11 @@ function getNotificationDestination(notification, role = 'admin') {
 
   if (notification.type === 'inventory' || /inventory|stock/i.test(`${notification.title || ''} ${notification.message || ''}`)) {
     return `${basePath}/inventory`
+  }
+
+  if (role === 'admin' && (notification.type === 'feedback' || notification.metadata?.target === 'feedback')) {
+    const feedbackId = notification.metadata?.feedbackId
+    return `${basePath}/feedback${feedbackId ? `?feedback=${encodeURIComponent(feedbackId)}` : ''}`
   }
 
   return ''

@@ -8,6 +8,7 @@ import AdminStaffPage from './pages/admin/AdminStaffPage.jsx'
 import AdminPatientsPage from './pages/admin/AdminPatientsPage.jsx'
 import AdminInventoryPage from './pages/admin/AdminInventoryPage.jsx'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage.jsx'
+import AdminFeedbackPage from './pages/admin/AdminFeedbackPage.jsx'
 import AdminLandingPage from './pages/admin/AdminLandingPage.jsx'
 import AdminNotificationsPage from './pages/admin/AdminNotificationsPage.jsx'
 import AdminPromotionsPage from './pages/admin/AdminPromotionsPage.jsx'
@@ -17,6 +18,7 @@ import BookAppointmentPage from './pages/patient/BookAppointmentPage.jsx'
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx'
 import ForcePasswordChangePage from './pages/ForcePasswordChangePage.jsx'
 import PatientLandingPage from './pages/patient/PatientLandingPage.jsx'
+import PatientFeedbackPage from './pages/patient/PatientFeedbackPage.jsx'
 import PatientNotificationsPage from './pages/patient/PatientNotificationsPage.jsx'
 import PatientPromotionsPage from './pages/patient/PatientPromotionsPage.jsx'
 import PatientRecordsPage from './pages/patient/PatientRecordsPage.jsx'
@@ -39,6 +41,7 @@ const adminNavItems = [
   { label: 'Treatment Records', to: '/admin/treatment-records', icon: 'treatmentRecords' },
   { label: 'Clinical Notes', to: '/admin/clinical-notes', icon: 'clinicalNotes' },
   { label: 'Analytics', to: '/admin/analytics', icon: 'analytics' },
+  { label: 'Feedback', to: '/admin/feedback', icon: 'feedback' },
   { label: 'Reports', to: '/admin/reports', icon: 'reports' },
   { label: 'Inventory', to: '/admin/inventory', icon: 'inventory' },
   { label: 'Promotions', to: '/admin/promotions', icon: 'promotions' },
@@ -62,6 +65,7 @@ const patientNavItems = [
   { label: 'Book Appointment', to: '/patient/book-appointment', icon: 'appointments' },
   { label: 'Records', to: '/patient/records', icon: 'records' },
   { label: 'Clinic Promotions', to: '/patient/promotions', icon: 'promotions' },
+  { label: 'Feedback', to: '/patient/feedback', icon: 'feedback' },
 ]
 
 function App() {
@@ -93,6 +97,7 @@ function App() {
         <Route path="book-appointment" element={<BookAppointmentPage />} />
         <Route path="records" element={<PatientRecordsPage />} />
         <Route path="promotions" element={<PatientPromotionsPage />} />
+        <Route path="feedback" element={<PatientFeedbackPage />} />
         <Route path="messages" element={<MessagesPage />} />
         <Route
           path="notifications"
@@ -125,6 +130,7 @@ function App() {
         />
         <Route path="treatment-records" element={<StaffTreatmentRecordsPage />} />
         <Route path="analytics" element={<AdminAnalyticsPage />} />
+        <Route path="feedback" element={<AdminFeedbackPage />} />
         <Route path="clinical-notes" element={<StaffClinicalNotesPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="inventory" element={<AdminInventoryPage />} />

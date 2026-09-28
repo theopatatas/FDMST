@@ -18,6 +18,7 @@ import {
   FaMoneyBillWave,
   FaNotesMedical,
   FaSignOutAlt,
+  FaStar,
   FaTimes,
   FaTrash,
   FaTooth,
@@ -37,6 +38,7 @@ const iconMap = {
   clinicalNotes: FaNotesMedical,
   dashboard: FaHome,
   dentists: FaUserMd,
+  feedback: FaStar,
   inventory: FaBoxOpen,
   logout: FaSignOutAlt,
   messages: FaComments,
@@ -58,6 +60,7 @@ const iconColorMap = {
   clinicalNotes: 'text-fuchsia-700 bg-fuchsia-50 ring-fuchsia-100',
   dashboard: 'text-sky-950 bg-sky-50 ring-sky-100',
   dentists: 'text-cyan-700 bg-cyan-50 ring-cyan-100',
+  feedback: 'text-amber-600 bg-amber-50 ring-amber-100',
   inventory: 'text-indigo-700 bg-indigo-50 ring-indigo-100',
   logout: 'text-red-600 bg-red-50 ring-red-100',
   messages: 'text-blue-700 bg-blue-50 ring-blue-100',
@@ -86,6 +89,7 @@ const sidebarSectionMap = {
   'Clinical Notes': 'Records',
   'Clinic Promotions': 'Clinic Work',
   Dashboard: 'Overview',
+  Feedback: 'Insights',
   Inventory: 'Clinic Work',
   Logout: 'Account',
   Patients: 'Clinic Work',
@@ -119,6 +123,7 @@ function applySystemPreferences(preferences = {}) {
 
 const adminPageMeta = [
   { path: '/admin/analytics', title: 'Analytics Dashboard', subtitle: 'Monitor clinic performance and key insights.' },
+  { path: '/admin/feedback', title: 'Patient Feedback', subtitle: 'Read patient ratings and manage feedback review status.' },
   { path: '/admin/appointments', title: 'Appointments', subtitle: 'View, filter, and manage clinic appointments.' },
   { path: '/admin/treatment-records', title: 'Treatment Records', subtitle: 'Create, review, and export official patient treatment history.' },
   { path: '/admin/clinical-notes', title: 'Clinical Notes', subtitle: 'Create, review, and export private provider documentation.' },
@@ -156,6 +161,7 @@ function getSidebarPageMeta(pathname, navItems, role) {
       'Clinical Notes': 'Manage private provider documentation and care notes.',
       Reports: 'Review your appointments, treatments, and patient activity.',
       Inventory: 'View inventory and process item releases.',
+      Feedback: 'Share or review clinic experience and patient ratings.',
       Promotions: 'View active clinic promotions and offers.',
       Settings: 'Manage your schedule, notifications, and preferences.',
     }
@@ -210,6 +216,7 @@ function getNotificationIcon(notification) {
   const text = `${notification?.title || ''} ${notification?.message || ''}`.toLowerCase()
 
   if (text.includes('payment')) return FaMoneyBillWave
+  if (notification?.type === 'feedback' || text.includes('feedback')) return FaStar
   if (notification?.type === 'message' || text.includes('message')) return FaComments
   if (text.includes('cancel')) return FaTimes
   if (text.includes('confirm')) return FaCheckCircle
@@ -438,6 +445,12 @@ function DashboardLayout({ portalLabel, navItems }) {
       const conversationId = notification.metadata?.conversationId
       setRequestedChatConversationId(conversationId ? String(conversationId) : '')
       setIsChatOpen(true)
+      return
+    }
+
+    if (user?.role === 'admin' && (notification.type === 'feedback' || notification.metadata?.target === 'feedback')) {
+      const feedbackId = notification.metadata?.feedbackId
+      navigate(`/admin/feedback${feedbackId ? `?feedback=${encodeURIComponent(feedbackId)}` : ''}`)
       return
     }
 

@@ -133,6 +133,7 @@ export const fdmstApi = {
     }),
   getAdminDashboard: () => request('/dashboard/admin'),
   getPublicSettings: () => request('/public-settings'),
+  getPublicFeedback: () => request('/feedback/public'),
   getAdminAnalytics: (filters = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
@@ -290,6 +291,26 @@ export const fdmstApi = {
       body: JSON.stringify(payload),
     }),
   getMyDentalRecords: () => request('/dentalrecords/my'),
+  getMyFeedback: () => request('/feedback/my'),
+  createFeedback: (payload) =>
+    request('/feedback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getAdminFeedback: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const query = params.toString()
+    return request(`/feedback/admin${query ? `?${query}` : ''}`)
+  },
+  getAdminFeedbackById: (id) => request(`/feedback/admin/${id}`),
+  updateFeedbackStatus: (id, status) =>
+    request(`/feedback/admin/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   getMyCarePatients: (filters = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {

@@ -6,6 +6,11 @@ const feedbackSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Patient",
     },
+    submittedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
     appointment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Appointment",
@@ -28,17 +33,28 @@ const feedbackSchema = new mongoose.Schema(
     comments: {
       type: String,
       trim: true,
+      required: true,
+      maxlength: 1500,
     },
     status: {
       type: String,
       enum: ["new", "reviewed", "resolved"],
       default: "new",
     },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    reviewedAt: Date,
   },
   {
     collection: "feedback",
     timestamps: true,
   },
 );
+
+feedbackSchema.index({ status: 1, createdAt: -1 });
+feedbackSchema.index({ patient: 1, createdAt: -1 });
+feedbackSchema.index({ appointment: 1 });
 
 module.exports = mongoose.model("Feedback", feedbackSchema);

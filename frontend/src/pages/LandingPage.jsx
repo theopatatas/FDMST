@@ -136,27 +136,6 @@ const processSteps = [
   },
 ]
 
-const testimonials = [
-  {
-    name: 'Maria Santos',
-    role: 'Patient',
-    quote:
-      'The clinic experience feels more organized, from appointment booking to the visit itself.',
-  },
-  {
-    name: 'Clinic Staff',
-    role: 'Front Desk',
-    quote:
-      'FDMST gives the clinic a clean digital direction while keeping the patient journey simple.',
-  },
-  {
-    name: 'Jose Ramirez',
-    role: 'Patient',
-    quote:
-      'The page makes it clear where to register, sign in, and book an appointment.',
-  },
-]
-
 const faqs = [
   {
     question: 'How do I book a dental appointment?',
@@ -435,6 +414,9 @@ function LandingPage() {
   const [openFaq, setOpenFaq] = useState(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clinicSettings, setClinicSettings] = useState(null)
+  const [testimonials, setTestimonials] = useState([])
+  const [ratingSummary, setRatingSummary] = useState({ averageRating: 0, totalRatings: 0 })
+  const [testimonialsLoading, setTestimonialsLoading] = useState(true)
   const clinicLogo = clinicSettings?.clinicLogo || ''
   const clinicName = clinicSettings?.clinicName || 'Flores-Dizon Dental Clinic'
   const clinicLocationLabel = useMemo(() => {
@@ -464,6 +446,29 @@ function LandingPage() {
       })
       .catch(() => {
         if (isActive) setClinicSettings(null)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let isActive = true
+
+    fdmstApi.getPublicFeedback()
+      .then((response) => {
+        if (!isActive) return
+        setTestimonials(Array.isArray(response.data) ? response.data : [])
+        setRatingSummary(response.summary || { averageRating: 0, totalRatings: 0 })
+      })
+      .catch(() => {
+        if (!isActive) return
+        setTestimonials([])
+        setRatingSummary({ averageRating: 0, totalRatings: 0 })
+      })
+      .finally(() => {
+        if (isActive) setTestimonialsLoading(false)
       })
 
     return () => {
@@ -800,21 +805,48 @@ function LandingPage() {
           <div className="mx-auto max-w-3xl text-center">
             <p className="font-medium uppercase tracking-wider text-amber-500">Testimonials</p>
             <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-              A cleaner clinic experience
+              What our patients say
             </h2>
+            <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-3 rounded-full border border-amber-100 bg-white px-5 py-2.5 shadow-sm">
+              <span className="flex items-center gap-1" aria-hidden="true">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <span className={star <= Math.round(ratingSummary.averageRating) ? 'text-amber-500' : 'text-gray-200'} key={star}><LineIcon type="star" /></span>
+                ))}
+              </span>
+              <span className="text-sm font-semibold text-slate-900">
+                Average Rating: {ratingSummary.totalRatings ? `${ratingSummary.averageRating} / 5` : 'No ratings yet'}
+              </span>
+              {ratingSummary.totalRatings ? <span className="text-sm text-gray-500">({ratingSummary.totalRatings} rating{ratingSummary.totalRatings === 1 ? '' : 's'})</span> : null}
+            </div>
           </div>
 
-          <div className="-mx-4 mt-8 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 md:mx-0 md:mt-10 md:grid md:overflow-visible md:px-0 md:pb-0 md:grid-cols-3 md:gap-6">
-            {testimonials.map((testimonial) => (
-              <article className="min-w-[17rem] snap-start rounded-[1.5rem] bg-white p-6 shadow-sm md:min-w-0 md:p-7" key={testimonial.name}>
-                <p className="text-base font-normal leading-7 text-gray-600 md:text-lg md:leading-8">"{testimonial.quote}"</p>
-                <div className="mt-6 border-t border-gray-100 pt-5">
-                  <p className="font-medium text-slate-900">{testimonial.name}</p>
-                  <p className="text-sm font-normal text-gray-600">{testimonial.role}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          {testimonialsLoading ? (
+            <div className="mt-8 grid gap-4 md:mt-10 md:grid-cols-3 md:gap-6">
+              {[1, 2, 3].map((item) => <div key={item} className="h-52 animate-pulse rounded-[1.5rem] bg-white shadow-sm" />)}
+            </div>
+          ) : testimonials.length ? (
+            <div className="-mx-4 mt-8 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 md:mx-0 md:mt-10 md:grid md:overflow-visible md:px-0 md:pb-0 md:grid-cols-3 md:gap-6">
+              {testimonials.map((testimonial) => (
+                <article className="min-w-[17rem] snap-start rounded-[1.5rem] bg-white p-6 shadow-sm md:min-w-0 md:p-7" key={testimonial.id}>
+                  <div className="flex items-center gap-1 text-amber-500" aria-label={`${testimonial.rating} out of 5 stars`}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <span className={star <= testimonial.rating ? 'text-amber-500' : 'text-gray-200'} key={star}><LineIcon type="star" /></span>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-base font-normal leading-7 text-gray-600 md:text-lg md:leading-8">“{testimonial.quote}”</p>
+                  <div className="mt-6 border-t border-gray-100 pt-5">
+                    <p className="font-medium text-slate-900">{testimonial.name}</p>
+                    <p className="text-sm font-normal text-gray-600">{testimonial.role}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="mx-auto mt-8 max-w-xl rounded-[1.5rem] border border-dashed border-gray-200 bg-white p-8 text-center shadow-sm md:mt-10">
+              <p className="font-semibold text-slate-900">Patient testimonials are coming soon</p>
+              <p className="mt-2 text-sm leading-6 text-gray-500">Reviewed patient feedback will appear here.</p>
+            </div>
+          )}
         </div>
       </section>
 

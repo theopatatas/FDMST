@@ -5,7 +5,6 @@ const AuditLog = require("../models/AuditLog");
 const Appointment = require("../models/Appointment");
 const ClinicSettings = require("../models/ClinicSettings");
 const DentalRecord = require("../models/DentalRecord");
-const Feedback = require("../models/Feedback");
 const Inventory = require("../models/Inventory");
 const Notification = require("../models/Notification");
 const Patient = require("../models/Patient");
@@ -15,6 +14,7 @@ const User = require("../models/User");
 const authRoutes = require("./auth");
 const appointmentRoutes = require("./appointments");
 const dashboardRoutes = require("./dashboard");
+const feedbackRoutes = require("./feedback");
 const messageRoutes = require("./messages");
 const uploadRoutes = require("./uploads");
 const userRoutes = require("./users");
@@ -1350,6 +1350,7 @@ router.get("/public-settings", async (req, res, next) => {
   }
 });
 router.use("/dashboard", dashboardRoutes);
+router.use("/feedback", feedbackRoutes);
 router.use("/users", userRoutes);
 router.use("/appointments", appointmentRoutes);
 router.use("/messages", messageRoutes);
@@ -2233,7 +2234,6 @@ router.use(
     },
   }),
 );
-router.use("/feedback", authorize("admin", "staff"), createCrudRouter(Feedback));
 router.get("/promotions", authorize("admin", "staff", "patient"), async (req, res, next) => {
   try {
     await expirePromotions();
