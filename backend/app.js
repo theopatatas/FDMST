@@ -8,34 +8,28 @@ const fs = require("fs");
 const { rateLimit } = require("express-rate-limit");
 
 const apiRoutes = require("./routes");
-const { getAllowedOrigins, isProduction, normalizeOrigin } = require("./config/environment");
+const { isOriginAllowed, isProduction, normalizeOrigin } = require("./config/environment");
 
 const app = express();
-const allowedOrigins = getAllowedOrigins();
 const frontendDistPath = path.resolve(__dirname, "../frontend/dist");
 const frontendIndexPath = path.join(frontendDistPath, "index.html");
 const hasFrontendBuild = fs.existsSync(frontendIndexPath);
 
 const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-
-    const normalized = normalizeOrigin(origin);
-    const localDevelopmentOrigin = !isProduction()
-      && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized);
-
-    if (allowedOrigins.includes(normalized) || localDevelopmentOrigin) {
-      return callback(null, true);
-    }
-
-    const error = new Error(`Origin ${normalized} is not allowed to access the API.`);
-    error.status = 403;
-    return callback(error);
-  },
+  origin: true,
   methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Authorization", "Content-Type"],
   credentials: false,
   maxAge: 86400,
+};
+
+const corsDelegate = (req, callback) => {
+  const { origin, host } = req.headers;
+  if (isOriginAllowed(origin, host)) return callback(null, corsOptions);
+
+  const error = new Error(`Origin ${normalizeOrigin(origin)} is not allowed to access the API.`);
+  error.status = 403;
+  return callback(error);
 };
 
 const apiLimiter = rateLimit({
@@ -73,7 +67,7 @@ app.use(helmet({
   },
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
-app.use(cors(corsOptions));
+app.use(cors(corsDelegate));
 app.use(express.json({ limit: "8mb" }));
 app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 app.use(morgan(isProduction() ? "combined" : "dev"));

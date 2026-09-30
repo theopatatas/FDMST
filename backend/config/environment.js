@@ -1,5 +1,6 @@
-// Deployed frontend origin.
+// Public URL of the deployed app.
 const DEFAULT_ORIGINS = ["https://fdmsd.wonderprotect.net"];
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 const normalizeOrigin = (value) => String(value || "").trim().replace(/\/$/, "");
 
@@ -12,8 +13,25 @@ const getAllowedOrigins = () => {
     .map(normalizeOrigin)
     .filter(Boolean);
 
-  // Fall back to the deployed frontend when no origins are configured.
+  // Fall back to the deployed app when no origins are configured.
   return configured.length ? [...new Set(configured)] : [...DEFAULT_ORIGINS];
+};
+
+// The frontend is served by this server, so requests from a page on the same host are always allowed.
+const isSameHostOrigin = (origin, host) => {
+  try {
+    return new URL(origin).host === String(host || "").toLowerCase();
+  } catch {
+    return false;
+  }
+};
+
+const isOriginAllowed = (origin, host) => {
+  if (!origin) return true;
+
+  const normalized = normalizeOrigin(origin);
+  if (getAllowedOrigins().includes(normalized) || isSameHostOrigin(normalized, host)) return true;
+  return !isProduction() && LOCAL_ORIGIN_PATTERN.test(normalized);
 };
 
 const validateEnvironment = () => {
@@ -51,6 +69,7 @@ const validateEnvironment = () => {
 module.exports = {
   DEFAULT_ORIGINS,
   getAllowedOrigins,
+  isOriginAllowed,
   isProduction,
   normalizeOrigin,
   validateEnvironment,
