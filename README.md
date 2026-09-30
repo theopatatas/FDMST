@@ -60,7 +60,7 @@ docker run --env-file .env -p 5050:5050 fdmst
 | Setting | Value |
 | --- | --- |
 | Base Directory | `/` |
-| Build Pack | Dockerfile (`/Dockerfile`), or Nixpacks with build command `npm run build` and start command `npm start` |
+| Build Pack | Nixpacks (configured by `nixpacks.toml`) or Dockerfile (`/Dockerfile`). Do not enable the static-site option |
 | Ports Exposes | `5050` |
 | Domains | `https://fdmsd.wonderprotect.net` |
 | Health check path | `/api/ready` |
