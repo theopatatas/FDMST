@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const path = require("path");
 const dotenv = require("dotenv");
 
-const loadedEnv = dotenv.config({ path: path.resolve(__dirname, "../.env") }).parsed || {};
+const loadedEnv = dotenv.config({ path: path.resolve(__dirname, "../.env"), quiet: true }).parsed || {};
 
 const DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=]+)$/i;
 const CLINICAL_FILE_DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/i;

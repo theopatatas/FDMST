@@ -1,3 +1,5 @@
+const DEFAULT_PUBLIC_URL = "http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io";
+
 const normalizeOrigin = (value) => String(value || "").trim().replace(/\/$/, "");
 
 const isProduction = () => process.env.NODE_ENV === "production";
@@ -9,7 +11,8 @@ const getAllowedOrigins = () => {
     .map(normalizeOrigin)
     .filter(Boolean);
 
-  return [...new Set(configured)];
+  // Fall back to the deployed public URL when no origins are configured.
+  return configured.length ? [...new Set(configured)] : [DEFAULT_PUBLIC_URL];
 };
 
 const validateEnvironment = () => {
@@ -42,13 +45,10 @@ const validateEnvironment = () => {
   if (seedPassword && seedPassword.length < 12) {
     throw new Error("ADMIN_SEED_PASSWORD must contain at least 12 characters.");
   }
-
-  if (isProduction() && !getAllowedOrigins().length) {
-    throw new Error("Configure APP_URL, CLIENT_URL, or CORS_ORIGINS for production.");
-  }
 };
 
 module.exports = {
+  DEFAULT_PUBLIC_URL,
   getAllowedOrigins,
   isProduction,
   normalizeOrigin,

@@ -4,7 +4,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 
-dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config({ path: path.resolve(__dirname, ".env"), quiet: true });
 
 const app = require("./app");
 const connectDatabase = require("./config/database");

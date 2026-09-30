@@ -38,7 +38,7 @@ docker build -t fdmst .
 docker run --env-file backend/.env -p 5050:5050 fdmst
 ```
 
-For a split deployment, host `frontend/dist` on a static host and set `VITE_API_URL` at build time to the public backend URL ending in `/api`. Add the frontend origin to `CLIENT_URL` or `CORS_ORIGINS` on the backend.
+For a split deployment, host `frontend/dist` on a static host and set `VITE_API_URL` at build time to the public backend URL ending in `/api` (production builds default to `http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io/api`). Add the frontend origin to `CLIENT_URL` or `CORS_ORIGINS` on the backend.
 
 ### Required Production Variables
 
@@ -46,7 +46,7 @@ For a split deployment, host `frontend/dist` on a static host and set `VITE_API_
 - `PORT` and optionally `HOST=0.0.0.0`
 - `MONGO_URI`
 - `JWT_SECRET` with at least 32 random characters
-- `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` containing the public frontend origin
+- `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` containing the public frontend origin (defaults to `http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io` when none are set)
 - `MAIL_API_URL`, `MAIL_API_KEY`, and `MAIL_FROM_NAME`
 - `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_STORAGE_BUCKET`
 - `SUPABASE_CLINICAL_STORAGE_BUCKET` and `SUPABASE_CHAT_STORAGE_BUCKET`
