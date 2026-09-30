@@ -38,6 +38,8 @@ docker build -t fdmst .
 docker run --env-file backend/.env -p 5050:5050 fdmst
 ```
 
+On a platform such as Coolify, deploy from the repository root (base directory `/`) with either the Dockerfile build pack or Nixpacks (configured by `nixpacks.toml`), and expose port `5050`. Deploying only the `backend` directory serves the API without the frontend, so pages such as `/login` return `Route not found`.
+
 For a split deployment, host `frontend/dist` on a static host and set `VITE_API_URL` at build time to the public backend URL ending in `/api` (production builds default to `https://fdmsd.wonderprotect.net/api`). Add the frontend origin to `CLIENT_URL` or `CORS_ORIGINS` on the backend.
 
 ### Required Production Variables

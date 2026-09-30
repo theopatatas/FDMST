@@ -1,0 +1,11 @@
+# Single-service Nixpacks deploy from the repository root: build the frontend
+# and serve it through the Express backend (mirrors the root Dockerfile).
+[phases.build]
+cmds = [
+  "npm ci --prefix backend --omit=dev",
+  "npm ci --prefix frontend",
+  "npm run build --prefix frontend",
+]
+
+[start]
+cmd = "node backend/server.js"
