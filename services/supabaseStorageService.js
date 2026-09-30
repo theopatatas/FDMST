@@ -149,7 +149,7 @@ const createStorageBucket = async (config, isPublic = true) => {
 
 const ensureConfigured = (config) => {
   if (config.url && config.key) return;
-  const error = new Error("Supabase storage is not configured. Add SUPABASE_URL and SUPABASE_SECRET_KEY to backend/.env.");
+  const error = new Error("Supabase storage is not configured. Add SUPABASE_URL and SUPABASE_SECRET_KEY to .env.");
   error.status = 503;
   throw error;
 };

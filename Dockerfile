@@ -1,11 +1,11 @@
-# Single-service deploy: builds the React frontend and serves it, the API
-# (/api) and Socket.IO from the Express backend on one domain.
-FROM node:22-alpine AS frontend-build
+# Builds the React frontend and runs the Express server, which serves the
+# pages, the API (/api) and Socket.IO on one domain.
+FROM node:22-alpine AS build
 
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
+WORKDIR /app
+COPY package*.json ./
 RUN npm ci
-COPY frontend/ ./
+COPY . .
 
 # Optional: point the frontend at a different API. Empty means same-domain /api.
 ARG VITE_API_URL=
@@ -19,11 +19,11 @@ ENV NODE_ENV=production \
     PORT=5050
 WORKDIR /app
 
-COPY backend/package*.json ./backend/
-RUN npm ci --prefix backend --omit=dev && npm cache clean --force
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --chown=node:node backend/ ./backend/
-COPY --chown=node:node --from=frontend-build /app/frontend/dist ./frontend/dist
+COPY --chown=node:node . .
+COPY --chown=node:node --from=build /app/dist ./dist
 
 USER node
 EXPOSE 5050
@@ -31,4 +31,4 @@ EXPOSE 5050
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:${PORT}/api/ready || exit 1
 
-CMD ["node", "backend/server.js"]
+CMD ["node", "server.js"]
