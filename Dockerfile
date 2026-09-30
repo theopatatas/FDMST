@@ -4,7 +4,9 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# Build tools (Vite) are devDependencies; install them even if the host
+# passes NODE_ENV=production at build time.
+RUN npm ci --include=dev
 COPY . .
 
 # Optional: point the frontend at a different API. Empty means same-domain /api.
