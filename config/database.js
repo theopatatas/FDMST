@@ -4,7 +4,7 @@ const connectDatabase = async () => {
   const mongoUri = process.env.MONGO_URI;
 
   if (!mongoUri) {
-    throw new Error("MONGO_URI is missing. Add it to backend/.env.");
+    throw new Error("MONGO_URI is missing. Add it to .env.");
   }
 
   mongoose.connection.on("connected", () => {

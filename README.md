@@ -1,6 +1,17 @@
 # FDMST
 
-Flores-Dizon Dental Clinic Management System. The repository contains a React/Vite frontend and an Express/MongoDB backend with Socket.IO messaging.
+Flores-Dizon Dental Clinic Management System. One Node.js project: a React/Vite frontend and an Express/MongoDB server with Socket.IO messaging, installed, built and started from the repository root.
+
+## Project Layout
+
+| Path | Contents |
+| --- | --- |
+| `server.js`, `app.js` | Express server entry point and app setup |
+| `config/`, `middleware/`, `models/`, `routes/`, `services/`, `utils/`, `scripts/` | Server code |
+| `tests/` | Server tests |
+| `src/`, `public/`, `index.html` | React frontend (Vite) |
+| `dist/` | Built frontend, created by `npm run build` and served by the server |
+| `Dockerfile` | Production image |
 
 ## Requirements
 
@@ -13,13 +24,11 @@ Flores-Dizon Dental Clinic Management System. The repository contains a React/Vi
 
 ```bash
 npm ci
-npm run install:all
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+cp .env.example .env
 npm run dev
 ```
 
-The frontend runs on `http://localhost:5173` and the API defaults to `http://127.0.0.1:5050/api` in development.
+The frontend runs on `http://localhost:5173` and the API on `http://127.0.0.1:5050/api`.
 
 ## Verification
 
@@ -27,15 +36,23 @@ The frontend runs on `http://localhost:5173` and the API defaults to `http://127
 npm run check
 ```
 
-This runs frontend linting, backend tests, and the production frontend build.
+This runs frontend linting, server tests, and the production frontend build.
 
 ## Production Deployment
 
-FDMST deploys as one app. The root `Dockerfile` is the only deployment file: it builds the React frontend and runs the Express backend, which serves the pages, the API at `/api` and Socket.IO from the same domain (`https://fdmsd.wonderprotect.net`). Because the frontend calls `/api` on its own domain, there is no CORS or mixed-content setup to maintain.
+FDMST deploys as one app from the repository root. The server serves the built pages, the API at `/api` and Socket.IO from the same domain (`https://fdmsd.wonderprotect.net`), so there is no CORS or mixed-content setup to maintain.
+
+```bash
+npm ci
+npm run build
+npm start
+```
+
+Or with Docker:
 
 ```bash
 docker build -t fdmst .
-docker run --env-file backend/.env -p 5050:5050 fdmst
+docker run --env-file .env -p 5050:5050 fdmst
 ```
 
 ### Coolify Settings
@@ -43,12 +60,12 @@ docker run --env-file backend/.env -p 5050:5050 fdmst
 | Setting | Value |
 | --- | --- |
 | Base Directory | `/` |
-| Build Pack | Dockerfile (`/Dockerfile`) |
+| Build Pack | Dockerfile (`/Dockerfile`), or Nixpacks with build command `npm run build` and start command `npm start` |
 | Ports Exposes | `5050` |
 | Domains | `https://fdmsd.wonderprotect.net` |
 | Health check path | `/api/ready` |
 
-Add the variables below as environment variables on the app. Deploying only the `backend` directory serves the API without the pages, so `/login` returns `Route not found`.
+Add the variables below as environment variables on the app. Leave `VITE_API_URL` unset so the pages call `/api` on their own domain.
 
 ### Required Production Variables
 
@@ -78,7 +95,7 @@ Create the Supabase buckets named by the storage variables before deployment. Th
 1. Rotate any credentials that have ever been shared, logged, or committed.
 2. Restrict MongoDB network access to the deployment provider where possible.
 3. Set exact HTTPS origins in `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS`; do not use `*`.
-4. Confirm Supabase bucket policies and keep the secret key backend-only.
+4. Confirm Supabase bucket policies and keep the secret key server-only.
 5. Run `npm run check` and test registration OTP, login, uploads, appointments, notifications, and real-time chat in staging.
 6. Configure the platform health check to `/api/ready` and enable automatic restart.
 7. Back up MongoDB before the first production release and before schema-changing releases.

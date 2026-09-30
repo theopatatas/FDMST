@@ -2,7 +2,7 @@ const getJwtSecret = () => {
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!jwtSecret) {
-    throw new Error("JWT_SECRET is missing. Add it to backend/.env.");
+    throw new Error("JWT_SECRET is missing. Add it to .env.");
   }
 
   return jwtSecret;

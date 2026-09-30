@@ -11,7 +11,7 @@ const apiRoutes = require("./routes");
 const { isOriginAllowed, isProduction, normalizeOrigin } = require("./config/environment");
 
 const app = express();
-const frontendDistPath = path.resolve(__dirname, "../frontend/dist");
+const frontendDistPath = path.resolve(__dirname, "dist");
 const frontendIndexPath = path.join(frontendDistPath, "index.html");
 const hasFrontendBuild = fs.existsSync(frontendIndexPath);
 
