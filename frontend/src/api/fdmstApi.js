@@ -1,5 +1,6 @@
+const DEFAULT_API_URL = 'http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io/api'
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '')
-const API_BASE_URL = configuredApiUrl || (import.meta.env.DEV ? 'http://127.0.0.1:5050/api' : '/api')
+const API_BASE_URL = configuredApiUrl || (import.meta.env.DEV ? 'http://127.0.0.1:5050/api' : DEFAULT_API_URL)
 export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '') || window.location.origin
 const AUTH_TOKEN_KEY = 'fdmst_auth_token'
 const AUTH_USER_KEY = 'fdmst_auth_user'
