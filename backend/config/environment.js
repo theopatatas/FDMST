@@ -1,4 +1,7 @@
-const DEFAULT_PUBLIC_URL = "http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io";
+const DEFAULT_ORIGINS = [
+  "https://fdmsd.wonderprotect.net",
+  "http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io",
+];
 
 const normalizeOrigin = (value) => String(value || "").trim().replace(/\/$/, "");
 
@@ -11,8 +14,8 @@ const getAllowedOrigins = () => {
     .map(normalizeOrigin)
     .filter(Boolean);
 
-  // Fall back to the deployed public URL when no origins are configured.
-  return configured.length ? [...new Set(configured)] : [DEFAULT_PUBLIC_URL];
+  // Fall back to the deployed public URLs when no origins are configured.
+  return configured.length ? [...new Set(configured)] : [...DEFAULT_ORIGINS];
 };
 
 const validateEnvironment = () => {
@@ -48,7 +51,7 @@ const validateEnvironment = () => {
 };
 
 module.exports = {
-  DEFAULT_PUBLIC_URL,
+  DEFAULT_ORIGINS,
   getAllowedOrigins,
   isProduction,
   normalizeOrigin,
