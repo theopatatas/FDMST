@@ -1,7 +1,5 @@
-const DEFAULT_ORIGINS = [
-  "https://fdmsd.wonderprotect.net",
-  "http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io",
-];
+// Deployed frontend origin.
+const DEFAULT_ORIGINS = ["https://fdmsd.wonderprotect.net"];
 
 const normalizeOrigin = (value) => String(value || "").trim().replace(/\/$/, "");
 
@@ -14,7 +12,7 @@ const getAllowedOrigins = () => {
     .map(normalizeOrigin)
     .filter(Boolean);
 
-  // Fall back to the deployed public URLs when no origins are configured.
+  // Fall back to the deployed frontend when no origins are configured.
   return configured.length ? [...new Set(configured)] : [...DEFAULT_ORIGINS];
 };
 

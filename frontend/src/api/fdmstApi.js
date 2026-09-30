@@ -1,5 +1,5 @@
-// HTTPS domain for the deployed backend; the sslip.io address has no HTTPS, so HTTPS pages cannot call it.
-const DEFAULT_API_URL = 'https://fdmsd.wonderprotect.net/api'
+// Must be HTTPS: browsers block an HTTPS page from calling an HTTP API.
+const DEFAULT_API_URL = 'https://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io/api'
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '')
 const API_BASE_URL = configuredApiUrl || (import.meta.env.DEV ? 'http://127.0.0.1:5050/api' : DEFAULT_API_URL)
 export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '') || window.location.origin

@@ -38,9 +38,18 @@ docker build -t fdmst .
 docker run --env-file backend/.env -p 5050:5050 fdmst
 ```
 
-On a platform such as Coolify, deploy from the repository root (base directory `/`) with either the Dockerfile build pack or Nixpacks (configured by `nixpacks.toml`), and expose port `5050`. Deploying only the `backend` directory serves the API without the frontend, so pages such as `/login` return `Route not found`.
+On a platform such as Coolify, deploy from the repository root (base directory `/`) with either the Dockerfile build pack or Nixpacks (configured by `nixpacks.toml`), and expose port `5050`. Deploying only the `backend` directory serves the API without the frontend, so pages such as `/login` return `Route not found`; use the split deployment below for that setup.
 
-For a split deployment, host `frontend/dist` on a static host and set `VITE_API_URL` at build time to the public backend URL ending in `/api` (production builds default to `https://fdmsd.wonderprotect.net/api`). Add the frontend origin to `CLIENT_URL` or `CORS_ORIGINS` on the backend.
+### Split Deployment
+
+The production site runs the frontend and backend as separate apps:
+
+| App | Base directory | Build | Port | Public URL |
+| --- | --- | --- | --- | --- |
+| Frontend | `/frontend` | `frontend/Dockerfile` (nginx with SPA fallback) | `80` | `https://fdmsd.wonderprotect.net` |
+| Backend | `/backend` | Nixpacks (`npm start`) | `5050` | `https://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io` |
+
+The backend must be served over HTTPS because browsers block an HTTPS page from calling an HTTP API (mixed content). Production frontend builds default to `https://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io/api`; set `VITE_API_URL` as a build variable to override it. The backend allows `https://fdmsd.wonderprotect.net` by default; set `CLIENT_URL` or `CORS_ORIGINS` to override it.
 
 ### Required Production Variables
 
@@ -48,7 +57,7 @@ For a split deployment, host `frontend/dist` on a static host and set `VITE_API_
 - `PORT` and optionally `HOST=0.0.0.0`
 - `MONGO_URI`
 - `JWT_SECRET` with at least 32 random characters
-- `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` containing the public frontend origin (defaults to `https://fdmsd.wonderprotect.net` and `http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io` when none are set)
+- `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` containing the public frontend origin (defaults to `https://fdmsd.wonderprotect.net` when none are set)
 - `MAIL_API_URL`, `MAIL_API_KEY`, and `MAIL_FROM_NAME`
 - `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_STORAGE_BUCKET`
 - `SUPABASE_CLINICAL_STORAGE_BUCKET` and `SUPABASE_CHAT_STORAGE_BUCKET`
