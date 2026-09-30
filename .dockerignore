@@ -9,3 +9,6 @@
 frontend/dist
 *.log
 npm-debug.log*
+backend/.mongo
+backend/tests
+README.md

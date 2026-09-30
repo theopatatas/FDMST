@@ -111,7 +111,7 @@ function SignInPage() {
         : location.state?.from || getRoleHomePath(response.user.role)
       navigate(redirectPath, { replace: true })
     } catch (err) {
-      toast.error(err.message || 'Invalid email or password.')
+      toast.error(err.message || 'Invalid email or password.', { duration: 8000 })
     } finally {
       setIsSubmitting(false)
     }

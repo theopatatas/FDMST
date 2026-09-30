@@ -31,22 +31,32 @@ This runs frontend linting, backend tests, and the production frontend build.
 
 ## Production Deployment
 
-The recommended single-service deployment uses the root `Dockerfile`. It builds the Vite app and serves it through the Express server, including SPA route fallback and Socket.IO on the same public domain.
+FDMST deploys as one app. The root `Dockerfile` is the only deployment file: it builds the React frontend and runs the Express backend, which serves the pages, the API at `/api` and Socket.IO from the same domain (`https://fdmsd.wonderprotect.net`). Because the frontend calls `/api` on its own domain, there is no CORS or mixed-content setup to maintain.
 
 ```bash
 docker build -t fdmst .
 docker run --env-file backend/.env -p 5050:5050 fdmst
 ```
 
-For a split deployment, host `frontend/dist` on a static host and set `VITE_API_URL` at build time to the public backend URL ending in `/api` (production builds default to `http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io/api`). Add the frontend origin to `CLIENT_URL` or `CORS_ORIGINS` on the backend.
+### Coolify Settings
+
+| Setting | Value |
+| --- | --- |
+| Base Directory | `/` |
+| Build Pack | Dockerfile (`/Dockerfile`) |
+| Ports Exposes | `5050` |
+| Domains | `https://fdmsd.wonderprotect.net` |
+| Health check path | `/api/ready` |
+
+Add the variables below as environment variables on the app. Deploying only the `backend` directory serves the API without the pages, so `/login` returns `Route not found`.
 
 ### Required Production Variables
 
 - `NODE_ENV=production`
-- `PORT` and optionally `HOST=0.0.0.0`
+- `PORT` (the Docker image defaults to `5050`) and optionally `HOST=0.0.0.0`
 - `MONGO_URI`
 - `JWT_SECRET` with at least 32 random characters
-- `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` containing the public frontend origin (defaults to `http://lcsogfpbk7uveikmn7kosxr2.199.119.136.66.sslip.io` when none are set)
+- Optional: `APP_URL`, `CLIENT_URL`, or `CORS_ORIGINS` for other sites that call the API. The domain serving the app is always allowed, and `https://fdmsd.wonderprotect.net` is allowed when none are set
 - `MAIL_API_URL`, `MAIL_API_KEY`, and `MAIL_FROM_NAME`
 - `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_STORAGE_BUCKET`
 - `SUPABASE_CLINICAL_STORAGE_BUCKET` and `SUPABASE_CHAT_STORAGE_BUCKET`

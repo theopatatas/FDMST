@@ -8,24 +8,16 @@ dotenv.config({ path: path.resolve(__dirname, ".env"), quiet: true });
 
 const app = require("./app");
 const connectDatabase = require("./config/database");
-const { getAllowedOrigins, normalizeOrigin, validateEnvironment } = require("./config/environment");
+const { isOriginAllowed, validateEnvironment } = require("./config/environment");
 const seedAdmin = require("./scripts/seedAdmin");
 const { startAppointmentExpiryMonitor, stopAppointmentExpiryMonitor } = require("./utils/appointmentExpiry");
 const { registerSocketServer } = require("./utils/messagingSocket");
 const { startPromotionExpiryMonitor, stopPromotionExpiryMonitor } = require("./utils/promotionExpiry");
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
 const HOST = process.env.HOST || "0.0.0.0";
 let server;
 let io;
-
-const isSocketOriginAllowed = (origin) => {
-  if (!origin) return true;
-  const normalized = normalizeOrigin(origin);
-  if (getAllowedOrigins().includes(normalized)) return true;
-  return process.env.NODE_ENV !== "production"
-    && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized);
-};
 
 const shutdown = (signal) => {
   console.log(`${signal} received. Shutting down gracefully.`);
@@ -56,12 +48,11 @@ const startServer = async () => {
 
     server = http.createServer(app);
     io = new Server(server, {
-      cors: {
-        origin(origin, callback) {
-          if (isSocketOriginAllowed(origin)) return callback(null, true);
-          return callback(new Error("This origin is not allowed to connect."));
-        },
-        methods: ["GET", "POST"],
+      cors(req, callback) {
+        if (isOriginAllowed(req.headers.origin, req.headers.host)) {
+          return callback(null, { origin: true, methods: ["GET", "POST"] });
+        }
+        return callback(new Error("This origin is not allowed to connect."));
       },
     });
     registerSocketServer(io);
