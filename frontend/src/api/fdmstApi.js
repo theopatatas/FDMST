@@ -44,18 +44,59 @@ export const authStorage = {
   },
 }
 
+const describeHttpFailure = (response) => {
+  const statusLabel = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`
+
+  if ([502, 503, 504].includes(response.status)) {
+    return `The server at ${API_BASE_URL} is unavailable (${statusLabel}). It may be starting up or down.`
+  }
+
+  if (response.status === 404) {
+    return `The API was not found at ${response.url || API_BASE_URL} (${statusLabel}). Check that the API URL points to the backend.`
+  }
+
+  return `The server returned an error (${statusLabel}). Please try again.`
+}
+
+// fetch() only reports "Failed to fetch", so probe for the most likely cause.
+const describeNetworkFailure = async () => {
+  if (navigator.onLine === false) {
+    return 'You appear to be offline. Check your internet connection and try again.'
+  }
+
+  if (window.location.protocol === 'https:' && API_BASE_URL.startsWith('http:')) {
+    return `The browser blocked the request because this page uses HTTPS but the API (${API_BASE_URL}) uses HTTP. Serve the API over HTTPS or open the site over HTTP.`
+  }
+
+  try {
+    // A no-cors request succeeds whenever the server is reachable, even if CORS would reject the real request.
+    await fetch(`${API_BASE_URL}/health`, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    return `The server at ${API_BASE_URL} is reachable but rejected requests from ${window.location.origin} (CORS). Add this origin to CLIENT_URL or CORS_ORIGINS on the backend.`
+  } catch {
+    return `Unable to reach the server at ${API_BASE_URL}. It may be down, restarting, or the address may be wrong.`
+  }
+}
+
 const parseResponse = async (response) => {
   const text = await response.text()
   let data
+  let isJson = true
 
   try {
     data = text ? JSON.parse(text) : null
   } catch {
     data = null
+    isJson = false
+  }
+
+  if (response.ok && !isJson) {
+    const error = new Error(`The server at ${response.url || API_BASE_URL} returned an unexpected (non-JSON) response. Check that the API URL points to the backend.`)
+    error.status = response.status
+    throw error
   }
 
   if (!response.ok) {
-    const error = new Error(data?.message || 'Something went wrong. Please try again.')
+    const error = new Error(data?.message || describeHttpFailure(response))
     error.status = response.status
     error.errors = data?.errors || {}
     error.retryAfterSeconds = data?.retryAfterSeconds
@@ -85,8 +126,13 @@ const request = async (path, options = {}) => {
       ...options,
       headers,
     })
-  } catch {
-    throw new Error('Unable to reach the server. Please check your connection and try again.')
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cause
+
+    const error = new Error(await describeNetworkFailure())
+    error.cause = cause
+    console.error(`Request to ${API_BASE_URL}${path} failed:`, error.message, cause)
+    throw error
   }
 
   return parseResponse(response)
@@ -124,6 +170,10 @@ export const fdmstApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+
+    if (!data?.token || !data?.user) {
+      throw new Error('The server returned an incomplete login response. Please try again.')
+    }
 
     authStorage.saveSession(data)
     return data

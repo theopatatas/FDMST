@@ -28,7 +28,7 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    const error = new Error("This origin is not allowed to access the API.");
+    const error = new Error(`Origin ${normalized} is not allowed to access the API.`);
     error.status = 403;
     return callback(error);
   },
